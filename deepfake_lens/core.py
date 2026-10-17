@@ -1376,7 +1376,7 @@ def _validate_c2pa(path: Path) -> dict[str, object]:
 # check says so instead of an opaque "type is unsupported".
 C2PA_TEXT_EMBEDDING_UNSUPPORTED = (
     "C2PA 텍스트·HTML 임베딩(C2PA 2.3/2.4)은 현재 SDK(c2pa_python 0.38 / c2pa_rs 0.91)가 판독하지 않음 — "
-    "텍스트 파일의 매니페스트 존재 여부를 확인하지 못했습니다"
+    "서명·해시를 검증하지 않았습니다(비정형 텍스트 래퍼의 존재는 비가시 유니코드 표식 검사가 사실로 기록)"
 )
 
 
@@ -1411,8 +1411,11 @@ def _marking(modality: str, validation: dict[str, object] | None, c2pa_entry: Co
         {"check": f.check, "algorithm": f.algorithm, "outcome": f.outcome, "detail": f.detail} for f in marks.findings
     ]
     context, item = build_marking(modality, findings)
+    # TB-7: name the service a manifest's signer / claim generator belongs to (neutral; the C2PA rules decide).
+    from .generator_strings import c2pa_signer_evidence
+
     return DeepLayers(
-        evidence=[*marks.evidence, item],
+        evidence=[*c2pa_signer_evidence(validation), *marks.evidence, item],
         coverage=[*marks.coverage, online_entry(modality)],
         limitations=list(marks.limitations),
         marking_context=context,
@@ -1431,7 +1434,7 @@ def _with_container(marks: "MarkLayers", container: "MarkLayers") -> "MarkLayers
     )
 
 
-def _mark_layers(file_path: Path, modality: str) -> DeepLayers:
+def _mark_layers(file_path: Path, modality: str, extra: "MarkLayers | None" = None) -> DeepLayers:
     """techniques-2026: the machine-readable-mark checks of a non-image file — C2PA, then the watermark decoders.
 
     Returned in the :class:`DeepLayers` shape (evidence, coverage, limitations,
@@ -1443,6 +1446,12 @@ def _mark_layers(file_path: Path, modality: str) -> DeepLayers:
 
     validation, entry = _c2pa_check(file_path)
     marks = audio_mark_layers(file_path) if modality == "audio" else video_mark_layers(file_path) if modality == "video" else MarkLayers()
+    if extra is not None:
+        # TB (techniques-2026b): further mark checks of the row (text marks, PerTh) join the marking context.
+        marks = MarkLayers(
+            evidence=[*marks.evidence, *extra.evidence], coverage=[*marks.coverage, *extra.coverage],
+            limitations=list(dict.fromkeys([*marks.limitations, *extra.limitations])), findings=[*marks.findings, *extra.findings],
+        )
     if modality in ("audio", "video"):
         # P0R-22 (threat G2): the container/bitstream metadata check of audio and video files.
         from .container_metadata import media_layers
@@ -1452,6 +1461,18 @@ def _mark_layers(file_path: Path, modality: str) -> DeepLayers:
     return DeepLayers(
         evidence=[*c2pa_evidence(validation), *layers.evidence], coverage=[entry, *layers.coverage],
         limitations=layers.limitations, marking_context=layers.marking_context,
+    )
+
+
+def _with_traces(layers: DeepLayers, file_path: Path, modality: str) -> DeepLayers:
+    """TB-4: the platform / messenger trace facts of an audio or video row join its mark layers."""
+    from .platform_traces import audio_trace_layers, video_trace_layers
+
+    traces = audio_trace_layers(file_path) if modality == "audio" else video_trace_layers(file_path)
+    return DeepLayers(
+        evidence=[*layers.evidence, *traces.evidence], coverage=[*layers.coverage, *traces.coverage],
+        limitations=[*layers.limitations, *traces.limitations], reference=list(layers.reference),
+        marking_context=layers.marking_context,
     )
 
 
@@ -1766,6 +1787,24 @@ def _analyze_image_file(
     )
     marks = _marking("image", c2pa_validation, c2pa_entry, _with_container(image_mark_layers(file_path, c2pa_validation), aigc))
     coverage.extend(marks.coverage)
+    # TB-4: platform / messenger traces (JPEG recompression tables, file-name formats) — facts only.
+    from .platform_traces import image_trace_layers
+
+    traces = image_trace_layers(file_path)
+    coverage.extend(traces.coverage)
+    marks = replace(marks, evidence=[*marks.evidence, *traces.evidence], limitations=[*marks.limitations, *traces.limitations])
+    # TB-3: device AI-edit labels (Samsung SEFT trailer names, Google AI credit labels) — self-declared facts.
+    from .device_labels import device_label_layers
+
+    device = device_label_layers(file_path, metadata)
+    coverage.extend(device.coverage)
+    marks = replace(marks, evidence=[*marks.evidence, *device.evidence])
+    # TB-5: screenshot facts (OS "Screenshot" user comment, native screen sizes) and the camera-C2PA recapture note.
+    from .screen_capture import screen_capture_layers
+
+    screen = screen_capture_layers(file_path, metadata, dimensions, c2pa_validation)
+    coverage.extend(screen.coverage)
+    marks = replace(marks, evidence=[*marks.evidence, *screen.evidence], limitations=[*marks.limitations, *screen.limitations])
 
     image_format = metadata_read.image_format if metadata_read is not None else None
     jpeg_quality = None
@@ -1800,7 +1839,7 @@ def _analyze_audio_file(
     model_path: Path | str | list[Path | str] | tuple[Path | str, ...] | None,
 ) -> ClassificationResult:
     analysis, entry = run_check("audio_analysis", lambda: analyze_audio(file_path, model_path=model_path))
-    marks = _mark_layers(file_path, "audio")
+    marks = _with_traces(_mark_layers(file_path, "audio"), file_path, "audio")
     if analysis is None:
         return build_classification_result(
             subject="오디오",
@@ -1904,7 +1943,7 @@ def _analyze_video_file(
 
     analysis, entry = run_check("video_analysis", video_check)
     deep = _deep_video_layers(file_path, thresholds) if deep_signals else _deep_disabled(DEEP_VIDEO_CHECKS)
-    marks = _mark_layers(file_path, "video")
+    marks = _with_traces(_mark_layers(file_path, "video"), file_path, "video")
     # techniques-2026: the mark checks join the deep layers' lists (evidence, coverage, limitations).
     deep = DeepLayers(
         evidence=[*deep.evidence, *marks.evidence], coverage=[*deep.coverage, *marks.coverage],
@@ -2053,12 +2092,33 @@ def _analyze_text_file(
         if tmp_text_path is not None:
             tmp_text_path.unlink(missing_ok=True)
     coverage.extend(model_entries)
-    marks = _mark_layers(file_path, "text")
+    # TB-1: invisible Unicode marks in the text this row analyzed (facts only).
+    from .text_marks import text_mark_layers
+
+    if extension in SUPPORTED_DOCUMENT_EXTENSIONS:
+        text_ran = bool(coverage) and coverage[0].check == "document_text" and coverage[0].status == CoverageStatus.RAN
+        text_marks = text_mark_layers(
+            text, source="추출한 문서 본문",
+            unavailable=None if text_ran else "문서 텍스트 추출이 실행되지 않아 검사하지 않음",
+        )
+    else:
+        text_marks = text_mark_layers(text, source="분석한 본문")
+    marks = _mark_layers(file_path, "text", text_marks)
     coverage.extend(marks.coverage)
+    structure_evidence: list[EvidenceItem] = []
+    structure_limitations: list[str] = []
+    if extension in SUPPORTED_DOCUMENT_EXTENSIONS:
+        # TB-6: document structure facts (PDF revisions / signature ranges / tool history, OOXML edit metadata).
+        from .document_structure import document_structure_layers
+
+        structure = document_structure_layers(file_path)
+        coverage.extend(structure.coverage)
+        structure_evidence, structure_limitations = structure.evidence, structure.limitations
     thresholds = profile_probability_thresholds(model_path)  # N1
     result = analyze_text(
         text, model_analysis=model_analysis, coverage=coverage, probability_thresholds=thresholds,
-        extra_evidence=marks.evidence, extra_limitations=marks.limitations, marking_context=marks.marking_context,
+        extra_evidence=[*marks.evidence, *structure_evidence], extra_limitations=[*marks.limitations, *structure_limitations],
+        marking_context=marks.marking_context,
     )
     return _apply_document_metadata(result, doc_metadata, probability_thresholds=thresholds)
 

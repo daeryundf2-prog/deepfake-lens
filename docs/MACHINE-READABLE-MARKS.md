@@ -92,7 +92,7 @@ IPTC·C2PA 이름공간이 아닌 IRI는 마지막 경로 조각이 같아도 "�
 - 메시지: `0b101100111110110010010000011110111011000110011110`(48비트, diffusers `StableDiffusionXLWatermarker`와 Stability 참조 구현이 같은 값 —
   출처·조회일은 `models/watermark-registry.json`). 문서화된 BGR 순서와 R·B를 바꾼 순서를 모두 시험한다.
 - **근거**: 48/48 정확 일치일 때만 결정적·생성·강 「SDXL 공식 파이프라인 워터마크 존재」. 메시지가 공개라 흉내 낼 수 있으므로 생성 도구
-  메타데이터와 같은 급이다. 불일치는 무정보(coverage `ran` 「48비트 정확 일치 없음 — 무정보(워터마크 부재를 뜻하지 않음)」).
+  메타데이터와 같은 급이다. 불일치는 무정보(coverage `ran` 「등록 고정 메시지 N개와 정확 일치 없음 — 무정보(워터마크 부재를 뜻하지 않음)」 — TB-8에서 문구 변경, §10).
 - 범위 밖: 짧은 변 256px 미만(SDXL 워터마커가 표식을 넣지 않음) → `skipped`; 8천만 화소 초과 → `skipped`.
 - 의존성 확인(R27-5): numpy·Pillow는 import하고, OpenCV는 설치 위치만 찾는다(없으면 이전과 같이 `skipped` 「의존성 부재: cv2」).
   OpenCV는 범위 안 이미지를 디코드할 때 import한다 — import가 OpenCV의 BLAS 스레드를 띄워 작은 이미지 검사에서 검사 자체보다 비쌌다.
@@ -154,3 +154,75 @@ IPTC·C2PA 이름공간이 아닌 IRI는 마지막 경로 조각이 같아도 "�
 - 한계: 재인코딩·다시 저장하면 메타데이터·SEI가 사라지거나 바뀐다 — 부재는 원본성 근거가 아니다.
 
 P0R-23: 영상 행의 출처 추정 문구가 존재하지 않던 영상 메타데이터 검사를 「…컨테이너 메타데이터에서 출처 단서를 찾지 못했습니다」로 적던 것을 없앴다. 지금 문구는 「영상 출처는 추정하지 않습니다 — 확인한 표식(컨테이너 메타데이터·C2PA·워터마크)의 결과는 근거 항목과 검사 범위에 있습니다.」이다.
+
+## 8. 비가시 유니코드 표식 (`text_invisible_marks`, techniques-2026b TB-1)
+
+위협 카탈로그 M-TXT-03·M-TXT-01. 대상: `.txt`·`.md`가 분석한 본문(앞 `text_bytes`), 문서(pdf·docx·xlsx·pptx·hwp)는 추출한 본문
+(추출이 실행되지 않으면 `skipped` 「문서 텍스트 추출이 실행되지 않아 검사하지 않음」). 의존성 없음(표준 라이브러리).
+
+| 찾는 것 | 규칙 | 출처 |
+| --- | --- | --- |
+| 유니코드 태그 문자 U+E0000–U+E007F | U+E0020–E007E를 ASCII로 풀어 그대로 적는다. U+1F3F4 + 태그 영숫자 + U+E007F(이모지 깃발 태그 시퀀스)는 정상 용법으로 세기만 한다 | Unicode 표준 §23.9, UTS #51 ED-14a |
+| 데이터로 쓰인 변형 선택자 | 선택자 2개 이상 연속, 또는 등록 IVS에 쓰이지 않는 U+E0120–U+E01EF 하나. VS1–16 → 0x00–0x0F, VS17–256 → 0x10–0xFF로 읽어 길이·16진수(UTF-8이면 그 글)를 적는다. 기준 문자 + 선택자 하나는 정상 변형 시퀀스 | StandardizedVariants.txt, UTS #37(IVD 2025-07-14: E0100–E011F만 사용), C2PA 2.3 부록 A.7.3 |
+| 제로폭 문자 U+200B·200C·200D·2060·FEFF(첫 글자 제외)·180E·2061–2064 | 종류별 개수, 4개 이상 연속열(이진 부호화 형태) 위치. 두 그림 문자 사이의 ZWJ(이모지 ZWJ 시퀀스)는 제외 | Unicode §23.2, §23.8.1 |
+| C2PA 비정형 텍스트 래퍼 | U+FEFF 뒤 선택자 열이 `C2PATXT\0`(0x4332504154585400)로 시작 → 버전(uint8)·매니페스트 길이(uint32, 빅엔디언)를 적는다. 길이 뒤 채움 선택자는 허용(MIT `c2pa-text`의 `encode_wrapper_padded`) | C2PA 2.3 부록 A.7.2 = 2.4 부록 A.8.2 |
+| C2PA 구조화 텍스트 블록 | `-----BEGIN C2PA MANIFEST-----` … `-----END C2PA MANIFEST-----` | C2PA 2.4 부록 A.9 |
+
+- **의미**: 찾은 것은 모두 결정적·중립·약 사실(층 `text_marks`)이다. 비가시 문자는 누구나 넣거나 지울 수 있고 복사·붙여넣기·편집기·입력기에서
+  생기거나 사라지므로 작성 주체나 AI 생성 여부를 뜻하지 않는다. 텍스트 결과는 규칙 1로 늘 "참고" 등급이라 판정에 영향이 없다. 없음은 무정보
+  (coverage `ran` 「… — 비가시 유니코드 표식 없음 — 무정보(…)」, 한계 문구 하나).
+- **C2PA 텍스트 매니페스트**: 번들 SDK(c2pa-python 0.38 = c2pa-c-ffi c2pa-v0.91.0)는 c2pa-rs의 `unstable_plain_text`·`unstable_structured_text`
+  기능 없이 빌드되어 텍스트 임베딩을 읽지 못한다. 그래서 래퍼·블록은 「…(서명 미검증)」 존재 사실로만 적고, `c2pa` 검사는 계속 `skipped`
+  (사유가 「…서명·해시를 검증하지 않았습니다(비정형 텍스트 래퍼의 존재는 비가시 유니코드 표식 검사가 사실로 기록)」로 바뀜). 표식 문맥
+  (`marking_context.checked`)에 `text_invisible_marks`와, 래퍼가 있으면 `c2pa_text_wrapper`(found, 「서명 검증 미실행」)가 더해진다.
+- **Encypher**: `encypher-ai`(AGPL-3.0 — 가져오지 않음)의 C2PA 형식은 위 래퍼이고, 이전 형식(basic/manifest — 머리 없는 JSON+Ed25519 서명 바이트)은
+  변형 선택자 데이터열로 잡혀 바이트로만 적힌다(서명 검증 없음). 공개되지 않은 독점 표식은 다루지 않는다.
+- 제로폭 스테가노그래피(offdev/zwsp-steg-js, KuroLabs/stegcloak 등)는 형식이 여럿이고 stegcloak은 기본 암호화라 풀지 않고 연속열만 적는다.
+- HTML(C2PA 2.4 부록 A.7, `<script type="application/c2pa">`)은 `.html`이 지원 형식이 아니어서 범위 밖이다.
+- 출처(2026-10-17 조회): https://spec.c2pa.org/specifications/specifications/2.3/specs/C2PA_Specification.html (부록 A.7),
+  …/2.4/specs/C2PA_Specification.html (부록 A.7–A.9), c2pa-rs `sdk/src/asset_handlers/plain_text_io.rs`(커밋 2dcc9114a6, unstable 기능),
+  github.com/encypherai/c2pa-text@7e81875(MIT), github.com/encypherai/encypher-ai@15f5878(AGPL-3.0), https://www.unicode.org/reports/tr51/ ,
+  https://www.unicode.org/reports/tr37/ , https://paulbutler.org/2025/smuggling-arbitrary-data-through-an-emoji/ . 테스트 `test_text_marks.py`.
+
+## 9. Resemble AI PerTh 암묵 워터마크 (`watermark_perth`, techniques-2026b TB-2)
+
+- 위협 카탈로그 O-CHATTERBOX·M-AUD-01. Chatterbox(resemble-ai/chatterbox, MIT)는 모든 출력에 `perth.PerthImplicitWatermarker().apply_watermark`를
+  적용한다(`src/chatterbox/tts.py` L126·L271, `vc.py` L29·L103, 커밋 `5de7a54aa4e5`, README 「Built-in PerTh Watermarking」).
+- 디코더: `resemble-perth` 1.0.1(PyPI, MIT)의 `get_watermark` 경로를 torch만으로 다시 구현(`wm_perth.py` — 게이트의 torch 2.14용 torchaudio가
+  없어 `Spectrogram`을 `torch.stft(center=True, pad_mode="reflect")`와 주기 Hann 창으로 옮김). 처음 300초를 ffmpeg로 32비트 실수 WAV로 풀고
+  모노 평균 → `librosa.resample(..., res_type="polyphase")`로 32 kHz → dB 크기 스펙트로그램 정규화 → PerthNet 디코더(2 kHz 이하 대역) → [0, 1] 신뢰도.
+  가중치는 휠 안의 `perth_net_250000.pth.tar`(자산 `perth-implicit-250000.pth.tar`, sha256 고정, 디코더 가중치만 `weights_only` 로드).
+  패키지 자체(torch 2.11 + torchaudio 2.11 임시 환경)와 242개 파일에서 최대 차이 3.0×10⁻⁷(`fixtures/perth/reference.json`).
+- **의미**: 암묵 표식은 메시지가 없는 1비트다.
+  - 신뢰도 ≥ 0.5(패키지의 반올림 기준) → 중립·약 사실 「PerTh 워터마크 검출」(측정 오탐률 문구 포함).
+  - 등록표 항목 `perth-implicit-chatterbox`(기대값 존재 = 1, `min_confidence` 0.9) 이상 → 생성·**중** 「등록된 생성기 워터마크 일치(PerTh 1비트 존재 표식 — 결론 근거 아님)」.
+    Resemble AI 서비스와 공개 라이브러리 사용자도 같은 표식을 넣으므로 Chatterbox를 생성기로 확정하지 않으며, 규칙 2(강)를 일으키지 않고 원본성 결론(규칙 5)만 막는다.
+  - 미만 → `ran` 「… 검출 안 됨(신뢰도 …) — 무정보(워터마크 부재를 뜻하지 않음)」. 재녹음·음성 향상·다른 TTS는 표식을 남기지 않는다.
+- coverage: torch 없음 → `skipped` 「의존성 부재: torch」(librosa 없음 → 「의존성 부재: librosa」, ffmpeg 없음 → 「의존성 부재: ffmpeg」); 가중치 없음 →
+  `skipped` 「가중치 없음: … fetch_watermark_models.py --only perth …」; 핀과 다른 바이트 → `failed` 「AssetPinError: 미고정 모델: …」; 1초 미만 → `skipped`.
+- **측정 범위(TB-2 수정)**: 디코더는 음성에서만 측정했다. ffmpeg의 440 Hz 사인파는 무손실·mp3·aac·opus 모두 신뢰도 0.99로 표식을 "주장"했다(220 Hz는 0.01 미만,
+  vorbis 220 Hz 10초는 0.92). 그래서 처음 30초의 평균 전력 스펙트럼에서 가장 강한 봉우리 3개(±2 빈)가 에너지의 90% 이상인 순음 위주 신호는 `skipped`
+  「측정 범위 밖: … 순음 위주 신호 — PerTh 디코더는 음성에서만 측정되었고 순음에서 오탐이 관찰됨 …」. 측정: LibriSpeech 240개의 비율 중앙값 0.23·최대 0.622,
+  합성 유성음 픽스처 0.55·0.67, 사인파 1.0. 같은 LibriSpeech 40개를 mp3 64k·aac 64k·opus 24k로 재압축해도 0.5 이상은 0건(최대 0.118).
+  오디오 행과 영상의 음성 트랙에서 실행되고 표식 문맥(`marking_context.checked`)에 `watermark_perth`가 들어간다. 추론은 torch 스레드 1개(잠금).
+- 측정(2026-10-17, `docs/WATERMARK-MEASUREMENTS.md`): LibriSpeech dev-clean 240개에서 0.5 이상 3건(1.25%, 95% 상한 3.6%, 최대 0.780), 0.9 이상 0건;
+  같은 240개에 패키지로 표식을 넣고 16비트로 저장하면 최소 0.922(240/240).
+- 게이트 이미지 `deepfake-lens-gate:tech2`(`scripts/gate/Dockerfile.tech2`, `:tech` 위에 가중치만 추가 — 휠·파일 sha256 확인).
+
+## 10. 공개 파이프라인의 고정 워터마크 확인 (techniques-2026b TB-8 — O-FLUX2, O-SDXL-FAMILY)
+
+2026-10-17, 소스 코드에서 직접 확인(커밋 고정). `watermark-registry.json` 판 `2026-10-17.2`에 들어간 것만 판정에 쓰인다(정확 일치 → 결정적·생성·강, 제목은 항목별).
+
+| 파이프라인 | 저장소@커밋 · 파일 | 메시지 | 기본 적용 | 등록 |
+| --- | --- | --- | --- | --- |
+| SDXL 계열 | Stability-AI/generative-models@e8cd6576 `sgm/inference/helpers.py` L54-58; diffusers@b800f828 SDXL 파이프라인 18개 | 48비트 `0xB3EC907BB19E` | 저장 경로 전부 / diffusers는 invisible-watermark 설치 시 | 기존 |
+| FLUX.1 참조 구현 | black-forest-labs/flux@802fb471 `src/flux/util.py` L733-774, `save_image()` L258 | `0b0010…101110` — `bin()[2:]`가 앞의 0 두 개를 버려 **46비트** | 예(끌 수 없음, 모든 CLI·데모) | 추가 |
+| SD 1.x txt2img | CompVis/stable-diffusion@21f890f9 `scripts/txt2img.py` L69-73 | 바이트 「StableDiffusionV1」(136비트, MSB 먼저 — imwatermark `bytes`=`numpy.unpackbits`, tech 이미지에서 확인) | 예(txt2img만) | 추가 |
+| SD 2.x 스크립트 | Stability-AI/stablediffusion@f16630a9(GitHub 404, Software Heritage 보관본) `scripts/txt2img.py` L206-209 등 4개 | 바이트 「SDV2」(32비트) | 예 | 추가 |
+| **FLUX.2** | black-forest-labs/flux2@50fe5162 `src/flux2/watermark.py`에 FLUX.1과 같은 상수가 있으나 `scripts/cli.py` L27 가져오기·L618 호출이 주석 처리 | — | **확인: 기본 워터마크 없음**(대신 EXIF `Software`=「AI generated;flux2」, TB-7) | 없음 |
+| FLUX.3 klein | black-forest-labs/flux-3-image-klein@e53f4ea6 — EXIF만(`src/flux3/safety.py` L121-124) | — | 확인: 기본 워터마크 없음 | 없음 |
+| SD 3.5 / Stable Cascade / diffusers의 flux·flux2·flux3·sd3·cascade·kandinsky·wuerstchen·pixart·aura_flow·hunyuandit·qwenimage·z_image·kolors·sana, Kandinsky-2/3, Qwen-Image, Z-Image, PixArt-sigma, HunyuanDiT 원 저장소 | 커밋은 등록표 `no_default_watermark` | — | 확인: 기본 워터마크 없음 | 없음 |
+
+- DeepFloyd IF는 보이는 로고를 붙인다(비가시 메시지 아님 — 범위 밖).
+- 32비트(SD 2) 메시지는 균일 비트 모형에서 우연 일치 확률이 이미지당 2×2⁻³²로 48비트보다 높다. 측정값은 `docs/WATERMARK-MEASUREMENTS.md`.
+- 테스트 `test_imwatermark_registry.py`(상수 재현·항목별 제목·n/n 일치).

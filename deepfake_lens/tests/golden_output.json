@@ -445,6 +445,48 @@
         "sklearn": "scikit-learn==1.9.1",
         "soundfile": "soundfile==0.14.0"
       }
+    },
+    {
+      "generation": 29,
+      "reason": "merge of techniques-2026b (TB generations 18-28) onto phase0 generation 24: checks of both sides; self_declared on unsigned TB labels",
+      "sha256": "eec4be3ff4a28f63e39507291e29c97e3d7ad7ef54e2f082ced26243b1509edc",
+      "sets": {
+        "stdlib": "eec4be3ff4a28f63e39507291e29c97e3d7ad7ef54e2f082ced26243b1509edc",
+        "full-extras": "c3f480d9e9a137b32d5c723b48b0b5ef84f0c53c456b722f22e9d394735abe0c"
+      },
+      "constants_sha256": "ce950cc854c40bac6e026feac4250e0ad93d8ddd05499e53aceb7d87bb60aa76",
+      "constants_count": 60,
+      "full_extras_environment": {
+        "PIL": "pillow==12.3.0",
+        "c2pa": "c2pa-python==0.38.0",
+        "cv2": "opencv-python==5.0.0.93",
+        "librosa": "librosa==1.0.0",
+        "numpy": "numpy==2.5.4",
+        "scipy": "scipy==1.18.1",
+        "sklearn": "scikit-learn==1.9.1",
+        "soundfile": "soundfile==0.14.0"
+      }
+    },
+    {
+      "generation": 30,
+      "reason": "merge of techniques-2026b (TB generation 29) into phase0 after R27-2/R27-5 (generation 24): both sides; numbered past both",
+      "sha256": "eec4be3ff4a28f63e39507291e29c97e3d7ad7ef54e2f082ced26243b1509edc",
+      "sets": {
+        "stdlib": "eec4be3ff4a28f63e39507291e29c97e3d7ad7ef54e2f082ced26243b1509edc",
+        "full-extras": "c3f480d9e9a137b32d5c723b48b0b5ef84f0c53c456b722f22e9d394735abe0c"
+      },
+      "constants_sha256": "ce950cc854c40bac6e026feac4250e0ad93d8ddd05499e53aceb7d87bb60aa76",
+      "constants_count": 60,
+      "full_extras_environment": {
+        "PIL": "pillow==12.3.0",
+        "c2pa": "c2pa-python==0.38.0",
+        "cv2": "opencv-python==5.0.0.93",
+        "librosa": "librosa==1.0.0",
+        "numpy": "numpy==2.5.4",
+        "scipy": "scipy==1.18.1",
+        "sklearn": "scikit-learn==1.9.1",
+        "soundfile": "soundfile==0.14.0"
+      }
     }
   ]
 }

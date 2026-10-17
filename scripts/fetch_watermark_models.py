@@ -13,14 +13,16 @@ The analysis never downloads — without these files the checks are
 | trustmark-decoder_C.onnx          | …/decoder_C.onnx                                                          | MIT |
 | videoseal-y_256b_img.jit          | https://dl.fbaipublicfiles.com/videoseal/y_256b_img.jit                   | MIT (facebookresearch/videoseal) |
 | audioseal-detector_base.pth       | https://huggingface.co/facebook/audioseal/resolve/3c19eba5…/detector_base.pth | MIT (facebook/audioseal) |
+| perth-implicit-250000.pth.tar     | member perth/perth_net/pretrained/implicit/perth_net_250000.pth.tar of the PyPI wheel resemble_perth-1.0.1 (wheel sha256 checked too) | MIT (resemble-ai/Perth) |
 
 Usage:
-    python scripts/fetch_watermark_models.py [--dest <models dir>] [--only trustmark|meta] [--verify-only]
+    python scripts/fetch_watermark_models.py [--dest <models dir>] [--only trustmark|meta|perth] [--verify-only]
 """
 
 from __future__ import annotations
 
 import hashlib
+import io
 import os
 import sys
 import tempfile
@@ -34,8 +36,17 @@ DOWNLOADS = {
     "videoseal-y_256b_img.jit": "https://dl.fbaipublicfiles.com/videoseal/y_256b_img.jit",
     "audioseal-detector_base.pth": "https://huggingface.co/facebook/audioseal/resolve/3c19eba53390776cf2cc9ed5f6c9ac67ce72ecba/detector_base.pth",
 }
+# TB-2: assets taken out of a published wheel — (wheel URL, wheel sha256, member path).
+WHEEL_MEMBERS = {
+    "perth-implicit-250000.pth.tar": (
+        "https://files.pythonhosted.org/packages/77/cc/73226dd776f8e9c2975f64f4efc22988fb37e5b185ba5cccd6f2e7196954/resemble_perth-1.0.1-py3-none-any.whl",
+        "65e9c37531b1a128a4a56226b75dece4521683cf3611b0b2a5ffe234f00c9342",
+        "perth/perth_net/pretrained/implicit/perth_net_250000.pth.tar",
+    ),
+}
 GROUPS = {"trustmark": [name for name in DOWNLOADS if name.startswith("trustmark-")],
-          "meta": [name for name in DOWNLOADS if not name.startswith("trustmark-")]}
+          "meta": [name for name in DOWNLOADS if not name.startswith("trustmark-")],
+          "perth": list(WHEEL_MEMBERS)}
 USER_AGENT = "deepfake-lens-fetch-watermark-models/1.0"
 
 
@@ -55,13 +66,13 @@ def main(argv: list[str] | None = None) -> int:
     from deepfake_lens.model_assets import expected_sha256
     from deepfake_lens.vendor_weights import default_models_dir
 
-    parser = KoreanArgumentParser(description="워터마크 디코더 가중치(TrustMark·VideoSeal·AudioSeal)를 sha256 확인 후 models 폴더에 받습니다.")
+    parser = KoreanArgumentParser(description="워터마크 디코더 가중치(TrustMark·VideoSeal·AudioSeal·PerTh)를 sha256 확인 후 models 폴더에 받습니다.")
     parser.add_argument("--dest", type=Path, default=None, help="models 폴더(기본: 유효 models 폴더)")
-    parser.add_argument("--only", choices=sorted(GROUPS), default=None, help="trustmark 또는 meta만")
+    parser.add_argument("--only", choices=sorted(GROUPS), default=None, help="한 묶음만 받기(trustmark/meta/perth)")
     parser.add_argument("--verify-only", action="store_true", help="내려받지 않고 있는 파일의 sha256만 확인")
     args = parser.parse_args(argv)
     dest = args.dest or default_models_dir()
-    names = GROUPS[args.only] if args.only else list(DOWNLOADS)
+    names = GROUPS[args.only] if args.only else [*DOWNLOADS, *WHEEL_MEMBERS]
     status = 0
     for name in names:
         expected = expected_sha256(name)
@@ -80,10 +91,23 @@ def main(argv: list[str] | None = None) -> int:
         fd, tmp = tempfile.mkstemp(prefix=".fetch-", dir=dest)
         os.close(fd)
         try:
-            request = urllib.request.Request(DOWNLOADS[name], headers={"User-Agent": USER_AGENT})
-            with urllib.request.urlopen(request, timeout=600) as response, open(tmp, "wb") as handle:
-                for chunk in iter(lambda: response.read(1 << 20), b""):
-                    handle.write(chunk)
+            if name in WHEEL_MEMBERS:
+                url, wheel_sha256, member = WHEEL_MEMBERS[name]
+                request = urllib.request.Request(url, headers={"User-Agent": USER_AGENT})
+                with urllib.request.urlopen(request, timeout=600) as response:
+                    wheel = response.read()
+                if hashlib.sha256(wheel).hexdigest() != wheel_sha256:
+                    print(f"{name}: 휠 sha256 불일치 — 저장하지 않음", file=sys.stderr)
+                    status = 1
+                    continue
+                import zipfile
+
+                Path(tmp).write_bytes(zipfile.ZipFile(io.BytesIO(wheel)).read(member))
+            else:
+                request = urllib.request.Request(DOWNLOADS[name], headers={"User-Agent": USER_AGENT})
+                with urllib.request.urlopen(request, timeout=600) as response, open(tmp, "wb") as handle:
+                    for chunk in iter(lambda: response.read(1 << 20), b""):
+                        handle.write(chunk)
             actual = _sha256(Path(tmp))
             if actual != expected:
                 print(f"{name}: sha256 불일치(기대 {expected[:12]}…, 실제 {actual[:12]}…) — 저장하지 않음", file=sys.stderr)

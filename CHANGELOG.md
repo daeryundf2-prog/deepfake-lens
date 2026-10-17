@@ -4,6 +4,39 @@ All notable changes to Deepfake Lens. Format: Keep a Changelog; this repo
 has not tagged a release yet (version is `0.1.0.dev0`), so entries are
 grouped by work pass rather than release.
 
+## 2026-10 — techniques-2026b (deterministic fact layers, TB)
+
+### Added
+- TB-1: `text_invisible_marks` — Unicode tag strings (decoded), variation selectors used as data (bytes), zero-width
+  characters, C2PA 2.3 text-manifest wrappers and 2.4 structured-text blocks (presence only — the bundled SDK does
+  not validate them) in text and document rows, as neutral facts. See `docs/MACHINE-READABLE-MARKS.md` §8.
+- TB-2: `watermark_perth` — the Resemble AI PerTh implicit watermark (Chatterbox's default) on audio and a
+  video's audio track, decoder re-implemented with torch (`[watermark_perth]` extra, weight pinned from the
+  resemble-perth 1.0.1 wheel); presence is a fact, the registered Chatterbox entry a moderate item (1 bit, never a
+  conclusion); FPR on 240 LibriSpeech utterances in `docs/WATERMARK-MEASUREMENTS.md`. Gate image
+  `deepfake-lens-gate:tech2` (`scripts/gate/Dockerfile.tech2`).
+- TB-3: `device_ai_label` — the Samsung SEFT trailer's entry names (ExifTool Samsung.pm layout; AI-related
+  candidates marked unverified) and Google AI credit labels ("Edited with Google AI", "Made with Google AI",
+  "Made by Google AI") as self-declared, at most moderate items (`models/device-labels.json`).
+- TB-5: `screen_capture` — the iOS/macOS "Screenshot" user comment (XMP `exif:UserComment`, EXIF UserComment) and
+  native phone/tablet screen sizes from the makers' spec pages (`models/screen-traits.json`) as neutral facts; a
+  trusted camera C2PA manifest adds "a camera manifest proves the device photographed this scene, not that it was real".
+- TB-7: `models/generator-strings.json` (versioned, sourced) holds the generator-name markers and XMP generator names
+  (phase-0 values unchanged, additions: FLUX.2 CLI's `AI generated;flux2`, ByteDance Dreamina/Seedream/Seedance,
+  Luma, Amazon Nova, Azure OpenAI/Designer, Apple Image Playground) and C2PA signer / claim-generator names (OpenAI,
+  Adobe Firefly, Google, BFL, Stability, ElevenLabs, Runway, Luma, Amazon, Microsoft, ByteDance/BytePlus) shown as
+  the neutral item 「C2PA 서명자·생성기 이름(등록표 대조)」. Strength rules unchanged.
+- TB-8: `watermark_sdxl` also recognises the fixed imwatermark messages the FLUX.1 reference code (46 bits) and the
+  SD 1 / SD 2 official scripts (`StableDiffusionV1`, `SDV2`) embed by default (verified in source at pinned commits);
+  FLUX.2, FLUX.3 klein, SD 3.5, Stable Cascade and the diffusers non-SDXL pipelines: 확인: 기본 워터마크 없음.
+- TB-6: `document_structure` — PDF revisions / incremental saves, bytes after a signature's `/ByteRange`, producer and
+  creator history, `application/c2pa` embedding; DOCX/XLSX/PPTX revision, application, editing time, `w:rsid` count,
+  tracked changes (self-declared facts). See `docs/FACT-LAYERS.md`.
+- TB-4: platform / messenger traces — JPEG recompression tables (`platform_recompression`, sourced library
+  `models/platform-traces.json`), messenger / screenshot / recording file-name formats (`file_name_pattern`; the file
+  name joins the scan-cache key, `content-v5`), AMR / Ogg Opus headers and effective bandwidth (`audio_channel_trace`),
+  with the limitation that such paths strip metadata, C2PA and watermarks.
+
 ## 2026-10 — techniques-2026 (machine-readable marks)
 
 ### Added

@@ -85,6 +85,16 @@ the pin.
 - `deepfake_lens/vendor_trustmark_bch.py` is `trustmark/bchecc.py` from the
   trustmark 0.9.2 sdist, unchanged — Copyright 2023 Adobe, **MIT**.
 
+## Resemble AI PerTh implicit decoder weight (techniques-2026b TB-2)
+
+- `perth-implicit-250000.pth.tar` — `perth/perth_net/pretrained/implicit/perth_net_250000.pth.tar` from the
+  PyPI wheel `resemble_perth-1.0.1-py3-none-any.whl` (wheel sha256 `65e9c375…`, file sha256 `a15bce45…`),
+  **MIT** (Copyright (c) 2025 Resemble AI, the wheel's LICENSE). Only the decoder half of the state dict is
+  loaded (`torch.load(weights_only=True)` from the verified bytes); `wm_perth.py` re-implements the decoder
+  architecture of `perth_net_implicit/model/decoder.py` and the torchaudio `Spectrogram` call with torch only —
+  equal to the package's own `get_watermark` within 3.0e-7 on 242 files (2026-10-17). Not committed;
+  `scripts/fetch_watermark_models.py --only perth` extracts it from the wheel after checking both digests.
+
 ## Meta VideoSeal / AudioSeal weights (techniques-2026)
 
 - `videoseal-y_256b_img.jit` — VideoSeal 1.0 (256-bit) TorchScript export,
