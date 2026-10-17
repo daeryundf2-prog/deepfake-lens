@@ -85,3 +85,19 @@
 - **재촬영 문구**: 신뢰 서명자의 유효 C2PA 매니페스트가 `digitalCapture`·`computationalCapture`를 선언하면 한계 문구
   「카메라 C2PA 서명은 이 기기가 이 장면을 찍었다는 것만 증명하며, 장면이 실제였다는 것(화면·인쇄물을 다시 찍은 것이 아님)은 증명하지 않습니다.」가 붙는다.
 - 테스트 `test_screen_capture.py`.
+
+## 5. 생성기·서비스 문자열 표 (TB-7 — S-* 서비스 행)
+
+표: `deepfake_lens/models/generator-strings.json`(`generator-strings-v1`, 판 `2026-10-17.1`, 판·sha256이 근거와 캐시 키에 들어감). **강도 규칙은 바꾸지 않는다** —
+자기 신고 규칙(evidence_rules·core)이 그대로 정하고, 이 표는 데이터만 준다(상표 토큰 강도 변경은 재구성 브랜치 결정).
+
+- `tool_guess_rules`: 이미지 메타데이터 출처 추정(`text_heuristics._direct_tool_guess`)의 생성기 표지. 0단계 규칙 13개는 순서·값 그대로 옮겼고, 출처가 있는 추가:
+  FLUX.2 CLI의 EXIF `Software` 「AI generated;flux2」(flux2 소스), ByteDance Dreamina/Seedream/Seedance·BytePlus_ModelArk·Volcengine_Ark_CN(제3자 실제 파일 관찰),
+  Luma AI, Amazon Nova(Bedrock), Azure OpenAI·Microsoft Designer·Bing Image Creator(Microsoft 공식 문서), Apple Image Playground(제3자 관찰).
+- `xmp_generator_names`: `evidence_rules.GENERATOR_NAMES`(XMP 도구 필드의 생성기 이름) — 값 변경 없음.
+- `c2pa_signers`: C2PA 서명 인증서 이름·발급자·claim generator에 들어 있으면 서비스를 **이름만** 붙이는 표(OpenAI Media Service / Truepic Lens CLI in
+  ChatGPT·Sora, Adobe Firefly C2PA, Google Media Processing Services, Google C2PA SDK for Android(촬영 기기), Black Forest Labs, Stability AI, Eleven Labs,
+  Runway, Luma AI, Amazon Bedrock, Microsoft Corporation, Bytedance/Byteplus Pte. Ltd.). 일치하면 중립·약 「C2PA 서명자·생성기 이름(등록표 대조)」 —
+  출처·생성 여부는 C2PA 검증 항목이 서명·해시·출처 유형으로 따로 판단하며, 신뢰되지 않은 서명이면 그렇게 적는다.
+- **찾지 못한 것**(2026-10-17): Midjourney V8 전용 필드(Description 안의 `--v N`뿐), Firefly 파트너 모델 표기, Stability·ElevenLabs claim generator,
+  Seedream 4.x 문자열, gpt-image-1.5·ChatGPT Images 2.5(소비자용) 문자열, Bing/Copilot claim generator — 실제 파일(`c2patool`, `exiftool -a -G1`)이 있어야 고정할 수 있다.

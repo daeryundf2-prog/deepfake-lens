@@ -1375,8 +1375,11 @@ def _marking(modality: str, validation: dict[str, object] | None, c2pa_entry: Co
         {"check": f.check, "algorithm": f.algorithm, "outcome": f.outcome, "detail": f.detail} for f in marks.findings
     ]
     context, item = build_marking(modality, findings)
+    # TB-7: name the service a manifest's signer / claim generator belongs to (neutral; the C2PA rules decide).
+    from .generator_strings import c2pa_signer_evidence
+
     return DeepLayers(
-        evidence=[*marks.evidence, item],
+        evidence=[*c2pa_signer_evidence(validation), *marks.evidence, item],
         coverage=[*marks.coverage, online_entry(modality)],
         limitations=list(marks.limitations),
         marking_context=context,

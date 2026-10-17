@@ -21,6 +21,11 @@ grouped by work pass rather than release.
 - TB-5: `screen_capture` — the iOS/macOS "Screenshot" user comment (XMP `exif:UserComment`, EXIF UserComment) and
   native phone/tablet screen sizes from the makers' spec pages (`models/screen-traits.json`) as neutral facts; a
   trusted camera C2PA manifest adds "a camera manifest proves the device photographed this scene, not that it was real".
+- TB-7: `models/generator-strings.json` (versioned, sourced) holds the generator-name markers and XMP generator names
+  (phase-0 values unchanged, additions: FLUX.2 CLI's `AI generated;flux2`, ByteDance Dreamina/Seedream/Seedance,
+  Luma, Amazon Nova, Azure OpenAI/Designer, Apple Image Playground) and C2PA signer / claim-generator names (OpenAI,
+  Adobe Firefly, Google, BFL, Stability, ElevenLabs, Runway, Luma, Amazon, Microsoft, ByteDance/BytePlus) shown as
+  the neutral item 「C2PA 서명자·생성기 이름(등록표 대조)」. Strength rules unchanged.
 - TB-6: `document_structure` — PDF revisions / incremental saves, bytes after a signature's `/ByteRange`, producer and
   creator history, `application/c2pa` embedding; DOCX/XLSX/PPTX revision, application, editing time, `w:rsid` count,
   tracked changes (self-declared facts). See `docs/FACT-LAYERS.md`.

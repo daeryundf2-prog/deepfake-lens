@@ -891,7 +891,10 @@ CACHE_KEY_VERSION = "content-v5"  # v3 (N6): + extension; v4 (R14-3): + output f
 #    candidates "의미 미확인") and Google AI credit labels in XMP photoshop:Credit (synthetic / moderate, self-declared).
 # 23: TB-5 — images gain screen_capture (iOS/macOS "Screenshot" user comment in XMP/EXIF, native screen size of a
 #    phone/tablet) as neutral facts, and a trusted camera C2PA manifest adds the recapture limitation.
-OUTPUT_FORMAT_GENERATION = 23
+# 24: TB-7 — generator strings move to models/generator-strings.json (phase-0 rules unchanged + sourced additions:
+#    FLUX.2 "AI generated;flux2", Dreamina/Seedream/Seedance, Luma, Amazon Nova, Azure OpenAI/Designer, Apple Image
+#    Playground); a C2PA manifest's signer / claim generator is named as the neutral item "C2PA 서명자·생성기 이름".
+OUTPUT_FORMAT_GENERATION = 24
 
 
 def cache_extension(path: Path) -> str:
@@ -947,6 +950,10 @@ def _cache_scan_context(model_path: ModelPathArg, *, models_dir: Path | str | No
     from .screen_capture import traits_cache_tokens
 
     tokens += traits_cache_tokens()
+    # TB-7: the generator / service string table (tool-guess markers, XMP generator names, C2PA signer names).
+    from .generator_strings import table_cache_tokens as generator_cache_tokens
+
+    tokens += generator_cache_tokens()
     return f"tool:{TOOL_VERSION}|pins:{_short_digest(chr(10).join(tokens))}"
 
 
