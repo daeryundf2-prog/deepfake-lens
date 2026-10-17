@@ -193,6 +193,8 @@ python scripts/build_traceability_commits.py --check
 | `verify_round24.md` | 24차 검증: R23 종료 확인, R24-1~R24-11(수정됨) |
 | `verify_round25.md` | 25차 검증: R24 종료 확인, R25-1~R25-8과 조정자 추가 R25-9(수정됨) |
 | `verify_round26.md` | 26차 검증: R25 종료 확인, R26-1~R26-7과 조정자 추가 R26-8~R26-10(잔여 리스크에서 승격; 이 브랜치에서 수정됨) |
+| `verify_round27.md` | 27차 검증(새 형식 첫 라운드): R27-1~R27-5(R27-2·R27-5 수정됨, 나머지는 BACKLOG BL-19~BL-22) |
+| `verify_round28.md` | 28차 검증(새 형식 두 번째 라운드): R27 종료 확인, R28-1(거짓 문구 — 수정 대상), R28-2~R28-5(BACKLOG 후보) |
 | `ux_audit_ec0d057.md` | 18차와 함께 한 UI/UX/AX 감사(ec0d057 기준) |
 | `BACKLOG.md` | 게이트를 막지 않는 항목(Low·Cosmetic·비게이트 명령의 지적, 1단계로 연기한 결정 — BL-1 Ed25519 등). 형식은 문서 머리말 |
 | `HANDOFF.md` | 이 문서 |
