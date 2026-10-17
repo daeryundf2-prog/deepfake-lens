@@ -883,7 +883,9 @@ CACHE_KEY_VERSION = "content-v4"  # v3 (N6): + extension; v4 (R14-3): + output f
 #    prompt/workflow, xmp:CreatorTool); exif.Model / LensModel / Credit / dc:creator / header strings give a neutral fact;
 #    the image metadata generator items carry self_declared and 「자기 선언 메타데이터 — 심거나 지울 수 있음」; a brand
 #    source guess is LOW (was HIGH).
-OUTPUT_FORMAT_GENERATION = 22
+# 23: P0R-12 — result.conclusion_caveats (why a manipulation / authenticity conclusion could be wrong); a manipulation
+#    verdict resting on a self-declared item says 「(자기 선언 메타데이터 — 심거나 지울 수 있음)」.
+OUTPUT_FORMAT_GENERATION = 23
 
 
 def cache_extension(path: Path) -> str:

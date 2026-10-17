@@ -427,6 +427,9 @@ class ClassificationResult:
     # (marking_context.build) — facts for the legal-marking section; None for
     # rows that were not analyzed as media/documents. Never decides.
     marking_context: dict | None = None
+    # P0R-12 (user decision 2026-10-17): for a manipulation or authenticity conclusion, why it could be wrong —
+    # Korean sentences derived from the evidence that decided it (evidence_rules.conclusion_caveats); [] otherwise.
+    conclusion_caveats: list[str] = field(default_factory=list)
 
     @property
     def verdict_label(self) -> str:

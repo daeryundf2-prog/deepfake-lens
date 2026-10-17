@@ -702,6 +702,59 @@ def evidence_conflicts(items: Iterable[EvidenceItem]) -> list[EvidenceItem]:
     )]
 
 
+# --- Why a conclusion could be wrong (P0R-12, user decision 2026-10-17) ------------------------------------------
+
+CAVEATS_TITLE = "이 결론이 틀릴 수 있는 이유"
+CAVEAT_SELF_DECLARED = (
+    "근거가 파일이 스스로 적은 메타데이터입니다({note}) — 다른 파일의 생성 기록을 복사해 넣으면 촬영 원본도 같은 결론이 나고, "
+    "생성물에서 지우거나 다시 저장하면 판단 불가가 됩니다."
+)
+CAVEAT_C2PA_SYNTHETIC = (
+    "C2PA 서명은 서명자가 선언한 출처를 보증할 뿐입니다 — 서명 인증서가 유출·오남용되었으면 틀릴 수 있고, "
+    "인증서 폐기 여부는 오프라인으로 확인하지 않았습니다."
+)
+CAVEAT_C2PA_AUTHENTIC = (
+    "C2PA 서명은 서명한 기기·소프트웨어가 이 내용을 서명했다는 기록입니다 — 루팅·변조된 기기나 유출된 인증서로 만든 정상 서명, "
+    "화면 재촬영·연출된 장면은 이 검사로 가려지지 않으며, 인증서 폐기 여부는 오프라인으로 확인하지 않았습니다."
+)
+CAVEAT_WATERMARK = "워터마크 검출은 공개 인코더로 실사에도 같은 표식을 넣을 수 있고, 검출기 자체의 오탐도 있습니다."
+CAVEAT_MEASURED = (
+    "측정된 탐지기의 결론입니다 — 측정 코퍼스와 다른 입력(새 생성기·재압축·편집)에서는 측정한 오류율이 성립하지 않을 수 있습니다."
+)
+CAVEAT_GENERIC = "근거가 된 기록이 위조·편집되었는지는 이 도구가 확인할 수 없습니다 — 원본 확보 경위를 함께 확인하십시오."
+
+
+def conclusion_caveats(verdict: object, evidence: Iterable[EvidenceItem]) -> list[str]:
+    """P0R-12: why a manipulation / authenticity conclusion could be wrong, from the evidence that decided it."""
+    from .result_types import Verdict
+
+    items = list(evidence)
+    if verdict == Verdict.MANIPULATION_EVIDENCE:
+        deciding = [i for i in items if i.direction == EvidenceDirection.SYNTHETIC and (
+            (i.kind == EvidenceKind.DETERMINISTIC and i.strength == EvidenceStrength.STRONG)
+            or (i.kind == EvidenceKind.STATISTICAL and i.is_calibrated))]
+    elif verdict == Verdict.AUTHENTICITY_EVIDENCE:
+        deciding = [i for i in items if i.direction == EvidenceDirection.AUTHENTIC and i.kind == EvidenceKind.DETERMINISTIC
+                    and i.strength == EvidenceStrength.STRONG]
+    else:
+        return []
+    caveats: list[str] = []
+    for item in deciding:
+        if item.self_declared:
+            text = CAVEAT_SELF_DECLARED.format(note=SELF_DECLARED_NOTE)
+        elif item.layer == "c2pa":
+            text = CAVEAT_C2PA_AUTHENTIC if item.direction == EvidenceDirection.AUTHENTIC else CAVEAT_C2PA_SYNTHETIC
+        elif item.layer.startswith("watermark"):
+            text = CAVEAT_WATERMARK
+        elif item.kind == EvidenceKind.STATISTICAL:
+            text = CAVEAT_MEASURED
+        else:
+            text = CAVEAT_GENERIC
+        if text not in caveats:
+            caveats.append(text)
+    return caveats or [CAVEAT_GENERIC]
+
+
 def calibrated_direction(
     probability: float | None,
     calibration_id: str | None,

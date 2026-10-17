@@ -831,6 +831,8 @@
             // Unmeasured heuristics (pixel ensemble, fusion, legacy audio/
             // video heuristics) — displayed for reference, never decide.
             parts.push(listItems('참고 신호(미측정 휴리스틱 — 결론 불참여)', (r.reference_signals || []).map(s => ({ title: `${s.title} (${s.weight})`, detail: s.detail }))));
+            // P0R-12: a conclusion says why it could be wrong (self-declared metadata, signatures, measured detectors)
+            parts.push(listItems('이 결론이 틀릴 수 있는 이유', r.conclusion_caveats || [], 'lim'));
             parts.push(listItems('한계', r.limitations, 'lim'));
             parts.push(listItems('다음 확인', r.next_checks));
             const sg = r.source_guess;

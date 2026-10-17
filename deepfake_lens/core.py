@@ -46,6 +46,8 @@ from .layer_diagnostic import UNAVAILABLE_BAND
 from .result_text import TEXT_LEGAL_LIMITATION, check_row_identities, member_row_path, unrecorded_files
 from .evidence_rules import (
     c2pa_evidence,
+    SELF_DECLARED_NOTE,
+    conclusion_caveats,
     evidence_conflicts,
     deep_layer_reference,
     document_metadata_evidence,
@@ -2486,7 +2488,9 @@ def _verdict_text(
             ),
             None,
         )
-        return f"{subject}: {VERDICT_LABELS[verdict]} — {basis.title if basis else '근거 목록 참조'}."
+        # P0R-12: a conclusion resting on self-declared metadata says so in the verdict sentence itself
+        declared = f"({SELF_DECLARED_NOTE})" if basis is not None and basis.self_declared else ""
+        return f"{subject}: {VERDICT_LABELS[verdict]} — {basis.title if basis else '근거 목록 참조'}{declared}."
     if verdict == Verdict.AUTHENTICITY_EVIDENCE:
         basis = next((item for item in evidence if item.direction == EvidenceDirection.AUTHENTIC and item.strength == EvidenceStrength.STRONG), None)
         return f"{subject}: {VERDICT_LABELS[verdict]} — {basis.title if basis else '근거 목록 참조'}."
@@ -2570,6 +2574,7 @@ def build_classification_result(
         score_is_calibrated=probability is not None,
         reference_signals=list(reference_signals or []),
         marking_context=marking_context,
+        conclusion_caveats=conclusion_caveats(verdict_code, ordered),  # P0R-12
     )
 
 

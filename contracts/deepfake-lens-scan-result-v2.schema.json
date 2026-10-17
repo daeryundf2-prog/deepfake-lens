@@ -194,6 +194,7 @@
         "score": { "type": "integer", "description": "round(probability*100) when calibrated, else 0." },
         "band": { "enum": ["high", "low", "unknown"], "description": "Derived: manipulation->high, authenticity->low, undetermined->unknown." },
         "signals": { "type": "array", "items": { "$ref": "#/$defs/signal" } },
+        "conclusion_caveats": { "type": "array", "items": { "type": "string" }, "description": "P0R-12: for a manipulation or authenticity conclusion, the reasons it could be wrong (Korean, from the deciding evidence — e.g. self-declared metadata can be planted or stripped); empty for undetermined. Absent in records written before it existed." },
         "marking_context": {
           "type": ["object", "null"],
           "description": "techniques-2026 item 6: the machine-readable marks checked for this file (EU AI Act Art. 50 / 인공지능기본법 context) — facts only, never a conclusion; the absence of a mark is not evidence of originality. Null for rows not analyzed as media/documents.",

@@ -10,6 +10,7 @@ from typing import Any, Callable
 
 from .core import TOOL_VERSION, BatchScanSummary, ScanItem
 from .evaluation_metrics import format_ci
+from .evidence_rules import CAVEATS_TITLE  # P0R-12
 from .office_config import OfficeIdentity, office_identity
 from .result_text import (
     HASH_UNAVAILABLE_ACCESS,
@@ -652,6 +653,8 @@ def _render_forensic_pdf(
             sig_str = "실패: " + ", ".join(check_label(entry.check) for entry in failed_checks)
         elif top_item is not None:
             sig_str = f"[{EVIDENCE_KIND_LABELS[top_item.kind][:2]}] {display_name(top_item.title)}"
+            if top_item.self_declared:
+                sig_str += " (자기 선언)"  # P0R-12
         else:
             sig_str = display_name(item.error or "") or "근거 항목 없음"
         if res and res.verdict_code == Verdict.MANIPULATION_EVIDENCE:
@@ -680,6 +683,13 @@ def _render_forensic_pdf(
             on_new_page=table_header,
         )
     layout.y += 6.0
+    caveat_rows = [(index, item) for index, item in enumerate(items, start=1) if item.result is not None and item.result.conclusion_caveats]
+    if caveat_rows:
+        # P0R-12: every conclusion says why it could be wrong.
+        layout.boxed_text(CAVEATS_TITLE, [
+            (f"{index}. {display_path(item.path, redact_paths=redact_paths)}: {display_name(text)}", 7.0, (0.3, 0.3, 0.3))
+            for index, item in caveat_rows for text in (item.result.conclusion_caveats if item.result else [])
+        ])
     if unsigned_rows:
         # X2: rows the server could not re-analyze — outside the table and the signature.
         layout.boxed_text(UNSIGNED_ROWS_TITLE, [
@@ -801,6 +811,11 @@ def _html_row(item: ScanItem, *, redact_paths: bool, allow_path: Callable[[str],
         evidence_parts.append(f'<div class="kind">{escape(kind_label)}</div><ul>' + "".join(f"<li>{escape(display_name(line))}</li>" for line in lines) + "</ul>")
     if not evidence_parts:
         evidence_parts.append("근거 항목 없음")
+    if result.conclusion_caveats:  # P0R-12
+        evidence_parts.append(
+            f'<div class="caveats"><div class="kind">{escape(CAVEATS_TITLE)}</div><ul>'
+            + "".join(f"<li>{escape(display_name(text))}</li>" for text in result.conclusion_caveats) + "</ul></div>"
+        )
     gaps = coverage_gaps(result)
     gap_cell = "<ul>" + "".join(
         f'<li class="{"gap-failed" if entry.status == CoverageStatus.FAILED else ""}">{escape(display_name(entry.describe()))}</li>' for entry in gaps

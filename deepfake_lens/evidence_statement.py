@@ -53,6 +53,7 @@ from .result_text import (
     UnrecordedFiles,
     unrecorded_files,
 )
+from .evidence_rules import CAVEATS_TITLE, SELF_DECLARED_NOTE  # P0R-12
 from .result_types import VERDICT_LABELS, CoverageStatus, EvidenceDirection, EvidenceKind, EvidenceStrength, Grade, Verdict, is_verdict_row, status_label
 from .signing import resolve_report_key, sign_report
 from .json_text import json_dumps
@@ -340,11 +341,14 @@ def _purpose_head(item: ScanItem, member_refs: str = "") -> str:
             f"(구성원 결론 집계: {rollup}; {member_refs or '구성원 행 참조'})."
         )
     if res.verdict_code == Verdict.MANIPULATION_EVIDENCE:
-        basis = next(
-            (e.title for e in res.evidence if e.kind == EvidenceKind.DETERMINISTIC and e.direction == EvidenceDirection.SYNTHETIC and e.strength == EvidenceStrength.STRONG),
-            "결정적 근거",
+        deciding = next(
+            (e for e in res.evidence if e.kind == EvidenceKind.DETERMINISTIC and e.direction == EvidenceDirection.SYNTHETIC and e.strength == EvidenceStrength.STRONG),
+            None,
         )
-        return f"결정적 근거({display_name(basis)})에 의해 조작·생성 근거가 확인된 증거물임을 소명함."
+        basis = deciding.title if deciding is not None else "결정적 근거"
+        # P0R-12: a conclusion resting on self-declared metadata says so in the purpose itself
+        declared = f" — {SELF_DECLARED_NOTE}" if deciding is not None and deciding.self_declared else ""
+        return f"결정적 근거({display_name(basis)}{declared})에 의해 조작·생성 근거가 확인된 증거물임을 소명함."
     if res.verdict_code == Verdict.AUTHENTICITY_EVIDENCE:
         basis = next(
             (e.title for e in res.evidence if e.direction == EvidenceDirection.AUTHENTIC and e.strength == EvidenceStrength.STRONG),
@@ -442,6 +446,9 @@ def build_evidence_statement(
             gaps = coverage_gaps(res)
             if gaps:
                 evidence_lines.append("• 검사 범위: " + "; ".join(display_name(entry.describe()) for entry in gaps[:3]) + (f" 외 {len(gaps) - 3}건" if len(gaps) > 3 else ""))
+        if res is not None and res.conclusion_caveats:
+            # P0R-12: every conclusion says why it could be wrong
+            evidence_lines.append(f"• {CAVEATS_TITLE}: " + " ".join(display_name(text) for text in res.conclusion_caveats))
         sig_text = "\n".join(evidence_lines) if evidence_lines else "• 근거 항목 없음"
 
         statute_text = STATUTE_PLACEHOLDER if band_value == "high" else STATUTE_NONE

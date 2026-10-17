@@ -403,6 +403,27 @@
         "sklearn": "scikit-learn==1.9.1",
         "soundfile": "soundfile==0.14.0"
       }
+    },
+    {
+      "generation": 23,
+      "reason": "P0R-12: result.conclusion_caveats(이 결론이 틀릴 수 있는 이유), 자기 선언 근거의 조작 결론 문장에 「(자기 선언 메타데이터 — 심거나 지울 수 있음)」",
+      "sha256": "5f350026c555dc7410d916223b0211fa55129e5cec5836787dd0e3f325a62eb3",
+      "sets": {
+        "stdlib": "5f350026c555dc7410d916223b0211fa55129e5cec5836787dd0e3f325a62eb3",
+        "full-extras": "cf44c69dd0cf1cdac066344ae197e3bea4f8782b441f93942af6db7e8326197b"
+      },
+      "constants_sha256": "0fe55dfdc7d8916124b9fec00cd87687e99e90373c1ecf1c43f2d5b3dc5ced41",
+      "constants_count": 60,
+      "full_extras_environment": {
+        "PIL": "pillow==12.3.0",
+        "c2pa": "c2pa-python==0.38.0",
+        "cv2": "opencv-python==5.0.0.93",
+        "librosa": "librosa==1.0.0",
+        "numpy": "numpy==2.5.4",
+        "scipy": "scipy==1.18.1",
+        "sklearn": "scikit-learn==1.9.1",
+        "soundfile": "soundfile==0.14.0"
+      }
     }
   ]
 }

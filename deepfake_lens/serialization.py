@@ -161,6 +161,8 @@ def _classification_result_from_json(data: dict[str, object]) -> ClassificationR
         score_is_calibrated=bool(data.get("score_is_calibrated", False)),
         reference_signals=[_signal_from_json(item) for item in _items(data.get("reference_signals")) if isinstance(item, dict)],
         marking_context=_dict(data.get("marking_context")) or None,
+        # P0R-12: absent in records written before the field existed
+        conclusion_caveats=[str(item) for item in _items(data.get("conclusion_caveats")) if isinstance(item, str)],
     )
 
 
