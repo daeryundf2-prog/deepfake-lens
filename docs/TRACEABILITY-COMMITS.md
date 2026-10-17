@@ -4,9 +4,9 @@
 
 Y13/P12: 검증 결함 ID(라운드 1–11)를 0단계 스펙의 갭 ID(G1–G34) 또는 신규(스펙 외) 사유에 매핑하고, 현재 phase0 히스토리의 커밋마다 제목의 ID와 'Gaps:' 줄을 적는다. 라운드 3과 라운드 6의 N은 서로 다른 집합이므로 N3-x / N6-x로, 라운드 5의 G1–G16은 스펙의 G1–G34와 충돌하므로 V5-G1…V5-G16으로 표기한다. 매핑(ids[], wp_gaps, unused_ids, notes)은 손으로 관리하는 데이터이고, commits[]와 ids[].commits는 scripts/build_traceability_commits.py가 git 히스토리에서 다시 만든다(제목으로 이전 항목과 매칭).
 
-범위: `dad9730..4c7cef5`(병합 커밋 제외, 커밋 471개). 이 표는 **표를 재생성한 커밋의 부모까지**를 덮는다 — 재생성 커밋 자신의 해시는 표에 없다(자기 해시를 담을 수 없음). CI(`python scripts/build_traceability_commits.py --check`)가 같은 범위를 히스토리에서 다시 만들어 커밋된 표와 비교한다.
+범위: `dad9730..bd798fb`(병합 커밋 제외, 커밋 475개). 이 표는 **표를 재생성한 커밋의 부모까지**를 덮는다 — 재생성 커밋 자신의 해시는 표에 없다(자기 해시를 담을 수 없음). CI(`python scripts/build_traceability_commits.py --check`)가 같은 범위를 히스토리에서 다시 만들어 커밋된 표와 비교한다.
 
-요약: ID 328개 — 스펙 갭에 매핑 232개(그중 신규 사유 병기 80개), 신규(스펙 외)만 96개.
+요약: ID 333개 — 스펙 갭에 매핑 232개(그중 신규 사유 병기 80개), 신규(스펙 외)만 101개.
 
 ## WP → 갭 (스펙 머리글)
 
@@ -355,6 +355,11 @@ Y13/P12: 검증 결함 ID(라운드 1–11)를 0단계 스펙의 갭 ID(G1–G34
 | R26-9 | 26 | R26-9 multimodal --av-sync decodes only what the energy envelope needs — 8 kHz mono of the | — | 신규(스펙 외): 갭 목록 밖 항목 포함 | ffb347f |
 | R27-2 | 27 | R27-2 the report labels the options as the scan job's own — 「검사 옵션(서버가 이 검사 작업을 실행한 옵션)」 — | G30 |  | 0fc5c71 |
 | R27-5 | 27 | R27-5 image scans and HTML reports back within 25% of 2130892 — the C2PA trust bundles are | — | 신규(스펙 외): 갭 목록 밖 항목 포함 | 3622dc6, 4420e63, 96b24f4, c4e00c4 |
+| R28-1 | 28 | R28-1 a single upload is analyzed under the client's own base name in a fresh temp folder, so the | — | 신규(스펙 외): 갭 목록 밖 항목 포함 | cb7283d |
+| R28-2 | 28 | R28-2 BL-23 carries the round-28 document measurement (+46%/+53% vs 2130892) | — | 신규(스펙 외): 갭 목록 밖 항목 포함 | bd798fb |
+| R28-3 | 28 | R28-3 :tech2 (the only image with the PerTh weight) is a required gate image | — | 신규(스펙 외): 갭 목록 밖 항목 포함 | bd798fb |
+| R28-4 | 28 | R28-4 Opus encoder-string match item not marked self_declared goes to BACKLOG as BL-33 | — | 신규(스펙 외): 갭 목록 밖 항목 포함 | bd798fb |
+| R28-5 | 28 | R28-5 scan-status done before the job file is written goes to BACKLOG as BL-34 | — | 신규(스펙 외): 갭 목록 밖 항목 포함 | bd798fb |
 
 커밋 제목에 쓰이지 않은 ID:
 
@@ -857,3 +862,7 @@ R18-14: ids[]의 갭 매핑을 커밋 제목·본문의 `Gaps:`에 맞췄다 —
 | 1ce2b05 | 27 | WP-J | Gaps: G26, G27, G28 | subject | docs(qa): CONFORMANCE.md and commit traceability regenerated on c4e00c4, round-27 IDs mapped; techniques-2026b merge included (WP-J; Gaps: G26, G27, G28) |
 | 3bf3489 | 27 | — | Gaps: 신규(스펙 외) | subject | fix(gui): GUI-REV6 M-1 the deciding-evidence rule compares the direction by its Korean label and the row reason joins the self-declared mark without a template — test_korean_output and test_display_names held the GUI to both rules (GUI-REV6 M-1; Gaps: 신규) |
 | 4c7cef5 | 27 | — | Gaps: 신규(스펙 외) | subject | docs(phase0): GUI review 6 Low/Cosmetic items go to BACKLOG as BL-24..BL-32 (GUI6; Gaps: 신규) |
+| 2a08d8e | 27 | WP-J | Gaps: G26, G27, G28 | subject | docs(qa): CONFORMANCE.md and commit traceability regenerated on 4c7cef5; gui-redesign merge (review rounds 1–6) and GUI6 backlog included, no new IDs (WP-J; Gaps: G26, G27, G28) |
+| c3ff620 | 27 | WP-J | Gaps: 신규(스펙 외) | subject | docs(phase0): round-28 verification findings — second round in the risk-based format: no Med+ on the verdict/signature/evidence axes, one false statement (R28-1) to fix, R28-2..R28-5 backlog candidates (WP-J; Gaps: 신규) |
+| cb7283d | 28 | R28-1 | Gaps: 신규(스펙 외) | subject | fix(upload): R28-1 a single upload is analyzed under the client's own base name in a fresh temp folder, so the file-name format check (and every other check that reads the name) checks the uploaded name like a folder scan or zip upload does, instead of reporting 「등록된 이름 형식 9개와 일치 없음 — 무정보」 for the server's temp file name (R28-1; Gaps: 신규) |
+| bd798fb | 28 | R28-2, R28-3, R28-4, R28-5 | Gaps: 신규(스펙 외) | subject | docs(phase0): R28-2..R28-5 round-28 backlog and handoff — :tech2 (the only image with the PerTh weight) is a required gate image beside :latest/:tech/:gui (R28-3), BL-23 carries the round-28 document measurement (R28-2), BL-33 Opus encoder string not self_declared (R28-4), BL-34 scan-status done before the job file is written (R28-5), BL-22 adds the FLUX.1/SD 1/SD 2 registered messages (R28-2, R28-3, R28-4, R28-5; Gaps: 신규) |
