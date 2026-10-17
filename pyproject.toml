@@ -51,6 +51,10 @@ watermark = ["onnxruntime>=1.20", "numpy>=1.24", "Pillow>=10.0", "opencv-python>
 # is the audioseal package (pinned: its private loader helpers are used);
 # audio is decoded by ffmpeg. Gate versions: scripts/gate/requirements-tech*.lock.
 watermark_meta = ["torch>=2.3", "audioseal==0.2.0", "omegaconf>=2.3", "einops>=0.7", "numpy>=1.24", "Pillow>=10.0", "opencv-python>=4.8"]
+# techniques-2026b TB-2: Resemble AI PerTh implicit watermark decoder (torch only — no torchaudio;
+# weights from the resemble-perth 1.0.1 wheel, scripts/fetch_watermark_models.py --only perth); audio
+# is decoded by ffmpeg and resampled with librosa (the package's resampler).
+watermark_perth = ["torch>=2.3", "librosa>=0.10", "numpy>=1.24"]
 # Pure-Python HWP/HWPX reader (MIT; sole dep olefile) for .hwp extraction.
 # Without it .hwp files degrade to extractor=unavailable:syhwp.
 hwp = ["syhwp>=0.0.7", "olefile>=0.46"]
@@ -297,6 +301,8 @@ files = [
     "deepfake_lens/float_wav.py",
     "deepfake_lens/platform_traces.py",
     "deepfake_lens/tests/test_platform_traces.py",
+    "deepfake_lens/wm_perth.py",
+    "deepfake_lens/tests/test_wm_perth.py",
 ]
 follow_imports = "skip"
 ignore_missing_imports = true

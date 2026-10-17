@@ -361,6 +361,27 @@
         "sklearn": "scikit-learn==1.9.1",
         "soundfile": "soundfile==0.14.0"
       }
+    },
+    {
+      "generation": 21,
+      "reason": "TB-2: watermark_perth on audio rows and video audio tracks; registry 2026-10-17.1",
+      "sha256": "4aba9a4a40581f81c759b105d8c7bed515e36f1e24a8621dd66f1a09e3917aad",
+      "sets": {
+        "stdlib": "4aba9a4a40581f81c759b105d8c7bed515e36f1e24a8621dd66f1a09e3917aad",
+        "full-extras": "7c9edc5bf4fcfbf7cf04ef9f78f4382a8da52769450f09ead5926fa29fd692d8"
+      },
+      "constants_sha256": "5fb690ad63f8b46d2d3bb06d2ae22337e8bf0c35777333c7685c6097cf3db322",
+      "constants_count": 57,
+      "full_extras_environment": {
+        "PIL": "pillow==12.3.0",
+        "c2pa": "c2pa-python==0.38.0",
+        "cv2": "opencv-python==5.0.0.93",
+        "librosa": "librosa==1.0.0",
+        "numpy": "numpy==2.5.4",
+        "scipy": "scipy==1.18.1",
+        "sklearn": "scikit-learn==1.9.1",
+        "soundfile": "soundfile==0.14.0"
+      }
     }
   ]
 }

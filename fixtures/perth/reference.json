@@ -1,0 +1,7 @@
+{
+ "note": "Confidences computed by resemble-perth 1.0.1 PerthImplicitWatermarker.get_watermark(round=False) itself (torch 2.11.0+cpu, torchaudio 2.11.0+cpu, librosa.load(sr=None)) on 2026-10-17; test_wm_perth compares wm_perth with them (delta 1e-3).",
+ "confidence": {
+  "synthetic-clean.wav": 0.004197677597403526,
+  "synthetic-perth.wav": 1.0
+ }
+}

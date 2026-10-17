@@ -144,3 +144,24 @@ IPTC·C2PA 이름공간이 아닌 IRI는 마지막 경로 조각이 같아도 "�
   …/2.4/specs/C2PA_Specification.html (부록 A.7–A.9), c2pa-rs `sdk/src/asset_handlers/plain_text_io.rs`(커밋 2dcc9114a6, unstable 기능),
   github.com/encypherai/c2pa-text@7e81875(MIT), github.com/encypherai/encypher-ai@15f5878(AGPL-3.0), https://www.unicode.org/reports/tr51/ ,
   https://www.unicode.org/reports/tr37/ , https://paulbutler.org/2025/smuggling-arbitrary-data-through-an-emoji/ . 테스트 `test_text_marks.py`.
+
+## 8. Resemble AI PerTh 암묵 워터마크 (`watermark_perth`, techniques-2026b TB-2)
+
+- 위협 카탈로그 O-CHATTERBOX·M-AUD-01. Chatterbox(resemble-ai/chatterbox, MIT)는 모든 출력에 `perth.PerthImplicitWatermarker().apply_watermark`를
+  적용한다(`src/chatterbox/tts.py` L126·L271, `vc.py` L29·L103, 커밋 `5de7a54aa4e5`, README 「Built-in PerTh Watermarking」).
+- 디코더: `resemble-perth` 1.0.1(PyPI, MIT)의 `get_watermark` 경로를 torch만으로 다시 구현(`wm_perth.py` — 게이트의 torch 2.14용 torchaudio가
+  없어 `Spectrogram`을 `torch.stft(center=True, pad_mode="reflect")`와 주기 Hann 창으로 옮김). 처음 300초를 ffmpeg로 32비트 실수 WAV로 풀고
+  모노 평균 → `librosa.resample(..., res_type="polyphase")`로 32 kHz → dB 크기 스펙트로그램 정규화 → PerthNet 디코더(2 kHz 이하 대역) → [0, 1] 신뢰도.
+  가중치는 휠 안의 `perth_net_250000.pth.tar`(자산 `perth-implicit-250000.pth.tar`, sha256 고정, 디코더 가중치만 `weights_only` 로드).
+  패키지 자체(torch 2.11 + torchaudio 2.11 임시 환경)와 242개 파일에서 최대 차이 3.0×10⁻⁷(`fixtures/perth/reference.json`).
+- **의미**: 암묵 표식은 메시지가 없는 1비트다.
+  - 신뢰도 ≥ 0.5(패키지의 반올림 기준) → 중립·약 사실 「PerTh 워터마크 검출」(측정 오탐률 문구 포함).
+  - 등록표 항목 `perth-implicit-chatterbox`(기대값 존재 = 1, `min_confidence` 0.9) 이상 → 생성·**중** 「등록된 생성기 워터마크 일치(PerTh 1비트 존재 표식 — 결론 근거 아님)」.
+    Resemble AI 서비스와 공개 라이브러리 사용자도 같은 표식을 넣으므로 Chatterbox를 생성기로 확정하지 않으며, 규칙 2(강)를 일으키지 않고 원본성 결론(규칙 5)만 막는다.
+  - 미만 → `ran` 「… 검출 안 됨(신뢰도 …) — 무정보(워터마크 부재를 뜻하지 않음)」. 재녹음·음성 향상·다른 TTS는 표식을 남기지 않는다.
+- coverage: torch 없음 → `skipped` 「의존성 부재: torch」(librosa 없음 → 「의존성 부재: librosa」, ffmpeg 없음 → 「의존성 부재: ffmpeg」); 가중치 없음 →
+  `skipped` 「가중치 없음: … fetch_watermark_models.py --only perth …」; 핀과 다른 바이트 → `failed` 「AssetPinError: 미고정 모델: …」; 1초 미만 → `skipped`.
+  오디오 행과 영상의 음성 트랙에서 실행되고 표식 문맥(`marking_context.checked`)에 `watermark_perth`가 들어간다. 추론은 torch 스레드 1개(잠금).
+- 측정(2026-10-17, `docs/WATERMARK-MEASUREMENTS.md`): LibriSpeech dev-clean 240개에서 0.5 이상 3건(1.25%, 95% 상한 3.6%, 최대 0.780), 0.9 이상 0건;
+  같은 240개에 패키지로 표식을 넣고 16비트로 저장하면 최소 0.922(240/240).
+- 게이트 이미지 `deepfake-lens-gate:tech2`(`scripts/gate/Dockerfile.tech2`, `:tech` 위에 가중치만 추가 — 휠·파일 sha256 확인).

@@ -59,7 +59,8 @@ class MarkingContextTest(unittest.TestCase):
             note.write_text("사람이 직접 쓴 메모입니다. " * 8, encoding="utf-8")
             text = self._result(note)
         assert audio.marking_context is not None and text.marking_context is not None
-        self.assertEqual([e["check"] for e in audio.marking_context["checked"]], ["c2pa", "watermark_audioseal"])
+        # TB-2: an audio row also lists its PerTh check.
+        self.assertEqual([e["check"] for e in audio.marking_context["checked"]], ["c2pa", "watermark_audioseal", "watermark_perth"])
         # TB-1: a text row also lists its invisible-Unicode-mark check (found / not_found / skipped).
         self.assertEqual([e["check"] for e in text.marking_context["checked"]], ["c2pa", "text_invisible_marks"])
         self.assertEqual(text.marking_context["checked"][1]["outcome"], "not_found")

@@ -334,6 +334,7 @@ CHECK_LABELS = {
     "watermark_videoseal": "VideoSeal 워터마크 검사",
     "watermark_audioseal": "AudioSeal 워터마크 검사",
     "online_detection": "온라인 전용 검출(미실행)",
+    "watermark_perth": "PerTh 워터마크 검사",
     # techniques-2026b (TB): further deterministic fact layers.
     "text_invisible_marks": "비가시 유니코드 표식 검사",
     "document_structure": "문서 구조 사실(증분 저장·편집 메타데이터)",

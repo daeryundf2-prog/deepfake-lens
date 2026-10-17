@@ -885,7 +885,9 @@ CACHE_KEY_VERSION = "content-v5"  # v3 (N6): + extension; v4 (R14-3): + output f
 # 20: TB-4 — images gain platform_recompression and file_name_pattern, videos file_name_pattern, audio
 #    file_name_pattern and audio_channel_trace (facts + the path limitation); the cache key gains the file name
 #    (content-v5) and the platform-trace library.
-OUTPUT_FORMAT_GENERATION = 20
+# 21: TB-2 — audio rows and a video's audio track gain watermark_perth (Resemble AI PerTh implicit mark, torch
+#    optional: skipped "의존성 부재: torch" without it); the registry gains perth-implicit-chatterbox (2026-10-17.1).
+OUTPUT_FORMAT_GENERATION = 21
 
 
 def cache_extension(path: Path) -> str:

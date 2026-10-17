@@ -152,6 +152,10 @@ R11-2 (round 11). 선택 패키지·도구·OS 기능·픽스처가 없으면 �
 | `torch required (tech image)` | `watermark_meta` extra(torch) — VideoSeal 가중치 없음·핀 불일치 처리 | test_wm_meta.py |
 | `torch + pinned VideoSeal weights required (tech image)` | `watermark_meta` extra + 고정 VideoSeal 가중치(`deepfake-lens-gate:tech`) | test_wm_meta.py |
 | `torch + audioseal + pinned detector + ffmpeg required (tech image)` | `watermark_meta` extra(torch, audioseal) + 고정 AudioSeal 검출기 + `ffmpeg` 실행 파일(`deepfake-lens-gate:tech`) | test_wm_meta.py |
+| `torch is installed` | torch가 **없는** 환경(`deepfake-lens-gate:latest`) — PerTh 검사가 「의존성 부재: torch」로 건너뛰어지는지 확인(TB-2) | test_wm_perth.py |
+| `torch required` | `watermark_perth` extra(torch) — PerTh 가중치 없음·핀 불일치 처리 | test_wm_perth.py |
+| `perth-implicit-250000.pth.tar not in the models folder (tech2 image)` | 고정 PerTh 가중치(`deepfake-lens-gate:tech2`, `scripts/fetch_watermark_models.py --only perth`) | test_wm_perth.py |
+| `torch, librosa and ffmpeg required (tech2 image)` | `watermark_perth` extra + `ffmpeg` + 고정 PerTh 가중치(`deepfake-lens-gate:tech2`) — 패키지 기준값과의 일치 | test_wm_perth.py |
 
 ## 환경 의존 기준선 테스트
 

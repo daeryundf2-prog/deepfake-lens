@@ -19,6 +19,10 @@ the same files is read back exactly (recall on lossless copies):
   how far a photo's chance agreement is from the attribution threshold;
 - ``audioseal`` (torch + audioseal + detector, ``--audio``): rate of
   detection probability >= the presence threshold.
+- ``perth`` (torch + librosa + ffmpeg + perth-implicit-250000.pth.tar, ``--audio``,
+  TB-2): rates of PerTh confidence >= 0.5 (presence) and >= the registry's
+  ``min_confidence`` (attribution); the real-speech set is
+  ``scripts/fetch_real_speech.py`` (LibriSpeech dev-clean, 40 speakers x 6).
 
 Writes JSON (``--out``) — the numbers in docs/WATERMARK-MEASUREMENTS.md and
 the ``FPR_NOTE`` constants come from its output. Network is never used.
@@ -182,6 +186,23 @@ def measure_audioseal(folder: Path) -> dict[str, object]:
             "max_probability": max(probabilities) if probabilities else None, "threshold": wm_meta.AUDIOSEAL_PRESENCE_THRESHOLD}
 
 
+def measure_perth(folder: Path) -> dict[str, object]:
+    """TB-2: PerTh implicit confidence on unmarked speech — presence (>= 0.5) and registry-match (>= min_confidence) rates."""
+    from deepfake_lens import wm_perth
+    from deepfake_lens.media_marks import load_registry
+
+    [entry] = load_registry().for_algorithm("perth-implicit")
+    cut = float(entry.get("min_confidence", 0.9))
+    clips = sorted(p for p in folder.rglob("*") if p.suffix.lower() in {".wav", ".flac", ".mp3", ".ogg"})
+    values = [wm_perth.perth_read(clip).confidence for clip in clips]
+    n = len(values)
+    present = sum(v >= wm_perth.PRESENCE_THRESHOLD for v in values)
+    matched = sum(v >= cut for v in values)
+    return {"n": n, "presence_threshold": wm_perth.PRESENCE_THRESHOLD, "false_presence": present, "fpr": present / n if n else None,
+            "fpr_upper95": clopper_pearson_upper(present, n), "registry_min_confidence": cut, "false_registry_matches": matched,
+            "registry_fpr_upper95": clopper_pearson_upper(matched, n), "max_confidence": max(values) if values else None}
+
+
 def main(argv: list[str] | None = None) -> int:
     repo = Path(__file__).resolve().parents[1]
     if str(repo) not in sys.path:
@@ -192,12 +213,12 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--photos", type=Path, help="실사 사진 폴더(fetch_real_photos.py 결과)")
     parser.add_argument("--audio", type=Path, help="실제 음성 파일 폴더")
     parser.add_argument("--trustmark-encoders", type=Path, help="TrustMark encoder_<V>.onnx 폴더(재검출률 측정용, 선택)")
-    parser.add_argument("--only", nargs="*", default=None, help="일부 검사만(sdxl/trustmark/videoseal/audioseal)")
+    parser.add_argument("--only", nargs="*", default=None, help="일부 검사만(sdxl/trustmark/videoseal/audioseal/perth)")
     parser.add_argument("--out", type=Path, required=True, help="결과 JSON")
     args = parser.parse_args(argv)
     import tempfile
 
-    wanted = set(args.only or ["sdxl", "trustmark", "videoseal", "audioseal"])
+    wanted = set(args.only or ["sdxl", "trustmark", "videoseal", "audioseal", "perth"])
     report: dict[str, object] = {"schema": "watermark-measurement-v1", "measured_at": time.strftime("%Y-%m-%d")}
     if args.photos:
         photos = _photos(args.photos)
@@ -212,6 +233,8 @@ def main(argv: list[str] | None = None) -> int:
                 report["videoseal"] = measure_videoseal(photos)
     if args.audio and "audioseal" in wanted:
         report["audioseal"] = measure_audioseal(args.audio)
+    if args.audio and "perth" in wanted:
+        report["perth"] = measure_perth(args.audio)
     args.out.write_text(json.dumps(report, ensure_ascii=False, indent=1) + "\n", encoding="utf-8")
     print(json.dumps(report, ensure_ascii=False, indent=1))
     return 0

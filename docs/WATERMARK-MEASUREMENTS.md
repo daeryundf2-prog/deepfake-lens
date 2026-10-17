@@ -50,6 +50,17 @@
 - 재현: `scripts/measure_watermark_fpr.py --photos … --only videoseal`, `--audio <폴더> --only audioseal`(오탐). 재검출 측정은 공개 임베더가
   필요해 이 저장소의 분석 경로 밖에서 했다(VideoSeal TorchScript의 `embed`, AudioSeal 생성기 — 같은 MIT 체크포인트).
 
+## Resemble AI PerTh (TB-2, 2026-10-17, deepfake-lens-gate:tech2 — linux aarch64, torch 2.14.1)
+
+| 디코더 | 세트 | 결과 |
+| --- | --- | --- |
+| PerTh 암묵(`wm_perth`, 신뢰도) | LibriSpeech dev-clean 화자 40명×6발화 = 240개(`scripts/fetch_real_speech.py`: `dev-clean.tar.gz` sha256 `76f87d09…` 스트림, 화자별 정렬 첫 6개, 세트 sha256 `643b44f6…`) | 0.5 이상 3건(1.25%, 95% 상한 3.6%), 최대 0.780; 등록 기준 0.9 이상 0건(95% 상한 1.5%) |
+| PerTh 재검출 | 같은 240개에 `resemble-perth` 1.0.1의 `apply_watermark`로 표식을 넣고 16비트 PCM으로 저장 | 240/240 ≥ 0.9, 최소 0.922 |
+| 패키지와의 일치 | 같은 480개 + 합성 픽스처 2개, 패키지 `get_watermark(round=False)`(torch 2.11 + torchaudio 2.11) | 최대 차이 3.0×10⁻⁷ |
+
+해석: 0.5 기준(패키지 기본값)은 실제 음성에서도 1% 남짓 표식을 주장하므로 존재 사실은 중립·약으로만 적는다. 등록표 일치 기준 0.9는 실사 최대(0.780)와
+재검출 최소(0.922) 사이 값이다. 재현: `scripts/measure_watermark_fpr.py --audio <폴더> --only perth`. 통화 재압축·잡음·음악은 측정하지 않았다.
+
 ## 보류
 
 - WavMark(MIT): `wavmark` 패키지가 실행 시 Hugging Face에서 가중치를 내려받는 구조이고 huggingface-hub·resampy·torchaudio가 필요하다 —

@@ -39,6 +39,7 @@ SDXL_CHECK = "watermark_sdxl"
 TRUSTMARK_CHECK = "watermark_trustmark"
 VIDEOSEAL_CHECK = "watermark_videoseal"
 AUDIOSEAL_CHECK = "watermark_audioseal"
+PERTH_CHECK = "watermark_perth"  # techniques-2026b TB-2
 
 ABSENCE_LIMITATION = (
     "비가시 워터마크가 검출되지 않은 것은 원본성 근거가 아닙니다 — 워터마크는 크기 조정·자르기·재압축으로 사라지거나 "
@@ -429,9 +430,65 @@ def _audioseal_layer(path: Path, layers: MarkLayers) -> None:
     layers.coverage.append(entry)
 
 
+# --- Resemble AI PerTh implicit watermark (techniques-2026b TB-2) -------------------
+
+PERTH_ALGORITHM_LABEL = "PerTh 암묵 워터마크(Resemble AI, 1비트 존재 표식)"
+PERTH_FOUND_TITLE = "PerTh 워터마크 검출"
+PERTH_REGISTERED_TITLE = "등록된 생성기 워터마크 일치(PerTh 1비트 존재 표식 — 결론 근거 아님)"
+# Measured with wm_perth on real speech (scripts/measure_watermark_fpr.py --audio --only perth; docs/WATERMARK-MEASUREMENTS.md).
+PERTH_FPR_NOTE = (
+    "워터마크가 없는 실제 음성 240개(LibriSpeech dev-clean 화자 40명×6발화)에서 신뢰도 0.5 이상 3건(1.25%, 95% 상한 3.6%, 최대 0.78), "
+    "등록표 일치 기준 0.9 이상 0건(95% 상한 1.5%)(측정 2026-10-17, docs/WATERMARK-MEASUREMENTS.md)"
+)
+
+
+def _perth_layer(path: Path, layers: MarkLayers) -> None:
+    from .checks import run_check
+    from . import wm_perth
+
+    def check() -> Any:
+        import torch  # noqa: F401 — dependency probe: without torch the check is "의존성 부재: torch"
+
+        return wm_perth.perth_read(path), load_registry()
+
+    outcome, entry = run_check(PERTH_CHECK, check)
+    if outcome is None:
+        layers.findings.append(MarkFinding(PERTH_CHECK, PERTH_ALGORITHM_LABEL, entry.status.value, entry.reason))
+        layers.coverage.append(entry)
+        return
+    reading, registry = outcome
+    span = f"처음 {reading.seconds:.1f}초 분석(원 표본화 {reading.source_rate} Hz → 32 kHz)"
+    if reading.present:
+        layers.evidence.append(EvidenceItem(
+            PERTH_FOUND_TITLE,
+            f"PerTh 암묵 디코더의 신뢰도 {reading.confidence:.3f}(기준 {wm_perth.PRESENCE_THRESHOLD:.1f} 이상, {span}) — Resemble AI PerTh 워터마크가 "
+            "들어 있다는 사실입니다. 이 표식은 메시지 없이 존재만 나타내며, 공개 라이브러리(MIT)로 누구나 어떤 오디오에도 넣을 수 있습니다. "
+            f"{PERTH_FPR_NOTE}.",
+            EvidenceKind.DETERMINISTIC, EvidenceDirection.NEUTRAL, EvidenceStrength.WEAK, WATERMARK_LAYER,
+        ))
+        for registered in registry.for_algorithm("perth-implicit"):
+            if str(registered.get("expected_payload", "")) == "1" and reading.confidence >= float(registered.get("min_confidence", 0.9)):
+                layers.evidence.append(EvidenceItem(
+                    PERTH_REGISTERED_TITLE,
+                    f"검출된 PerTh 표식(신뢰도 {reading.confidence:.3f} ≥ 등록 기준 {float(registered.get('min_confidence', 0.9)):.1f})이 등록표 항목"
+                    f"({registered.get('id')}: {registered.get('generator')})의 기대값(존재 = 1)과 일치합니다. "
+                    "1비트 표식이라 특정 생성기를 확정하지 않으며(Resemble AI 서비스·라이브러리 사용자도 같은 표식을 넣음), 원본성 결론만 막습니다. "
+                    f"기준: {registry.label}.",
+                    EvidenceKind.DETERMINISTIC, EvidenceDirection.SYNTHETIC, EvidenceStrength.MODERATE, WATERMARK_LAYER,
+                ))
+                break
+        entry = CoverageEntry(PERTH_CHECK, CoverageStatus.RAN, f"{span} — 검출됨(신뢰도 {reading.confidence:.3f})")
+        layers.findings.append(MarkFinding(PERTH_CHECK, PERTH_ALGORITHM_LABEL, "found", f"신뢰도 {reading.confidence:.3f}"))
+    else:
+        entry = CoverageEntry(PERTH_CHECK, CoverageStatus.RAN, f"{span} — 검출 안 됨(신뢰도 {reading.confidence:.3f}) — {NO_INFORMATION}")
+        layers.findings.append(MarkFinding(PERTH_CHECK, PERTH_ALGORITHM_LABEL, "not_found", NO_INFORMATION))
+    layers.coverage.append(entry)
+
+
 def audio_mark_layers(path: Path) -> MarkLayers:
     layers = MarkLayers()
     _audioseal_layer(path, layers)
+    _perth_layer(path, layers)
     layers.limitations.append(ABSENCE_LIMITATION)
     return layers
 
@@ -440,6 +497,7 @@ def video_mark_layers(path: Path) -> MarkLayers:
     layers = MarkLayers()
     _videoseal_layer(path, layers, video=True)
     _audioseal_layer(path, layers)  # the video's audio track (skipped "오디오 트랙 없음" without one)
+    _perth_layer(path, layers)
     layers.limitations.append(ABSENCE_LIMITATION)
     return layers
 
@@ -458,6 +516,9 @@ def image_mark_layers(path: Path, c2pa_validation: dict[str, object] | None = No
 __all__ = [
     "ABSENCE_LIMITATION",
     "AUDIOSEAL_CHECK",
+    "PERTH_CHECK",
+    "PERTH_FOUND_TITLE",
+    "PERTH_REGISTERED_TITLE",
     "MarkFinding",
     "MarkLayers",
     "REGISTRY_PATH",
