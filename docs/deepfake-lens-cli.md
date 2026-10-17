@@ -9,6 +9,10 @@ It is intentionally CLI-first:
 - Reusable later from a local web app or localhost API.
 - No upload, login, cloud AI API, or new runtime dependency.
 
+## Gate scope (P0R-4, user decision 2026-10-17)
+
+Phase-0 gate verification covers these commands only: `scan`, `classify`, `verify-report`, `evidence-statement`, `doctor`, `web`, `api-serve`, `corpus build|split|verify` and `vendor-weights pin` / `pin-asset` (`deepfake_lens.cli_parser.GATE_COMMANDS`). Every other command is **experimental and outside the gate** — its help line ends with `[실험·비게이트]` and its `--help` description starts with 「실험·비게이트 명령 — 0단계 게이트 검증 범위 밖입니다 …」; `vendor-weights --help` says that only its `pin`/`pin-asset` actions are in scope. The experimental commands keep working and their tests still run in every gate; findings about their paths, wording or help are classified Low and go to `docs/phase0/BACKLOG.md` (a factually false user-visible statement is still fixed). See docs/phase0/HANDOFF.md §6.
+
 ## Command Reference
 
 Every subcommand, briefly. Detail for the core workflow lives in the sections below.
