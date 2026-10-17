@@ -115,3 +115,32 @@ IPTC·C2PA 이름공간이 아닌 IRI는 마지막 경로 조각이 같아도 "�
 - 결과 JSON의 `result.marking_context`(`legal_basis`, `checked[]`, `online_only[]`, `marks_found`, `absence_statement`)와 결정적·중립·약 근거 항목
   「기계판독 표식 확인 결과(EU 인공지능법 제50조·인공지능기본법 관련)」(근거 목록 맨 뒤 — 모든 보고서에 그대로 출력·서명). 추론은 하지 않는다:
   「표식이 확인되지 않은 것은 원본성 근거가 아닙니다 …」가 늘 함께 적힌다.
+
+## 7. 비가시 유니코드 표식 (`text_invisible_marks`, techniques-2026b TB-1)
+
+위협 카탈로그 M-TXT-03·M-TXT-01. 대상: `.txt`·`.md`가 분석한 본문(앞 `text_bytes`), 문서(pdf·docx·xlsx·pptx·hwp)는 추출한 본문
+(추출이 실행되지 않으면 `skipped` 「문서 텍스트 추출이 실행되지 않아 검사하지 않음」). 의존성 없음(표준 라이브러리).
+
+| 찾는 것 | 규칙 | 출처 |
+| --- | --- | --- |
+| 유니코드 태그 문자 U+E0000–U+E007F | U+E0020–E007E를 ASCII로 풀어 그대로 적는다. U+1F3F4 + 태그 영숫자 + U+E007F(이모지 깃발 태그 시퀀스)는 정상 용법으로 세기만 한다 | Unicode 표준 §23.9, UTS #51 ED-14a |
+| 데이터로 쓰인 변형 선택자 | 선택자 2개 이상 연속, 또는 등록 IVS에 쓰이지 않는 U+E0120–U+E01EF 하나. VS1–16 → 0x00–0x0F, VS17–256 → 0x10–0xFF로 읽어 길이·16진수(UTF-8이면 그 글)를 적는다. 기준 문자 + 선택자 하나는 정상 변형 시퀀스 | StandardizedVariants.txt, UTS #37(IVD 2025-07-14: E0100–E011F만 사용), C2PA 2.3 부록 A.7.3 |
+| 제로폭 문자 U+200B·200C·200D·2060·FEFF(첫 글자 제외)·180E·2061–2064 | 종류별 개수, 4개 이상 연속열(이진 부호화 형태) 위치. 두 그림 문자 사이의 ZWJ(이모지 ZWJ 시퀀스)는 제외 | Unicode §23.2, §23.8.1 |
+| C2PA 비정형 텍스트 래퍼 | U+FEFF 뒤 선택자 열이 `C2PATXT\0`(0x4332504154585400)로 시작 → 버전(uint8)·매니페스트 길이(uint32, 빅엔디언)를 적는다. 길이 뒤 채움 선택자는 허용(MIT `c2pa-text`의 `encode_wrapper_padded`) | C2PA 2.3 부록 A.7.2 = 2.4 부록 A.8.2 |
+| C2PA 구조화 텍스트 블록 | `-----BEGIN C2PA MANIFEST-----` … `-----END C2PA MANIFEST-----` | C2PA 2.4 부록 A.9 |
+
+- **의미**: 찾은 것은 모두 결정적·중립·약 사실(층 `text_marks`)이다. 비가시 문자는 누구나 넣거나 지울 수 있고 복사·붙여넣기·편집기·입력기에서
+  생기거나 사라지므로 작성 주체나 AI 생성 여부를 뜻하지 않는다. 텍스트 결과는 규칙 1로 늘 "참고" 등급이라 판정에 영향이 없다. 없음은 무정보
+  (coverage `ran` 「… — 비가시 유니코드 표식 없음 — 무정보(…)」, 한계 문구 하나).
+- **C2PA 텍스트 매니페스트**: 번들 SDK(c2pa-python 0.38 = c2pa-c-ffi c2pa-v0.91.0)는 c2pa-rs의 `unstable_plain_text`·`unstable_structured_text`
+  기능 없이 빌드되어 텍스트 임베딩을 읽지 못한다. 그래서 래퍼·블록은 「…(서명 미검증)」 존재 사실로만 적고, `c2pa` 검사는 계속 `skipped`
+  (사유가 「…서명·해시를 검증하지 않았습니다(비정형 텍스트 래퍼의 존재는 비가시 유니코드 표식 검사가 사실로 기록)」로 바뀜). 표식 문맥
+  (`marking_context.checked`)에 `text_invisible_marks`와, 래퍼가 있으면 `c2pa_text_wrapper`(found, 「서명 검증 미실행」)가 더해진다.
+- **Encypher**: `encypher-ai`(AGPL-3.0 — 가져오지 않음)의 C2PA 형식은 위 래퍼이고, 이전 형식(basic/manifest — 머리 없는 JSON+Ed25519 서명 바이트)은
+  변형 선택자 데이터열로 잡혀 바이트로만 적힌다(서명 검증 없음). 공개되지 않은 독점 표식은 다루지 않는다.
+- 제로폭 스테가노그래피(offdev/zwsp-steg-js, KuroLabs/stegcloak 등)는 형식이 여럿이고 stegcloak은 기본 암호화라 풀지 않고 연속열만 적는다.
+- HTML(C2PA 2.4 부록 A.7, `<script type="application/c2pa">`)은 `.html`이 지원 형식이 아니어서 범위 밖이다.
+- 출처(2026-10-17 조회): https://spec.c2pa.org/specifications/specifications/2.3/specs/C2PA_Specification.html (부록 A.7),
+  …/2.4/specs/C2PA_Specification.html (부록 A.7–A.9), c2pa-rs `sdk/src/asset_handlers/plain_text_io.rs`(커밋 2dcc9114a6, unstable 기능),
+  github.com/encypherai/c2pa-text@7e81875(MIT), github.com/encypherai/encypher-ai@15f5878(AGPL-3.0), https://www.unicode.org/reports/tr51/ ,
+  https://www.unicode.org/reports/tr37/ , https://paulbutler.org/2025/smuggling-arbitrary-data-through-an-emoji/ . 테스트 `test_text_marks.py`.

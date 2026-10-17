@@ -289,6 +289,9 @@ files = [
     "deepfake_lens/tests/test_wm_trustmark.py",
     "deepfake_lens/tests/test_wm_meta.py",
     "deepfake_lens/tests/test_marking_context.py",
+    # techniques-2026b (TB)
+    "deepfake_lens/text_marks.py",
+    "deepfake_lens/tests/test_text_marks.py",
 ]
 follow_imports = "skip"
 ignore_missing_imports = true

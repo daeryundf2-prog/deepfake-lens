@@ -1340,7 +1340,7 @@ def _validate_c2pa(path: Path) -> dict[str, object]:
 # check says so instead of an opaque "type is unsupported".
 C2PA_TEXT_EMBEDDING_UNSUPPORTED = (
     "C2PA 텍스트·HTML 임베딩(C2PA 2.3/2.4)은 현재 SDK(c2pa_python 0.38 / c2pa_rs 0.91)가 판독하지 않음 — "
-    "텍스트 파일의 매니페스트 존재 여부를 확인하지 못했습니다"
+    "서명·해시를 검증하지 않았습니다(비정형 텍스트 래퍼의 존재는 비가시 유니코드 표식 검사가 사실로 기록)"
 )
 
 
@@ -1383,7 +1383,7 @@ def _marking(modality: str, validation: dict[str, object] | None, c2pa_entry: Co
     )
 
 
-def _mark_layers(file_path: Path, modality: str) -> DeepLayers:
+def _mark_layers(file_path: Path, modality: str, extra: "MarkLayers | None" = None) -> DeepLayers:
     """techniques-2026: the machine-readable-mark checks of a non-image file — C2PA, then the watermark decoders.
 
     Returned in the :class:`DeepLayers` shape (evidence, coverage, limitations,
@@ -1395,6 +1395,12 @@ def _mark_layers(file_path: Path, modality: str) -> DeepLayers:
 
     validation, entry = _c2pa_check(file_path)
     marks = audio_mark_layers(file_path) if modality == "audio" else video_mark_layers(file_path) if modality == "video" else MarkLayers()
+    if extra is not None:
+        # TB (techniques-2026b): further mark checks of the row (text marks, PerTh) join the marking context.
+        marks = MarkLayers(
+            evidence=[*marks.evidence, *extra.evidence], coverage=[*marks.coverage, *extra.coverage],
+            limitations=list(dict.fromkeys([*marks.limitations, *extra.limitations])), findings=[*marks.findings, *extra.findings],
+        )
     layers = _marking(modality, validation, entry, marks)
     return DeepLayers(
         evidence=[*c2pa_evidence(validation), *layers.evidence], coverage=[entry, *layers.coverage],
@@ -1986,7 +1992,18 @@ def _analyze_text_file(
         if tmp_text_path is not None:
             tmp_text_path.unlink(missing_ok=True)
     coverage.extend(model_entries)
-    marks = _mark_layers(file_path, "text")
+    # TB-1: invisible Unicode marks in the text this row analyzed (facts only).
+    from .text_marks import text_mark_layers
+
+    if extension in SUPPORTED_DOCUMENT_EXTENSIONS:
+        text_ran = bool(coverage) and coverage[0].check == "document_text" and coverage[0].status == CoverageStatus.RAN
+        text_marks = text_mark_layers(
+            text, source="추출한 문서 본문",
+            unavailable=None if text_ran else "문서 텍스트 추출이 실행되지 않아 검사하지 않음",
+        )
+    else:
+        text_marks = text_mark_layers(text, source="분석한 본문")
+    marks = _mark_layers(file_path, "text", text_marks)
     coverage.extend(marks.coverage)
     thresholds = profile_probability_thresholds(model_path)  # N1
     result = analyze_text(

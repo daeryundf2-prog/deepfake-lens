@@ -4,6 +4,13 @@ All notable changes to Deepfake Lens. Format: Keep a Changelog; this repo
 has not tagged a release yet (version is `0.1.0.dev0`), so entries are
 grouped by work pass rather than release.
 
+## 2026-10 — techniques-2026b (deterministic fact layers, TB)
+
+### Added
+- TB-1: `text_invisible_marks` — Unicode tag strings (decoded), variation selectors used as data (bytes), zero-width
+  characters, C2PA 2.3 text-manifest wrappers and 2.4 structured-text blocks (presence only — the bundled SDK does
+  not validate them) in text and document rows, as neutral facts. See `docs/MACHINE-READABLE-MARKS.md` §7.
+
 ## 2026-10 — techniques-2026 (machine-readable marks)
 
 ### Added
