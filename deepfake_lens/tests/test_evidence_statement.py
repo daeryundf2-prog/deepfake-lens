@@ -352,7 +352,7 @@ class EvidenceStatementTest(_StatementFixture):
             doc.close()
 
 
-KEY = b"evidence-statement-test-key"
+KEY = b"evidence-statement-test-key-0123456789abcdef"  # P0R-15: ≥ 32 bytes
 
 
 class EvidenceStatementSigningTest(_StatementFixture):
@@ -420,10 +420,10 @@ class EvidenceStatementSigningTest(_StatementFixture):
         self.assertEqual(json.loads(json_out.read_text(encoding="utf-8")), printed)
         self.assertIn(signed_body_sha256(printed), md_out.read_text(encoding="utf-8"))
         key_file = self.root / "key.txt"
-        key_file.write_bytes(b"another-key")
+        key_file.write_bytes(b"another-key-0123456789abcdef0123456789")  # P0R-15
         with self._env(None), redirect_stdout(io.StringIO()):
             self.assertEqual(main(["evidence-statement", str(scan_json), "--json-out", str(json_out), "--key-file", str(key_file)]), 0)
-        self.assertTrue(verify_report(json_out, b"another-key").verified)
+        self.assertTrue(verify_report(json_out, b"another-key-0123456789abcdef0123456789").verified)
 
     def test_cli_scan_writes_signed_statement_json(self) -> None:
         folder = self.root / "case"

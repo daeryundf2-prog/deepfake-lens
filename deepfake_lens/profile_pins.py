@@ -124,3 +124,44 @@ def model_path_digest(model_path: ModelPathArg) -> str:
             except OSError:
                 digests.append(f"missing:{target.name}")
     return hashlib.sha256("\n".join(sorted(digests)).encode("utf-8")).hexdigest() if digests else ""
+
+
+# P0R-14 (review §4-4): a signed body records the model profiles that actually ran on its rows — not the pins of
+# whatever profiles sit in the models folder. Executed = an available member of a row's model_analysis.models[].
+EXECUTED_MODELS_FIELD = "executed_models"
+
+
+def executed_profiles(rows: Iterable[object]) -> list[dict[str, object]]:
+    """``[{"profile", "model", "pin", "threshold", "calibration_id"}]`` of the profiles that ran on ``rows``.
+
+    ``rows`` are scan-row JSON objects (``{"result": {"model_analysis": {"models": [...]}}}``). The pin, threshold
+    and calibration id are read from the profile file when it is still there (a missing or unreadable file gives
+    ``pin: null`` — never silently pinned). Sorted by profile name, de-duplicated.
+    """
+    found: dict[str, dict[str, object]] = {}
+    for row in rows:
+        result = row.get("result") if isinstance(row, dict) else None
+        analysis = result.get("model_analysis") if isinstance(result, dict) else None
+        members = analysis.get("models") if isinstance(analysis, dict) else None
+        for member in members if isinstance(members, list) else []:
+            if not isinstance(member, dict) or member.get("available") is not True:
+                continue
+            source = str(member.get("profile") or "")
+            path = Path(source)
+            name = _profile_name(path) if source else str(member.get("model") or "")
+            if not name or name in found:
+                continue
+            data: object = None
+            if source and path.is_file():
+                try:
+                    data = json.loads(path.read_text(encoding="utf-8"))
+                except (OSError, UnicodeDecodeError, json.JSONDecodeError):
+                    data = None
+            threshold = data.get("threshold") if isinstance(data, dict) else None
+            calibration = data.get("calibration_id") if isinstance(data, dict) else None
+            found[name] = {
+                "profile": name, "model": member.get("model"), "pin": _pin_of(data),
+                "threshold": threshold if isinstance(threshold, (int, float)) and not isinstance(threshold, bool) else None,
+                "calibration_id": calibration if isinstance(calibration, str) else None,
+            }
+    return [found[key] for key in sorted(found)]

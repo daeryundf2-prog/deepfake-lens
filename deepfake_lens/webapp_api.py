@@ -262,7 +262,6 @@ def report_context(folder: Path, options: AnalysisOptions, thresholds: Any) -> d
     as names (signed as ``analysis_options``), the threshold provenance and the model coverage of the run, and the
     pins of the models folder. A report never re-reads these from the request or recomputes them later.
     """
-    from .profile_pins import profile_pins
     from .reports import _thresholds_payload
     from .vendor_weights import weights_coverage
 
@@ -271,7 +270,6 @@ def report_context(folder: Path, options: AnalysisOptions, thresholds: Any) -> d
         "analysis_options": report_analysis_options(options),
         "thresholds": _thresholds_payload(thresholds),
         "coverage": dict(weights_coverage(options.resolved_models_dir())),
-        "model_pins": profile_pins(_models_dir()),
     }
 
 
@@ -1901,8 +1899,6 @@ def _report_payload(
         thresholds = context.get("thresholds")
         coverage = context.get("coverage") if isinstance(context.get("coverage"), dict) else None
         analysis_options = context.get("analysis_options") if isinstance(context.get("analysis_options"), dict) else None
-        raw_pins = context.get("model_pins")
-        model_pins = raw_pins if isinstance(raw_pins, list) else None
         if job_id is not None:
             summary = _job_summary(items, job_summary, cancelled)
         else:
@@ -1913,7 +1909,7 @@ def _report_payload(
         root_label = _scan_root_label(scan_root, roots)
         signed = signed_report_body(
             summary, items, thresholds=thresholds, coverage=coverage,
-            report_format=req_format, model_pins=model_pins,
+            report_format=req_format,
             excluded_items=excluded_rows, scan_root=root_label,
             analysis_options=analysis_options, files_cancelled_source="server" if cancelled else None,
             exhibit_paths=exhibit_paths,
@@ -1962,7 +1958,7 @@ def _report_payload(
                     )
                     write_evidence_statement_pdf(
                         tmp_path, stmt, signed=signed_statement_body(
-                            stmt, model_pins=model_pins, scan_root=root_label, analysis_options=analysis_options,
+                            stmt, scan_root=root_label, analysis_options=analysis_options,
                         ),
                         unsigned_rows=uploads,
                     )

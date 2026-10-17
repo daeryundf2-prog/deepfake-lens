@@ -306,11 +306,11 @@ class LegalReportTest(unittest.TestCase):
 
         with tempfile.TemporaryDirectory() as tmp:
             key = Path(tmp) / "key"
-            key.write_text("legal-key", encoding="utf-8")
+            key.write_text("legal-key-0123456789abcdef0123456789", encoding="utf-8")  # P0R-15
             out_json = Path(tmp) / "report.json"
             with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
                 main(["legal-report", str(A1111), "--json-out", str(out_json), "--key-file", str(key)])
-            self.assertTrue(verify_report(out_json, b"legal-key").verified)
+            self.assertTrue(verify_report(out_json, b"legal-key-0123456789abcdef0123456789").verified)
 
 
 class VerifyReportCommandTest(unittest.TestCase):
@@ -322,12 +322,12 @@ class VerifyReportCommandTest(unittest.TestCase):
         self._tmp = tempfile.TemporaryDirectory()
         self.root = Path(self._tmp.name)
         self.key = self.root / "key"
-        self.key.write_text("report-key-1", encoding="utf-8")
+        self.key.write_text("report-key-1-0123456789abcdef0123456789", encoding="utf-8")  # P0R-15
         self.other_key = self.root / "other"
-        self.other_key.write_text("report-key-2", encoding="utf-8")
+        self.other_key.write_text("report-key-2-0123456789abcdef0123456789", encoding="utf-8")
         body = {"schema_version": 2, "summary": {"total": 1}, "items": [{"path": "a.png", "sha256": "0" * 64}]}
         self.signed = self.root / "signed.json"
-        self.signed.write_text(json.dumps(sign_report(body, b"report-key-1"), ensure_ascii=False), encoding="utf-8")
+        self.signed.write_text(json.dumps(sign_report(body, b"report-key-1-0123456789abcdef0123456789"), ensure_ascii=False), encoding="utf-8")
         self.unsigned = self.root / "unsigned.json"
         self.unsigned.write_text(json.dumps(sign_report(body, None), ensure_ascii=False), encoding="utf-8")
 
@@ -348,7 +348,7 @@ class VerifyReportCommandTest(unittest.TestCase):
         self.assertEqual((code, text.split(":")[0]), (0, "검증됨"))
 
     def test_env_key(self) -> None:
-        code, text = self._run([str(self.signed)], env_key="report-key-1")
+        code, text = self._run([str(self.signed)], env_key="report-key-1-0123456789abcdef0123456789")
         self.assertEqual(code, 0)
         self.assertIn("검증됨", text)
 

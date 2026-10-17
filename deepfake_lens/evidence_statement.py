@@ -55,6 +55,7 @@ from .result_text import (
 )
 from .evidence_rules import CAVEATS_TITLE, SELF_DECLARED_NOTE  # P0R-12
 from .result_text import shown_grade_label  # P0R-13
+from .profile_pins import executed_profiles  # P0R-14
 from .result_types import VERDICT_LABELS, CoverageStatus, EvidenceDirection, EvidenceKind, EvidenceStrength, Grade, Verdict, is_verdict_row, status_label
 from .signing import resolve_report_key, sign_report
 from .json_text import json_dumps
@@ -115,6 +116,8 @@ class EvidenceStatement:
     # (native_path.temp_location(), the scan result's ``temp_folder``); a
     # fallback is also a line of provenance_note ("임시 폴더: …").
     temp_folder: dict[str, Any] = field(default_factory=lambda: {"fallback": False})
+    # P0R-14: the model profiles that ran on the statement's rows (profile_pins.executed_profiles) — signed.
+    executed_models: list[dict[str, Any]] = field(default_factory=list)
 
     def to_json(self) -> dict[str, Any]:
         return asdict(self)
@@ -522,6 +525,7 @@ def build_evidence_statement(
         unrecorded_files=unrecorded_files(list(items), summary).to_json(),
         excluded_items=[dict(entry) for entry in excluded_items or []],
         temp_folder=temp_folder,
+        executed_models=executed_profiles([item.to_json() for item in items]),
     )
 
 
@@ -546,7 +550,9 @@ def signed_statement_body(
         body["scan_root"] = scan_root
     if analysis_options is not None:
         body["analysis_options"] = dict(analysis_options)  # R19-3: the options the server re-analyzed with
-    return sign_report(body, key if key is not None else resolve_report_key(), model_pins=model_pins)
+    return sign_report(
+        body, key if key is not None else resolve_report_key(), model_pins=model_pins, executed_models=list(statement.executed_models),
+    )
 
 
 def statement_signature_lines(signed: dict[str, object]) -> list[str]:

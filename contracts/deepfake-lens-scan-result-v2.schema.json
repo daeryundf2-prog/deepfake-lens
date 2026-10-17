@@ -60,9 +60,11 @@
     "scan_job_note": { "type": "string", "description": "P0R-6: web/API folder scans only, present when the job could not be persisted (held in memory only — a server restart loses it); Korean." },
     "exhibit_paths": { "type": "array", "items": { "type": "string" }, "description": "P0R-6: POST /api/report signed bodies only, when the request chose exhibits — the ordered row paths of the job the evidence statement numbers as exhibits; every row of the job is in items either way." },
     "tool_version": { "type": "string", "description": "Signed reports only (G30): tool version, inside the MAC." },
+    "executed_models": { "type": "array", "description": "P0R-14: signed bodies only — the model profiles that ran on the rows: profile, model, pin (null = unpinned / file gone), threshold, calibration_id; inside the MAC.", "items": { "type": "object", "required": ["profile", "pin"] } },
+    "generated_at": { "type": "string", "description": "P0R-14: signed bodies only — ISO 8601 local time with UTC offset when signed (the signer's clock); inside the MAC." },
     "model_pins": {
       "type": "array",
-      "description": "Signed reports only (G30): runtime-profile pins, inside the MAC; pin null = unpinned.",
+      "description": "Signed reports only (G30): runtime-profile pins, inside the MAC; pin null = unpinned. P0R-14: only when a caller passes them explicitly (older reports); executed_models records what ran.",
       "items": {
         "type": "object",
         "required": ["profile", "pin"],

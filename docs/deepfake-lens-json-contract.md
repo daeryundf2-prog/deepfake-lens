@@ -494,10 +494,14 @@ top-level fields. The HMAC-SHA256 covers the canonical JSON
 | Field | Meaning |
 | --- | --- |
 | `tool_version` | Deepfake Lens version that produced the report. |
-| `model_pins` | `[{"profile": "<profile file stem>", "pin": {"sha256"\|"revision": …} \| null}]` for every runtime profile in the effective models dir (plus explicit `--model-path` profiles), sorted by name. `null` = unpinned. |
+| `model_pins` | `[{"profile": "<profile file stem>", "pin": {"sha256"\|"revision": …} \| null}]` for every runtime profile in the effective models dir (plus explicit `--model-path` profiles), sorted by name. `null` = unpinned. P0R-14: no longer added by default — only an explicit list is recorded (older reports carry it). |
+| `executed_models` | P0R-14 (review §4-4): `[{"profile", "model", "pin", "threshold", "calibration_id"}]` — the model profiles that actually ran on the body's rows (an available member of a row's `model_analysis.models[]`), with the pin, threshold and calibration id read from the profile file (`pin: null` when the file is gone or unpinned); `[]` when no model ran (phase 0: every profile is gated). Inside the MAC. |
+| `generated_at` | P0R-14 (review §4-2): ISO 8601 local time with its UTC offset when the body was signed — the signer's own clock (no timestamp authority; RFC 3161 is BACKLOG BL-2). Inside the MAC. A signed body never carries `temp_folder` (a host path, review §4-5). |
 | `signature_note` | Korean note: what the HMAC proves, or `서명 없음: …` when no key was configured. Inside the MAC. |
 | `signature_key_id` | `hmac-sha256-v1:<first 12 hex of SHA-256(key)>`. Outside the MAC; a mismatch with the verifying key is reported as `키 ID 불일치`. |
 | `signature` | Hex HMAC, or `null` when unsigned. |
+
+P0R-15 (review §4-1): signing refuses a key shorter than 32 bytes (`signing.MIN_REPORT_KEY_BYTES`) — `오류: 보고서 서명 키가 너무 짧습니다(N바이트) — 서명에는 32바이트 이상의 무작위 키가 필요합니다(예: \`openssl rand -hex 32\`의 출력). …`, exit 2 from the CLI (an explicit `--key-file` is checked before any work; `web` / `api-serve` refuse to start with a short `DEEPFAKE_LENS_REPORT_KEY`); verifying an existing report with a short key still works. **HMAC limits**: the signature is symmetric — whoever can verify a report holds the key and can also sign one, so it shows integrity to the key holder, not authorship to a third party (no non-repudiation); the key is used as given (no KDF), so a guessable key can be found offline from one signed report (`signature_key_id` is a SHA-256 prefix of the key). Asymmetric signatures (Ed25519 with a public-key id in the body) are deferred to the start of phase 1 (docs/phase0/BACKLOG.md BL-1).
 
 Rendered reports (`POST /api/report`, `--html-out`) additionally carry
 `report_format`, `thresholds`/`coverage` provenance and `unrecorded_files`

@@ -818,7 +818,7 @@ class MeasurementGateTest(unittest.TestCase):
 # ============================================================================
 
 
-KEY = b"qa-sys-6-report-key"
+KEY = b"qa-sys-6-report-key-0123456789abcdef"  # P0R-15: ≥ 32 bytes
 PIN_SHA = "0123456789abcdef" * 4
 SECRET = b"QA-SYS-7-SECRET-BYTES-do-not-serve"
 
@@ -1000,7 +1000,8 @@ class QaSys6SignatureCoversWholeReportTest(unittest.TestCase):
                 self.assertEqual(main(["scan", str(root), "--no-default-engine", "--json-out", str(out), "--sign", "--format", "json"]), 0)
             self.assertTrue(verify_report(out, KEY).verified)
             payload = json.loads(out.read_text(encoding="utf-8"))
-            self.assertIn("model_pins", payload)
+            self.assertIn("executed_models", payload)  # P0R-14: the profiles that ran (was the models-folder model_pins)
+            self.assertIn("generated_at", payload)
             self.assertIn("tool_version", payload)
             payload["signature_note"] = _flip(payload["signature_note"])
             out.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
@@ -1049,7 +1050,8 @@ class QaSys6SignatureCoversWholeReportTest(unittest.TestCase):
         self.assertTrue(verify_report(embedded, KEY).verified)
         self.assertIn("보고서 서명: HMAC-SHA256 서명됨", html.decode("utf-8"))
         self.assertTrue(verify_report(signed_json, KEY).verified)
-        self.assertIn("model_pins", signed_json)
+        self.assertIn("executed_models", signed_json)  # P0R-14
+        self.assertIn("generated_at", signed_json)
         embedded["items"][0]["result"]["verdict_code"] = _flip(embedded["items"][0]["result"]["verdict_code"])
         self.assertEqual(verify_report(embedded, KEY).reason, "변조됨")
 

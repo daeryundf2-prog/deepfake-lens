@@ -176,7 +176,7 @@ class NonUtf8NameCliTest(_EnvMixin):
 
     def test_signed_report_verifies(self) -> None:
         key = self.out / "k.key"
-        key.write_text("r11-1-key-0123456789abcdef", encoding="utf-8")
+        key.write_text("r11-1-key-0123456789abcdef0123456789", encoding="utf-8")  # P0R-15: ≥ 32 bytes
         report = self.out / "signed.json"
         code, _, stderr = _run(["scan", str(self.folder), "--include-low", "--json-out", str(report), "--sign", "--key-file", str(key)])
         self.assertEqual(code, 0, stderr)

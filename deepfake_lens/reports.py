@@ -131,8 +131,6 @@ def build_report_body(
         "coverage": coverage,
         # X1: inside the signed body, like the scan JSON.
         "unrecorded_files": unrecorded_files(list(items), summary).to_json(),
-        # R15-6: where the run's temp files went (a fallback folder is reported).
-        "temp_folder": temp_location(),
         "items": rows,
     }
     if excluded_items is not None:
@@ -374,14 +372,16 @@ def temp_folder_line(location: object) -> str:
     override_env = location.get("override_env", "DEEPFAKE_LENS_TMPDIR")
     requested_by = str(location.get("requested_by") or "system")
     named = f"환경 변수 {requested_by}에 지정된 폴더" if requested_by != "system" else "시스템 임시 폴더"
+    # P0R-14: no host path in a report line (it ends up in signed bodies); the CLI notice on stderr names the folder.
     return (
-        f"임시 폴더: {named}를 쓸 수 없어({location.get('reason', '')}) 대체 폴더 {location.get('base', '')}에 "
+        f"임시 폴더: {named}를 쓸 수 없어({location.get('reason', '')}) 대체 폴더에 "
         f"임시 파일을 만들었습니다(지정: 환경 변수 {override_env})."
     )
 
 
 def _temp_folder_html(signed_report: dict[str, object]) -> str:
-    line = temp_folder_line(signed_report.get("temp_folder"))
+    # P0R-14: the signed body no longer carries temp_folder (a host path); the notice comes from this run.
+    line = temp_folder_line(signed_report.get("temp_folder") or temp_location())
     return f'<p class="note" id="temp-folder">{escape(line)}</p>' if line else ""
 
 
