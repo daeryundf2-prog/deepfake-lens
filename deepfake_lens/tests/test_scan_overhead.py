@@ -424,5 +424,27 @@ class PlainValueTest(unittest.TestCase):
             self._same(_fields_except(item.result, frozenset()), asdict(item.result))
 
 
+class TextMarkScanFastPathTest(unittest.TestCase):
+    """R27-5: scan_text jumping to the characters it acts on == the character-by-character walk."""
+
+    def test_equals_the_walk(self) -> None:
+        import random
+        import re
+        from dataclasses import asdict
+
+        from deepfake_lens import text_marks
+
+        pool = (["a", "한", " ", "\U0001f3f4", "\U0001f600", "\u2764", "x", "\u0301"]
+                + [chr(c) for c in (0xE0001, 0xE0020, 0xE0041, 0xE0067, 0xE0062, 0xE007F, 0xFE00, 0xFE0F, 0xE0100, 0xE0120, 0xE01EF,
+                                    0x200B, 0x200C, 0x200D, 0x2060, 0xFEFF, 0x180E, 0x2064)]
+                + ["-----BEGIN C2PA MANIFEST-----", "-----END C2PA MANIFEST-----"])
+        rnd = random.Random(275)
+        texts = ["".join(rnd.choice(pool) for _ in range(rnd.randint(0, 40))) for _ in range(5000)]
+        fast = [asdict(text_marks.scan_text(t)) for t in texts]
+        with mock.patch.object(text_marks, "_ACTED_ON", re.compile("(?s).")):  # every character: the old walk
+            walk = [asdict(text_marks.scan_text(t)) for t in texts]
+        self.assertEqual(fast, walk)
+
+
 if __name__ == "__main__":
     unittest.main()

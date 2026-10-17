@@ -39,6 +39,7 @@ skipped with that reason.
 
 from __future__ import annotations
 
+import re
 import unicodedata
 from dataclasses import dataclass, field
 
@@ -122,11 +123,26 @@ def _pictographic(ch: str) -> bool:
     return unicodedata.category(ch) == "So" or 0x1F000 <= cp <= 0x1FAFF or 0x2600 <= cp <= 0x27BF
 
 
+# R27-5: the characters scan_text's branches start on — tag characters, variation selectors (both blocks) and the
+# ZERO_WIDTH set (U+FEFF among them); a per-character Python loop over the rest cost a text scan more than the
+# text analysis itself.
+_ACTED_ON = re.compile(
+    "[" + "".join(
+        f"\\U{low:08x}-\\U{high:08x}" for low, high in ((TAG_FIRST, TAG_LAST), (VS_BMP_FIRST, VS_BMP_LAST), (VS_SUP_FIRST, VS_SUP_LAST))
+    ) + "".join(f"\\U{cp:08x}" for cp in sorted(ZERO_WIDTH)) + "]"
+)
+
+
 def scan_text(text: str) -> TextMarkScan:
     """Find the marks in ``text`` (pure, deterministic)."""
     out = TextMarkScan(chars=len(text))
     i, n = 0, len(text)
     while i < n:
+        # R27-5: jump to the next character any branch below acts on — every other character only did "i += 1".
+        found = _ACTED_ON.search(text, i)
+        if found is None:
+            break
+        i = found.start()
         cp = ord(text[i])
         if TAG_FIRST <= cp <= TAG_LAST:
             j = i
