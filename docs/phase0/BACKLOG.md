@@ -61,3 +61,8 @@
 
 - BL-33 — `platform_traces.audio_channel_layers`의 「메신저 음성 인코더 문자열과 일치」 항목(OpusTags에 서명 없이 적힌 인코더 문자열)에 `self_declared` 표시가 없다 — 364abfc의 「서명 없는 TB 기기·서비스 라벨은 self_declared」와 어긋남. 중립·약 사실이라 결론에는 영향 없음(상세에는 「문자열은 누구나 쓸 수 있습니다」). (R28-4, Low, 판정)
 - BL-34 — `JobStore.finish`가 메모리의 상태를 `done`으로 바꾼 뒤 잠금 밖에서 작업 파일을 써서, `/api/scan-status`가 `done`을 돌려준 직후 작업 파일이 아직 없는 순간이 있다. 보고서는 메모리의 작업으로 만들므로 결과는 같고, 그 짧은 사이에 서버가 재시작될 때만 작업이 사라진다. (R28-5, Cosmetic, 서명)
+
+## 30차 검증에서 넘긴 항목
+
+- BL-35 — 256 MiB 상한보다 4 KiB 작은 업로드 본문 하나에 서버 최대 RSS가 web 2461 MB, api-serve 2449 MB(본문의 약 9.5배; `rfile.read` 사본 + `BytesParser`의 문자열·메시지 사본) — 동시에 두 개면 8 GB 기계에서도 OOM 가능. (30차 백로그 후보, Low, 성능·견고성) → 처리: 210cf09 「fix(upload): R30-1 R30-2 R30-3 R30-5 every upload path parses multipart/form-data with one strict parser (form_data.py) instead of the e-mail parser — …」 (같은 탐침 `probe_big.py`, `:latest`, `--cpus 2 --memory 2500m`: 0cfbd03 web 2489 MB·api-serve 2482 MB → web 582 MB·api-serve 594 MB(본문의 약 2.2배 — 본문 + 파트 바이트 사본), 응답 3.6 s → 0.4 s, 행 `analyzed`·sha256 일치; 같은 본문 두 개를 동시에 보내면 web 1100 MB·api-serve 1113 MB, 둘 다 200)
+- BL-36 — 파일 이름의 `"`는 브라우저가 `%22`로 보내고(CR·LF는 `%0D`·`%0A`) 서버는 글자 그대로의 `%22`와 구별할 수 없다(HTML Standard의 multipart/form-data 인코딩이 인정하는 모호성). R30 파서는 브라우저가 뜻한 대로 `%22`·`%0D`·`%0A`를 되돌리므로 `say "hi".png`는 맞게 보이고, 반대로 이름에 실제로 `%22`가 든 파일(예: `say %22hi%22.png`)은 행 이름이 `say "hi".png`로 보인다(다른 `%`는 그대로). GUI가 원래 이름을 별도 필드(JSON 이름 목록 등)로 함께 보내면 없앨 수 있다. (30차 백로그 후보, Cosmetic, 판정)

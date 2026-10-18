@@ -177,7 +177,10 @@ at the first `"`, a backslash is an ordinary character (it was read as an
 escape and removed, R30-3), and only `%22`, `%0D`, `%0A` are decoded (to `"`,
 CR, LF — so a name that really contains `%22` reads as `"`); the name's bytes
 are UTF-8, else CP949, else kept as surrogate escapes (R12-10).
-Analysis failures surface as HTTP 500 with the exception text.
+A file whose analysis raises is a `failed` row (`<Exception>: …`, R29-2), not
+an HTTP error; only a failure outside a file's analysis (the request
+handling itself) is a 500 `업로드 분석 중 오류가 발생했습니다` with a `detail`
+(E20).
 
 `/api/check/stream` emits SSE frames `event: <name>\ndata: <json>\n\n`.
 Stage events carry `{stage, index, total}` (`core`, `forensic`/`text-advanced`,
@@ -321,7 +324,7 @@ endpoints (`/api/analyze/*`, `/api/classify`, `/api/check`, `/api/compare`,
 | E17 | GET `/api/heatmap`, `/api/preview` (both) | outside the roots / not found / not media (P8: preview of a non-media file inside the roots was 403) | 403 / 404 / 400 | plain text `허용되지 않은 경로` / `파일을 찾을 수 없습니다` / `미리보기를 지원하지 않는 형식입니다: …` + `X-Deepfake-Lens-Error` header |
 | E18 | POST `/api/analyze-upload` (both) | not multipart, no file part, empty body, body cut off before its closing boundary (P8 — was analyzed as a partial file, 200), no or an empty `boundary=` / a boundary the body never uses (R30-5 — both said the body was cut off), a part whose headers never end | 400 | `multipart/form-data 업로드가 필요합니다`, `업로드된 파일이 없습니다`, `업로드 본문이 잘렸습니다(닫는 경계 없음) — …`, `Content-Type에 multipart boundary가 없습니다 — …`, `본문의 경계가 Content-Type의 boundary와 다릅니다 — …`, `업로드 본문의 파트 헤더가 끝나지 않습니다(빈 줄 없음) — …` |
 | E19 | POST `/api/analyze-upload` (both) | body over `MAX_UPLOAD_BYTES` | 413 | `업로드 크기가 상한(…바이트)을 초과합니다` |
-| E20 | POST `/api/analyze-upload` (web) | analysis raised | 500 | `업로드 분석 중 오류가 발생했습니다` (+ `detail`) |
+| E20 | POST `/api/analyze-upload` (web) | the request handling raised outside a file's analysis (a file whose analysis raises is a `failed` row of a 200 — R29-2) | 500 | `업로드 분석 중 오류가 발생했습니다` (+ `detail`) |
 | E21 | POST `/api/check` (web) | invalid JSON / not an object / text < 8 or > 256 KB / not multipart / no file / more than one file (R29-5 — only the first was analyzed) / cut-off multipart (P8) / no boundary or a boundary the body never uses (R30-5, as E18) | 400 | `JSON 본문을 해석할 수 없습니다`, `요청 본문은 JSON 객체여야 합니다`, `분석할 텍스트가 너무 짧습니다 (8자 이상).`, `빠른 검사는 파일 1개만 받습니다(받은 파일 N개) — …`, … |
 | E22 | POST `/api/check` (web) | body over `MAX_UPLOAD_BYTES` | 413 | `요청 본문이 상한(…바이트)을 초과합니다` |
 | E23 | POST `/api/check` (api) | neither `file_path` nor `text`; text > 256 KB | 400 | `file_path 또는 text가 필요합니다` / `텍스트가 256KB를 초과합니다` |
