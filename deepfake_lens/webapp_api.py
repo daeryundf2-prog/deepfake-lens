@@ -1179,6 +1179,11 @@ def _upload_file_parts(message: Any) -> list[tuple[str, bytes]]:
     return parts
 
 
+# R29-4 (round 29): the reason a file over the upload cap was not analyzed. The cap counts files, not rows — it
+# counted rows, so an archive with 20 members made the next file "파일 수 상한(20) 초과" in a two-file upload.
+UPLOAD_FILES_OVER_CAP = "파일 수 상한({cap}개) 초과 — 이 요청의 파일 {count}개 중 앞의 {cap}개만 분석함"
+
+
 @in_worker_scope  # R20-2: one audio worker for all files (was one per file)
 def _analyze_upload_payload(content_type: str, body: bytes) -> dict[str, object]:
     """Analyze files uploaded via multipart/form-data.
@@ -1191,16 +1196,21 @@ def _analyze_upload_payload(content_type: str, body: bytes) -> dict[str, object]
         return ApiError("multipart/form-data 업로드가 필요합니다", 400)
     if _multipart_incomplete(content_type, body):
         return ApiError(MULTIPART_INCOMPLETE, 400)  # P8
+    from .result_text import escape_row_path
+
     message = BytesParser(policy=email_policy).parsebytes(
         b"Content-Type: " + content_type.encode("latin-1") + b"\r\n\r\n" + body
     )
     options = _web_options()
     thresholds = load_thresholds(options)
     items: list[dict[str, object]] = []
-    for filename, payload in _upload_file_parts(message):
-        if len(items) >= MAX_UPLOAD_FILES:
-            items.append({"name": filename, "error": f"파일 수 상한({MAX_UPLOAD_FILES}) 초과"})
-            break
+    files = _upload_file_parts(message)
+    for index, (filename, payload) in enumerate(files):
+        if index >= MAX_UPLOAD_FILES:
+            # R29-4: every file over the cap is its own skipped row with the true count (was one failed row, by rows).
+            items.append({"name": filename, "path": escape_row_path(filename), "status": "skipped",
+                          "error": UPLOAD_FILES_OVER_CAP.format(cap=MAX_UPLOAD_FILES, count=len(files))})
+            continue
         items.extend(_upload_part_rows(filename, payload, options=options, thresholds=thresholds))
     if not items:
         return ApiError("업로드된 파일이 없습니다", 400)

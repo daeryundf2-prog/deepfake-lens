@@ -579,6 +579,29 @@ class UploadEntryPointEquivalenceTest(unittest.TestCase):
                     ctype, body = _form(parts, field="files" if "upload" in path else "file")
                     self.assertEqual(post(path, ctype, body), (400, {"error": "업로드된 파일이 없습니다"}))
 
+    def test_the_upload_cap_counts_files_not_rows(self) -> None:
+        # R29-4: the cap counted rows — an archive's 3 rows made the next file of a 3-file upload "상한 초과" under a
+        # cap of 2 (20 in production). Every file over the cap is now its own skipped row with the true count.
+        from unittest.mock import patch
+
+        from deepfake_lens import webapp_api
+
+        legs, _web = self._upload_legs()
+        b = self.bytes
+        capped = [("case.zip", b["zip"]), (self.K + ".png", b["png"]), ("t.txt", b["txt"]), ("u.txt", b["txt"])]
+        ctype, body = _form(capped)
+        with patch.object(webapp_api, "MAX_UPLOAD_FILES", 2):
+            for leg, post, path in legs:
+                with self.subTest(leg=leg):
+                    status, payload = post(path, ctype, body)
+                    self.assertEqual(status, 200, payload)
+                    rows = payload["items"]
+                    self._assert_rows(leg, [(name, self._folder_rows(name, data)) for name, data in capped[:2]], rows[:-2])
+                    self.assertEqual([{k: row.get(k) for k in ("path", "name", "status", "error", "source")} for row in rows[-2:]],
+                                     [{"path": name, "name": name, "status": "skipped", "source": "upload",
+                                       "error": webapp_api.UPLOAD_FILES_OVER_CAP.format(cap=2, count=4)} for name in ("t.txt", "u.txt")])
+                    self.assertEqual(payload["summary"]["skipped"], 2)
+
     def test_an_analysis_that_raises_is_the_same_failed_row_on_every_entry_point(self) -> None:
         # R29-2: /api/check had no handler for an exception (a 500); every leg now gives /api/analyze-upload's failed row.
         from unittest.mock import patch
