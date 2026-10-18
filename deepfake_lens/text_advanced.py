@@ -733,8 +733,9 @@ class StylometryComparison:
     texts make it unreliable.
     """
 
-    same_author_score: int  # 0-100 raw similarity mapping (unmeasured)
-    distance: float
+    # R30-4 (round 30): None when a side has too little text to compare — an empty side gave a distance and a score.
+    same_author_score: int | None  # 0-100 raw similarity mapping (unmeasured)
+    distance: float | None
     # D1: no same/unclear/different band from unmeasured 67/35 cutoffs.
     reference_band: str
     reference_note: str
@@ -774,12 +775,26 @@ def _stylometry_vector(text: str) -> list[float]:
     ]
 
 
+# R30-4: the shortest text compared (as /api/check's 「분석할 텍스트가 너무 짧습니다 (8자 이상)」), counted after stripping.
+MIN_COMPARE_CHARS = 8
+
+
 def compare_texts(text_a: str, text_b: str) -> StylometryComparison:
     """Compare two texts for same-author likelihood."""
     limitations = [
         "문체 벡터 거리 측정이며 포렌식 저자 귀속이 아닙니다.",
         "짧거나 번역된 텍스트에서는 거리가 불안정합니다.",
     ]
+    sizes = (len(text_a.strip()), len(text_b.strip()))
+    short = [side for side, size in zip(("파일 A", "파일 B"), sizes) if size < MIN_COMPARE_CHARS]
+    if short:
+        # R30-4: a side under MIN_COMPARE_CHARS (an empty .txt) is not compared — no distance, no score.
+        which = "두 파일 모두" if len(short) == 2 else short[0]
+        return StylometryComparison(
+            None, None, UNAVAILABLE_BAND,
+            f"{which}의 텍스트가 {MIN_COMPARE_CHARS}자 미만이라 문체 비교를 하지 않았습니다(유사도·거리 없음; 표본 앞뒤 공백 제외 {sizes[0]}자/{sizes[1]}자).",
+            limitations + [f"{which}의 텍스트가 {MIN_COMPARE_CHARS}자 미만입니다(앞뒤 공백 제외)."],
+        )
     vec_a = _stylometry_vector(text_a)
     vec_b = _stylometry_vector(text_b)
     # Mean relative difference per dimension — cosine on mostly-positive

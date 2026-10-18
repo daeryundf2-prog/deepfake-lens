@@ -2973,7 +2973,8 @@
             if (data.reference_note) parts.push(`<div class="verdict">${shown(data.reference_note)}</div>`);
             parts.push(provenanceNoteHtml(data));
             const kv = [];
-            if (body.distance != null) kv.push(`<b>거리</b><span>${escapeHtml(String(body.distance))}</span>`);
+            // R30-4: an unmeasured comparison (a side without audio features or text) has no distance — "없음", never 1.
+            kv.push(`<b>거리</b><span>${body.distance != null ? escapeHtml(String(body.distance)) : '없음 — 측정하지 않음'}</span>`);
             parts.push(layer('측정값', `<div class="kv">${kv.join('')}</div>`));
             parts.push(listItems('한계', body.limitations, 'lim'));
             parts.push(`<div class="caveat">유사도는 측정되지 않은 참고 수치이며 동일인 증명이 아닙니다. 추가 증거와 함께 해석하세요.</div>`);

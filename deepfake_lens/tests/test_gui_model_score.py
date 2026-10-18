@@ -96,5 +96,38 @@ class ModelScoreBehaviourTest(unittest.TestCase):
         self.assertEqual(done.stdout.strip().splitlines(), ["없음", "없음", "0", "12"])
 
 
+    def test_an_unmeasured_comparison_shows_no_score_and_no_distance(self) -> None:
+        # R30-4 (round 30): a comparison whose side had no audio features showed 「0」 and 「거리 1」 (the server sent 0 and
+        # 1.0); it now sends null and the card says 「없음」 for both. A measured one still shows its numbers.
+        engine = _js_engine()
+        assert engine is not None
+        line = next(line for line in GUI_JS.read_text(encoding="utf-8").splitlines() if "function rawScoreText(" in line)
+        stubs = (
+            "function shown(x) { return String(x); }\nfunction escapeHtml(x) { return String(x); }\n"
+            "function provenanceNoteHtml() { return ''; }\nfunction layer(t, h) { return '[' + t + ']' + h; }\n"
+            "function listItems(t, xs) { return '[' + t + ']' + (xs || []).join('|'); }\n"
+            "var box = {innerHTML: ''}; function $(id) { return box; }\n" + line + "\n"
+        )
+        body = (
+            stubs + _function("renderCompare")
+            + "var out = [];\n"
+            "renderCompare({raw_score: null, reference_band: 'unavailable', reference_note: '파일 B에서 오디오 특징을 추출하지 못해',"
+            " diagnostic: {kind: 'speaker', method: 'mfcc', distance: null, limitations: []}}); out.push(box.innerHTML);\n"
+            "renderCompare({raw_score: 42, reference_band: 'reference', diagnostic: {kind: 'speaker', method: 'mfcc', distance: 0.123,"
+            " limitations: []}}); out.push(box.innerHTML);\n"
+        )
+        script = f"{body}console.log(out.join('\\n=====\\n'));" if engine[0] == "node" else f"function run() {{\n{body}return out.join('\\n=====\\n');\n}}"
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "compare.js"
+            path.write_text(script, encoding="utf-8")
+            done = subprocess.run([*engine, str(path)], capture_output=True, text=True, timeout=60)
+        self.assertEqual(done.returncode, 0, done.stderr)
+        unmeasured, measured = done.stdout.strip().split("\n=====\n")
+        self.assertIn('<span class="big">없음</span>', unmeasured)
+        self.assertIn("<b>거리</b><span>없음 — 측정하지 않음</span>", unmeasured)
+        self.assertNotIn('<span class="big">0</span>', unmeasured)
+        self.assertIn('<span class="big">42</span>', measured)
+        self.assertIn("<b>거리</b><span>0.123</span>", measured)
+
 if __name__ == "__main__":
     unittest.main()

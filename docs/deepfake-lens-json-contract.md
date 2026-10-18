@@ -654,7 +654,7 @@ without a result carries `verdict_label` `판단 불가` and `grade_label` `참�
 | `notice` | Fixed: "이 출력은 측정되지 않은 참고 신호이며 결론이 아닙니다. 결론은 `scan`을 사용하십시오." |
 | `reference_band` | `reference` (the layer ran; numbers are reference only) or `unavailable` (it could not run). Never a band. |
 | `reference_note` | Neutral note with the raw score, or the reason the layer could not run. |
-| `raw_score` | The layer's unmeasured heuristic sum (0-100), when it has one. |
+| `raw_score` | The layer's unmeasured heuristic sum (0-100), when it has one; `null` when the layer measured nothing — R30-4 (round 30): `compare` gives `raw_score: null`, `diagnostic.distance: null` and `reference_band: "unavailable"` with the reason in `reference_note` when a side's audio features could not be extracted (a 0-byte or non-audio file, no librosa) or a side has under 8 characters of text (it gave 0 and distance 1.0, or a distance computed from an empty text). |
 | `diagnostic` | The layer's raw output (signals, limitations, measurements) with any legacy `band`/`band_label`/`verdict` key removed at every depth. |
 
 The layer modules themselves (`AudioAnalysis`, `VideoTemporalAnalysis`,

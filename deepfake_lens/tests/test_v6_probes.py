@@ -85,6 +85,27 @@ class SpeakerComparisonTest(unittest.TestCase):
         _write_sine_wav(a)
         result = compare_speakers(a, self.dir / "missing.wav")
         self.assertEqual(result.reference_band, "unavailable")  # D1: was band "unknown"
+        # R30-4 (round 30): nothing was measured — no score and no distance (were 0 and 1.0).
+        self.assertEqual((result.same_speaker_score, result.distance), (None, None))
+        self.assertIn("파일 B", result.reference_note)
+
+    def test_a_side_without_audio_features_has_no_score_or_distance(self) -> None:
+        # R30-4: a 0-byte .wav and a PNG named .wav (the GUI's compare_wav0 / compare_png_as_wav).
+        from deepfake_lens.audio import compare_speakers
+        from deepfake_lens.tests.png_fixture import write_png
+
+        a = self.dir / "a.wav"
+        _write_sine_wav(a)
+        (self.dir / "zero.wav").write_bytes(b"")
+        write_png(self.dir / "p.png", {})
+        (self.dir / "png.wav").write_bytes((self.dir / "p.png").read_bytes())
+        for other in ("zero.wav", "png.wav"):
+            with self.subTest(other=other):
+                result = compare_speakers(a, self.dir / other)
+                self.assertEqual((result.same_speaker_score, result.distance, result.reference_band), (None, None, "unavailable"))
+                both = compare_speakers(self.dir / other, self.dir / other)
+                self.assertEqual((both.same_speaker_score, both.distance), (None, None))
+                self.assertIn("두 파일 모두", both.reference_note)
 
     @unittest.skipUnless(os.environ.get("DEEPFAKE_LENS_MODEL_TESTS") == "1", "set DEEPFAKE_LENS_MODEL_TESTS=1")
     def test_ecapa_self_comparison_when_available(self) -> None:
@@ -126,8 +147,23 @@ class StylometryComparisonTest(unittest.TestCase):
     def test_short_text_adds_limitation(self) -> None:
         from deepfake_lens.text_advanced import compare_texts
 
-        result = compare_texts("짧다.", "짧다.")
+        # R30-4: a text under 8 characters is not compared at all (below), so the short-but-compared case uses 9+.
+        result = compare_texts("짧은 문장 하나입니다.", "짧은 문장 하나입니다.")
         self.assertTrue(any("400자" in lim for lim in result.limitations))
+        self.assertIsNotNone(result.distance)
+
+    def test_an_empty_or_too_short_side_is_not_compared(self) -> None:
+        # R30-4 (round 30): an empty side gave 「문체 벡터 평균 상대 차이 0.3841 (참고 원점수 0/100 …; 표본 0자/200자)」.
+        from deepfake_lens.text_advanced import MIN_COMPARE_CHARS, compare_texts
+
+        long = "평범한 글입니다. 여러 문장이 있습니다. " * 10
+        for a, b, which in (("", long, "파일 A"), (long, "  \n ", "파일 B"), ("짧다.", "", "두 파일 모두"), ("x" * (MIN_COMPARE_CHARS - 1), long, "파일 A")):
+            with self.subTest(a=a[:10], b=b[:10]):
+                result = compare_texts(a, b)
+                self.assertEqual((result.same_author_score, result.distance, result.reference_band), (None, None, "unavailable"))
+                self.assertIn(which, result.reference_note)
+                self.assertNotIn("상대 차이", result.reference_note)
+        self.assertIsNotNone(compare_texts("x" * MIN_COMPARE_CHARS, long).distance)
 
 
 class LipsyncTest(unittest.TestCase):

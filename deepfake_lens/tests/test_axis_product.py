@@ -675,6 +675,18 @@ class UploadEntryPointEquivalenceTest(unittest.TestCase):
                 status, payload = web("/api/compare", ctype, body)
                 self.assertEqual(status, 200, payload)
                 self.assertNotIn("dflens-up-", json.dumps(payload, ensure_ascii=False))
+        # R30-4 (round 30): a side with nothing to measure — a 0-byte WAV, a PNG named .wav, an empty text — gives no
+        # number (it showed 「0」, 「거리 1」 and 「0/100」 as if measured).
+        png = self.bytes["png"]
+        for label, parts in (("0-byte wav", [("a.wav", self.bytes["wav"]), ("b.wav", b"")]),
+                             ("png named .wav", [("a.wav", self.bytes["wav"]), ("b.wav", png)]),
+                             ("empty text", [("a.txt", b""), ("b.txt", text * 4)]),
+                             ("blank text", [("a.txt", text * 4), ("b.txt", b" \r\n\t")])):
+            with self.subTest(case=label):
+                ctype, body = _form(parts)
+                status, payload = web("/api/compare", ctype, body)
+                self.assertEqual(status, 200, payload)
+                self.assertEqual((payload["raw_score"], payload["diagnostic"]["distance"], payload["reference_band"]), (None, None, "unavailable"), payload)
         for count in (1, 3):
             with self.subTest(files=count):
                 ctype, body = _form([(f"{i}.txt", text) for i in range(count)])

@@ -922,8 +922,10 @@ class SpeakerComparison:
     identification — embedding-based verification needs a dedicated model.
     """
 
-    same_speaker_score: int  # 0-100 raw similarity mapping (unmeasured), higher = closer voices
-    distance: float  # cosine distance on the feature vector
+    # R30-4 (round 30): None when nothing was measured (a side's features could not be extracted) — it was 0 and
+    # 1.0, shown as 「화자 유사도 0」 and 「거리 1」.
+    same_speaker_score: int | None  # 0-100 raw similarity mapping (unmeasured), higher = closer voices
+    distance: float | None  # cosine distance on the feature vector
     # D1: no same/unclear/different band from unmeasured 67/35 cutoffs —
     # reference_band per layer_diagnostic and a descriptive measurement note.
     reference_band: str
@@ -990,7 +992,13 @@ def compare_speakers(
     feat_a = _extract_features(Path(path_a), segment_seconds=segment_seconds)
     feat_b = _extract_features(Path(path_b), segment_seconds=segment_seconds)
     if feat_a is None or feat_b is None:
-        return SpeakerComparison(0, 1.0, UNAVAILABLE_BAND, "특징 추출 실패 — librosa 또는 오디오 형식을 확인하세요.", limitations + ["한쪽 파일의 특징 추출에 실패했습니다."])
+        # R30-4: no score and no distance — nothing was compared (0바이트, not audio, or no librosa).
+        failed = "두 파일 모두" if feat_a is None and feat_b is None else ("파일 A" if feat_a is None else "파일 B")
+        return SpeakerComparison(
+            None, None, UNAVAILABLE_BAND,
+            f"{failed}에서 오디오 특징을 추출하지 못해 화자 비교를 하지 않았습니다(유사도·거리 없음) — librosa 또는 오디오 형식을 확인하세요.",
+            limitations + [f"{failed}의 특징 추출에 실패했습니다."],
+        )
 
     import math
     vec_a = list(feat_a.mfcc_means) + [feat_a.pitch_mean, feat_a.pitch_std, feat_a.spectral_centroid / 1000.0]
