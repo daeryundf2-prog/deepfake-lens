@@ -2778,6 +2778,25 @@
             runQuickCheck({ method: 'POST', body: form });
         });
 
+        // R31-5 (round 31): the quick check's archive toast said "압축 해제 — N개 파일 분석됨" with N the number of rows —
+        // the container row and unsupported members counted, and a corrupt or empty archive read "1개 파일 분석됨".
+        // It counts member rows whose status is "analyzed", and says when the archive could not be opened (its
+        // archive check failed or was skipped) or held nothing analyzed.
+        function archiveCheckToast(items) {
+            const members = items.filter(it => it && it.member);
+            const analyzed = members.filter(it => it.status === 'analyzed').length;
+            const container = items.find(it => it && !it.member) || {};
+            if (analyzed > 0) {
+                const rest = members.filter(it => it.status !== 'analyzed' && it.kind !== 'archive').length;
+                return `압축 해제 — 구성 파일 ${analyzed}개 분석됨` + (rest ? `, ${rest}개 분석 못 함 — 원장에서 사유를 보십시오` : '');
+            }
+            const coverage = ((container.result || {}).coverage || []).find(c => c && c.check === 'archive');
+            if (container.status !== 'expanded' && (!coverage || coverage.status !== 'ran')) {
+                return '압축 파일을 열지 못했습니다 — 원장에서 사유를 보십시오';
+            }
+            return '압축 파일에서 분석한 구성 파일이 없습니다 — 원장에서 사유를 보십시오';
+        }
+
         async function runQuickCheck(options) {
             const box = $('qc-out');
             const stop = startElapsed($('qc-status'), '전체 검사 실행 중… 뉴럴 모델 로딩 시 수십 초');
@@ -2800,7 +2819,7 @@
                 lastScanJobNote = '';
                     retireErrors();
                     processResults(data);
-                    toast(`압축 해제 — ${(data.items || []).length}개 파일 분석됨`);
+                    toast(archiveCheckToast(data.items || []));  // R31-5: what was analyzed, not the row count
                     navigate('ledger', $('sum-h'));
                     return;
                 }
