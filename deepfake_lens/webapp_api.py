@@ -11,7 +11,6 @@ import contextlib
 import json
 import logging
 import os
-import re
 import shutil
 import stat
 import tempfile
@@ -19,14 +18,13 @@ import threading
 import time
 from collections import OrderedDict
 from dataclasses import replace
-from email.parser import BytesParser
-from email.policy import default as email_policy
 from pathlib import Path
 from typing import Any, Callable, Iterator
 from urllib.parse import parse_qs
 
 from .audio_worker import in_worker_scope
 from .checks import failure_reason
+from .form_data import FormDataError, file_parts as _form_file_parts  # R30-1..R30-3, R30-5
 from .native_path import expand_user, scratch_dir
 from .result_text import display_name
 from .scan_jobs import (
@@ -184,23 +182,6 @@ def scan_root_text(folder: Path) -> str:
         return str(expand_user(folder).resolve())
     except (OSError, RuntimeError):
         return str(Path(os.path.abspath(expand_user(folder))))
-
-
-# P8 (round 8): a multipart body cut off before its closing boundary was
-# parsed as far as it went — a truncated upload was analyzed (200) as if it
-# were the whole file.
-MULTIPART_INCOMPLETE = "업로드 본문이 잘렸습니다(닫는 경계 없음) — 파일을 다시 보내십시오"
-
-
-def _multipart_incomplete(content_type: str, body: bytes) -> bool:
-    """True when a multipart/form-data ``body`` lacks its closing ``--boundary--`` (P8)."""
-    import re as _re
-
-    match = _re.search(r'boundary=(?:"([^"]+)"|([^;\s]+))', content_type, _re.IGNORECASE)
-    if match is None:
-        return True
-    boundary = (match.group(1) or match.group(2)).encode("latin-1", errors="replace")
-    return b"--" + boundary + b"--" not in body
 
 
 # P6 (round 8): an uploaded file is a temp copy, not a file under a read
@@ -895,62 +876,6 @@ def _model_active(item: dict[str, object]) -> bool:
     return isinstance(ma, dict) and bool(ma.get("available"))
 
 
-# R12-10 (round 12): the email parser decodes a multipart file name's raw
-# bytes as UTF-8 with replacement, so a CP949 name ("증거.png" from a Korean
-# Windows browser) or any other non-UTF-8 name became "����.png". The
-# Content-Disposition header is read as raw bytes (latin-1 round trip) and
-# its filename decoded as UTF-8, else CP949, else kept byte for byte with
-# surrogate escapes (shown "\\udcXX" by display_name). Encodings tried for a
-# plain filename="…" parameter, in order:
-FILENAME_ENCODINGS = ("utf-8", "cp949")
-_FILENAME_STAR = re.compile(rb"(?:^|;)\s*filename\*\s*=\s*\"?([^\";]*)\"?", re.IGNORECASE)
-_FILENAME = re.compile(rb'(?:^|;)\s*filename\s*=\s*(?:"((?:[^"\\]|\\.)*)"|([^;]*))', re.IGNORECASE)
-
-
-def _decode_filename_bytes(raw: bytes, charset: str = "") -> str:
-    """A file name's bytes as text: the declared charset, UTF-8, CP949, else surrogate escapes (R12-10)."""
-    for encoding in ((charset,) if charset else ()) + FILENAME_ENCODINGS:
-        try:
-            return raw.decode(encoding)
-        except (LookupError, UnicodeDecodeError):
-            continue
-    return raw.decode("utf-8", "surrogateescape")
-
-
-def _part_filename(part) -> str | None:
-    """The multipart part's file name from its raw Content-Disposition bytes (R12-10)."""
-    from urllib.parse import unquote_to_bytes
-
-    raw = next((value for key, value in part.raw_items() if key.lower() == "content-disposition"), None)
-    if not isinstance(raw, str):
-        return part.get_filename()
-    # BytesParser keeps undecodable header bytes as surrogate escapes; unfold.
-    header = re.sub(rb"\r?\n[ \t]", b" ", raw.encode("ascii", "surrogateescape"))
-    star = _FILENAME_STAR.search(header)
-    if star is not None:
-        charset, _, rest = star.group(1).strip().partition(b"'")
-        _, _, encoded = rest.partition(b"'")
-        return _decode_filename_bytes(unquote_to_bytes(encoded), charset.decode("ascii", "replace"))
-    plain = _FILENAME.search(header)
-    if plain is None:
-        return part.get_filename()
-    if plain.group(1) is not None:
-        value = re.sub(rb"\\(.)", rb"\1", plain.group(1))
-    else:
-        value = plain.group(2).strip()
-    return _decode_filename_bytes(value)
-
-
-def _part_bytes(part) -> bytes | None:
-    """Normalize a multipart payload to bytes (email API may return str)."""
-    payload = part.get_payload(decode=True)
-    if isinstance(payload, bytes):
-        return payload
-    if isinstance(payload, str):
-        return payload.encode("utf-8", errors="replace")
-    return None
-
-
 def _summarize_records(items: list[dict[str, object]], source: str) -> dict[str, object]:
     """Mirror core.summarize() — identical inputs must yield identical counts
     across CLI JSON, web uploads, and report headers. A row with a result
@@ -1163,20 +1088,16 @@ def _upload_part_rows(filename: str, payload: bytes, *, options: AnalysisOptions
         return [_failed_upload_row(filename, exc)]
 
 
-def _upload_file_parts(message: Any) -> list[tuple[str, bytes]]:
-    """``(client name, bytes)`` of every part that is a file: it has a file name and a payload, empty or not.
+def _upload_file_parts(content_type: str, body: bytes) -> list[tuple[str, bytes]]:
+    """``(client name, bytes)`` of every part that is a file: it has a file name, its bytes empty or not.
 
     R29-1 (round 29): ``/api/check`` chose its part by ``p.get_payload(decode=True)`` being truthy, so a 0-byte file
     was "업로드된 파일이 없습니다" there while ``/api/analyze-upload`` and a folder scan analyzed it. Every upload
-    path now selects parts here.
+    path selects parts here. R30-1..R30-3 (round 30): the body is split by :mod:`form_data` (was the e-mail parser,
+    which dropped a ``message/*`` part, re-serialized a ``multipart/*`` part and unescaped backslashes in names);
+    :class:`form_data.FormDataError` carries the 400 reason (R30-5).
     """
-    parts: list[tuple[str, bytes]] = []
-    for part in message.iter_parts():
-        filename = _part_filename(part)  # R12-10
-        payload = _part_bytes(part)
-        if filename and payload is not None:
-            parts.append((filename, payload))
-    return parts
+    return _form_file_parts(content_type, body)
 
 
 # R29-4 (round 29): the reason a file over the upload cap was not analyzed. The cap counts files, not rows — it
@@ -1200,17 +1121,15 @@ def _analyze_upload_payload(content_type: str, body: bytes) -> dict[str, object]
     """
     if "multipart/form-data" not in content_type:
         return ApiError("multipart/form-data 업로드가 필요합니다", 400)
-    if _multipart_incomplete(content_type, body):
-        return ApiError(MULTIPART_INCOMPLETE, 400)  # P8
     from .result_text import escape_row_path
 
-    message = BytesParser(policy=email_policy).parsebytes(
-        b"Content-Type: " + content_type.encode("latin-1") + b"\r\n\r\n" + body
-    )
+    try:
+        files = _upload_file_parts(content_type, body)  # R30-1..R30-3, R30-5; P8 (cut off)
+    except FormDataError as exc:
+        return ApiError(str(exc), 400)
     options = _web_options()
     thresholds = load_thresholds(options)
     items: list[dict[str, object]] = []
-    files = _upload_file_parts(message)
     for index, (filename, payload) in enumerate(files):
         if index >= MAX_UPLOAD_FILES:
             # R29-4: every file over the cap is its own skipped row with the true count (was one failed row, by rows).
@@ -1318,13 +1237,11 @@ def _check_file_payload(content_type: str, body: bytes) -> dict[str, object]:
     """Unified single-file check: full scan + forensics + text probes."""
     if "multipart/form-data" not in content_type:
         return ApiError("multipart/form-data 또는 application/json 본문이 필요합니다", 400)
-    if _multipart_incomplete(content_type, body):
-        return ApiError(MULTIPART_INCOMPLETE, 400)  # P8
-    message = BytesParser(policy=email_policy).parsebytes(
-        b"Content-Type: " + content_type.encode("latin-1") + b"\r\n\r\n" + body
-    )
-    files = _upload_file_parts(message)  # R29-1: a 0-byte file is a file (was "업로드된 파일이 없습니다")
-    if not files:
+    try:
+        files = _upload_file_parts(content_type, body)  # R30-1..R30-3, R30-5; P8 (cut off)
+    except FormDataError as exc:
+        return ApiError(str(exc), 400)
+    if not files:  # R29-1: a 0-byte file is a file (was "업로드된 파일이 없습니다")
         return ApiError("업로드된 파일이 없습니다", 400)
     if len(files) > 1:
         # R29-5: the quick check takes one file — the others were silently dropped (only the first was analyzed).
@@ -1392,14 +1309,12 @@ def _compare_payload(content_type: str, body: bytes) -> dict[str, object]:
     for text/document pairs. Both parts must carry filenames."""
     if "multipart/form-data" not in content_type:
         return ApiError("multipart/form-data 본문이 필요합니다", 400)
-    if _multipart_incomplete(content_type, body):
-        return ApiError(MULTIPART_INCOMPLETE, 400)  # P8
-    message = BytesParser(policy=email_policy).parsebytes(
-        b"Content-Type: " + content_type.encode("latin-1") + b"\r\n\r\n" + body
-    )
     # R29-6 (round 29): parts as every upload path selects them — a 0-byte file is a file (it was dropped, so two
     # files sent gave "비교할 파일 2개가 필요합니다"), and a third file is refused instead of silently ignored.
-    parts = _upload_file_parts(message)
+    try:
+        parts = _upload_file_parts(content_type, body)  # R30-1..R30-3, R30-5; P8 (cut off)
+    except FormDataError as exc:
+        return ApiError(str(exc), 400)
     if len(parts) != 2:
         return ApiError(COMPARE_TWO_FILES.format(count=len(parts)), 400)
     with contextlib.ExitStack() as stack:

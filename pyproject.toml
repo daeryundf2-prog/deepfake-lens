@@ -254,6 +254,7 @@ files = [
     "deepfake_lens/rule_classifier.py",
     "deepfake_lens/security.py",
     "deepfake_lens/webapp_api.py",
+    "deepfake_lens/form_data.py",
     "deepfake_lens/scan_jobs.py",
     "deepfake_lens/container_metadata.py",
     "deepfake_lens/c2pa_binding.py",

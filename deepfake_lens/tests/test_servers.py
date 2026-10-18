@@ -267,7 +267,6 @@ class AnalyzeUploadPayloadTest(unittest.TestCase):
         from deepfake_lens.result_text import escape_row_path, unescape_row_path
 
         data = (Path(__file__).resolve().parents[2] / "fixtures" / "benchmark" / "a1111-metadata-marker.png").read_bytes()
-        # (A "\\" in a multipart filename is a quoting escape, so names here have none.)
         names = ("t:::c.png", "x::y.png", "::::.png", "plain.png")
         content_type, body = self._multipart(*((name, data) for name in names))
         result = webapp_api._analyze_upload_payload(content_type, body)
@@ -1933,7 +1932,12 @@ class ErrorTableEveryRowTest(unittest.TestCase):
             + [case(s, "GET", f"/api/preview?path={q(f / 'memo.txt')}&root={q(f)}", 400, "미리보기를 지원하지 않는 형식입니다: .txt") for s in both],
             "E18": [case(s, "POST", "/api/analyze-upload", 400, "multipart/form-data 업로드가 필요합니다", b"x", "text/plain") for s in both]
             + [case(s, "POST", "/api/analyze-upload", 400, "업로드 본문이 잘렸습니다", cut, cut_type) for s in both]
-            + [case(s, "POST", "/api/analyze-upload", 400, "업로드된 파일이 없습니다", b"------p8table--\r\n", upload_type) for s in both],
+            + [case(s, "POST", "/api/analyze-upload", 400, "업로드된 파일이 없습니다", b"------p8table--\r\n", upload_type) for s in both]
+            # R30-5 (round 30): no boundary and a boundary the body never uses said 「업로드 본문이 잘렸습니다」.
+            + [case(s, "POST", "/api/analyze-upload", 400, text, upload, ctype) for s in both for ctype, text in (
+                ("multipart/form-data", "Content-Type에 multipart boundary가 없습니다"),
+                ("multipart/form-data; boundary=", "Content-Type에 multipart boundary가 없습니다"),
+                ("multipart/form-data; boundary=other", "본문의 경계가 Content-Type의 boundary와 다릅니다"))],
             "E19": [case("web", "POST", "/api/analyze-upload", 413, "업로드 크기가 상한", upload, upload_type, patches=(patch.object(webapp_module, "MAX_UPLOAD_BYTES", 16),)),
                     case("api", "POST", "/api/analyze-upload", 413, "업로드 크기가 상한", upload, upload_type, patches=(patch.object(webapp_api, "MAX_UPLOAD_BYTES", 16),))],
             "E20": [case("web", "POST", "/api/analyze-upload", 500, "업로드 분석 중 오류가 발생했습니다", upload, upload_type,
@@ -1945,6 +1949,8 @@ class ErrorTableEveryRowTest(unittest.TestCase):
                 (b"x", "text/plain", "multipart/form-data 또는 application/json 본문이 필요합니다"),
                 (cut, cut_type, "업로드 본문이 잘렸습니다"),
                 (two_files, two_type, webapp_api.CHECK_ONE_FILE.format(count=2)),
+                (upload, "multipart/form-data", "Content-Type에 multipart boundary가 없습니다"),  # R30-5
+                (upload, "multipart/form-data; boundary=other", "본문의 경계가 Content-Type의 boundary와 다릅니다"),
             )],
             "E22": [case("web", "POST", "/api/check", 413, "요청 본문이 상한", upload, upload_type, patches=(patch.object(webapp_module, "MAX_UPLOAD_BYTES", 16),))],
             # (text > 256 KB cannot travel in a test client's query string; the
@@ -1957,6 +1963,8 @@ class ErrorTableEveryRowTest(unittest.TestCase):
                 (triple, triple_type, webapp_api.COMPARE_TWO_FILES.format(count=3)),
                 (pair, pair_type, "지원되는 쌍이 아닙니다(.txt, .wav)"),
                 (cut_pair, pair_type, "업로드 본문이 잘렸습니다"),
+                (pair, "multipart/form-data", "Content-Type에 multipart boundary가 없습니다"),  # R30-5
+                (pair, "multipart/form-data; boundary=other", "본문의 경계가 Content-Type의 boundary와 다릅니다"),
             )],
             "E25": [case("web", "POST", "/api/compare", 500, "비교 분석 중 오류가 발생했습니다", pair, pair_type,
                          patches=(patch.object(webapp_module, "_compare_payload", raise_),))],

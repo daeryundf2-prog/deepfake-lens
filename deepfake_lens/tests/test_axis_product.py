@@ -326,6 +326,26 @@ def _form(parts: list[tuple[str | None, bytes]], field: str = "files") -> tuple[
     return f"multipart/form-data; boundary={boundary}", body + f"--{boundary}--\r\n".encode("ascii")
 
 
+def _browser_form(parts: list[tuple[str | bytes, bytes, str | None]], field: str = "files",
+                  boundary: str = "----WebKitFormBoundaryR30axis") -> tuple[str, bytes]:
+    """A multipart body as a browser (and curl) writes it — R30-1..R30-3 (round 30).
+
+    Each part is ``(name, bytes, part Content-Type or None)``. The name travels as a quoted ``filename="…"`` in the
+    HTML Standard's encoding: its bytes (UTF-8 for text, else as given) with ``"`` → ``%22``, CR → ``%0D``,
+    LF → ``%0A`` and nothing else escaped — a backslash is sent literally. The part's ``Content-Type`` is what a
+    browser takes from the extension (``message/rfc822`` for ``.eml``, ``multipart/related`` for ``.mht``).
+    """
+    body = b""
+    for name, data, part_type in parts:
+        raw = name if isinstance(name, bytes) else name.encode("utf-8", "surrogateescape")
+        raw = raw.replace(b'"', b"%22").replace(b"\r", b"%0D").replace(b"\n", b"%0A")
+        head = f'--{boundary}\r\nContent-Disposition: form-data; name="{field}"; filename="'.encode("ascii") + raw + b'"'
+        if part_type is not None:
+            head += f"\r\nContent-Type: {part_type}".encode("ascii")
+        body += head + b"\r\n\r\n" + data + b"\r\n"
+    return f"multipart/form-data; boundary={boundary}", body + f"--{boundary}--\r\n".encode("ascii")
+
+
 # Identity fields an upload row takes from the client's name (R10-6, R11-14, R12-4); the rest of a row is the scan's.
 _IDENTITY = ("path", "name", "display_name", "path_b64", "container", "source")
 
@@ -659,6 +679,128 @@ class UploadEntryPointEquivalenceTest(unittest.TestCase):
             with self.subTest(files=count):
                 ctype, body = _form([(f"{i}.txt", text) for i in range(count)])
                 self.assertEqual(web("/api/compare", ctype, body), (400, {"error": webapp_api.COMPARE_TWO_FILES.format(count=count)}))
+
+    # -- R30 (round 30): what a browser sends ----------------------------------------------------------------------
+
+    # The part Content-Types a browser attaches (Chromium: by extension) — the bytes are the file whatever it says.
+    PART_TYPES = ("application/octet-stream", "message/rfc822", "multipart/related", "multipart/mixed",
+                  "text/plain; charset=utf-8", None)
+    EML = b"From: a@example.com\r\nTo: b@example.com\r\nSubject: hi\r\nContent-Type: text/plain\r\n\r\nbody\r\n"
+    MHT = (b"MIME-Version: 1.0\r\nContent-Type: multipart/related; boundary=\"mhtb\"\r\n\r\n--mhtb\r\n"
+           b"Content-Type: text/html\r\n\r\n<html>x</html>\r\n--mhtb--\r\n")
+
+    def _part_type_files(self) -> list[tuple[str, bytes]]:
+        b = self.bytes
+        return [("mail.eml", self.EML), ("page.mht", self.MHT), (self.K + ".png", b["png"]), ("빈.txt", b""),
+                ("case.zip", b["zip"]), ("x.bin", bytes(range(256)) * 4)]
+
+    def _assert_sha256(self, label: str, client: str, data: bytes, rows: list[dict]) -> None:
+        import hashlib
+
+        top = [row for row in rows if row.get("member") is None]
+        self.assertEqual([row.get("name") for row in top], [client], label)
+        if top[0].get("sha256") is not None:
+            self.assertEqual(top[0]["sha256"], hashlib.sha256(data).hexdigest(), label)  # R30-2: the bytes sent
+
+    def test_part_content_type_never_changes_or_drops_the_file(self) -> None:
+        # R30-1: a message/* part (a browser's .eml) vanished — alone 「업로드된 파일이 없습니다」, among others no row.
+        # R30-2: a multipart/* part (a browser's .mht) was re-serialized — the analyzed bytes and sha256 were not the file's.
+        from deepfake_lens import webapp_api
+
+        legs, web = self._upload_legs()
+        files = self._part_type_files()
+        expected = {client: self._folder_rows(client, data) for client, data in files}
+        for part_type in self.PART_TYPES:
+            for client, data in files:
+                for leg, post, path in legs + [("web /api/check", web, "/api/check")]:
+                    with self.subTest(part_type=part_type, file=client, leg=leg):
+                        ctype, body = _browser_form([(client, data, part_type)], field="file" if "check" in path else "files")
+                        status, payload = post(path, ctype, body)
+                        self.assertEqual(status, 200, payload)
+                        rows = payload["items"] if "items" in payload else [payload["item"]]
+                        self._assert_rows(f"{part_type} {client} {leg}", [(client, expected[client])], rows)
+                        self._assert_sha256(f"{part_type} {client} {leg}", client, data, rows)
+            # Several files in one request: every file is a row, and the cap counts the files sent.
+            with self.subTest(part_type=part_type, files="all"):
+                ctype, body = _browser_form([(client, data, part_type) for client, data in files])
+                for leg, post, path in legs:
+                    status, payload = post(path, ctype, body)
+                    self.assertEqual(status, 200, payload)
+                    self._assert_rows(f"{part_type} all {leg}", [(client, expected[client]) for client, _data in files], payload["items"])
+                many = [(f"{i}.eml", self.EML, part_type) for i in range(3)] + [(f"{i}.png", self.bytes["png"], None) for i in range(3)]
+                ctype, body = _browser_form(many)
+                from unittest.mock import patch
+
+                with patch.object(webapp_api, "MAX_UPLOAD_FILES", 4):
+                    for leg, post, path in legs:
+                        status, payload = post(path, ctype, body)
+                        self.assertEqual(status, 200, payload)
+                        skipped = [row["error"] for row in payload["items"] if row.get("status") == "skipped"]
+                        self.assertEqual(skipped, [webapp_api.UPLOAD_FILES_OVER_CAP.format(cap=4, count=6)] * 2, leg)
+                # /api/check: two such files are two files; /api/compare: two are two (R29-5, R29-6 counts).
+                ctype, body = _browser_form([("a.eml", self.EML, part_type), ("b.mht", self.MHT, part_type)], field="file")
+                self.assertEqual(web("/api/check", ctype, body), (400, {"error": webapp_api.CHECK_ONE_FILE.format(count=2)}))
+                for pair in ([("a.eml", self.EML, part_type)], [("a.eml", self.EML, part_type)] * 3):
+                    ctype, body = _browser_form(pair)
+                    self.assertEqual(web("/api/compare", ctype, body), (400, {"error": webapp_api.COMPARE_TWO_FILES.format(count=len(pair))}))
+                ctype, body = _browser_form([("a.wav", self.bytes["wav"], part_type), ("mail.eml", self.EML, part_type)])
+                status, payload = web("/api/compare", ctype, body)
+                self.assertEqual(status, 400, payload)
+                self.assertTrue(payload["error"].startswith("지원되는 쌍이 아닙니다(.wav, .eml)"), payload)  # was 「받은 파일 1개」
+
+    # Names as a browser encodes them: (name the user's file has, the bytes sent for it when not its UTF-8).
+    BROWSER_NAMES = [
+        ("a\\b.png", None),
+        ("KakaoTalk_2024010\\1_123456789.png", None),  # not the KakaoTalk format: it read 「이름 형식 일치」 (R30-3)
+        ("case.zip\\", None),  # R29-3 from a browser: an archive, its member rows and container row
+        ('say "hi".png', None),  # sent as say %22hi%22.png
+        ("line\nbreak.png", None),  # sent as line%0Abreak.png
+        ("100%25 %41.png", None),  # a percent the browser does not escape stays literal
+        ("caf\udce9.png", b"caf\xe9.png"),  # neither UTF-8 nor CP949: kept byte for byte
+        ("증거.png", "증거.png".encode("cp949")),  # CP949 bytes (R12-10)
+    ]
+
+    def test_browser_encoded_names_are_the_names_of_the_files(self) -> None:
+        from deepfake_lens.platform_traces import FILE_NAME_CHECK
+
+        legs, web = self._upload_legs()
+        data = self.bytes["png"]
+        for client, sent in self.BROWSER_NAMES:
+            payload_bytes = self.bytes["zip"] if client.startswith("case.zip") else data
+            expected = [(client, self._folder_rows(client, payload_bytes))]
+            for leg, post, path in legs + [("web /api/check", web, "/api/check")]:
+                with self.subTest(name=client, leg=leg):
+                    ctype, body = _browser_form([(sent if sent is not None else client, payload_bytes, "image/png")],
+                                                field="file" if "check" in path else "files")
+                    status, payload = post(path, ctype, body)
+                    self.assertEqual(status, 200, payload)
+                    rows = payload["items"] if "items" in payload else [payload["item"]]
+                    self._assert_rows(f"{client} {leg}", expected, rows)
+                    self._assert_sha256(f"{client} {leg}", client, payload_bytes, rows)
+                    if client.startswith("case.zip"):
+                        self.assertTrue(any(row.get("member") is not None for row in rows), rows)  # expanded (R29-3)
+                    if client.startswith("KakaoTalk_2024010"):
+                        name_check = [c for c in rows[0]["result"]["coverage"] if c.get("check") == FILE_NAME_CHECK]
+                        self.assertNotIn("일치:", str(name_check), rows[0]["name"])
+
+    def test_boundary_refusals_say_what_is_wrong(self) -> None:
+        # R30-5: no boundary, an empty one and one the body never uses all said 「업로드 본문이 잘렸습니다(닫는 경계 없음)」.
+        from deepfake_lens import form_data
+
+        legs, web = self._upload_legs()
+        good_type, body = _browser_form([(self.K + ".png", self.bytes["png"], "image/png")])
+        cases = [("multipart/form-data", body, form_data.MULTIPART_NO_BOUNDARY),
+                 ("multipart/form-data; boundary=", body, form_data.MULTIPART_NO_BOUNDARY),
+                 ('multipart/form-data; boundary=""', body, form_data.MULTIPART_NO_BOUNDARY),
+                 ("multipart/form-data; boundary=wrong", body, form_data.MULTIPART_BOUNDARY_MISMATCH),
+                 ("multipart/form-data; boundary=----WebKitFormBoundaryR30", body, form_data.MULTIPART_BOUNDARY_MISMATCH),
+                 (good_type, body[:-8], form_data.MULTIPART_INCOMPLETE),  # the closing boundary cut off (P8)
+                 (good_type, body[:len(body) // 2], form_data.MULTIPART_INCOMPLETE),
+                 (good_type, body[:12], form_data.MULTIPART_INCOMPLETE)]
+        for leg, post, path in legs + [("web /api/check", web, "/api/check"), ("web /api/compare", web, "/api/compare")]:
+            for ctype, sent, reason in cases:
+                with self.subTest(leg=leg, ctype=ctype, size=len(sent)):
+                    self.assertEqual(post(path, ctype, sent), (400, {"error": reason}))
 
 
 if __name__ == "__main__":

@@ -326,7 +326,10 @@ class NonUtf8NameServersTest(_EnvMixin):
         (b'filename="caf\xe9.png"', "caf\udce9.png"),  # neither: kept byte for byte
         (b'filename="\x80\x81\xbf.png"', "\udc80\udc81\udcbf.png"),
         (b"filename*=UTF-8''%EC%A6%9D%EA%B1%B0.png", "증거.png"),  # RFC 5987
-        (b'filename="q\\"uote.png"', 'q"uote.png'),
+        # R30-3 (round 30): a quote travels as the browser writes it (%22); the backslash is literal (it was read as an
+        # RFC 822 escape — 'filename="q\\"uote.png"' is no browser's encoding, so it is no longer pinned here).
+        (b'filename="q%22uote.png"', 'q"uote.png'),
+        (b'filename="a\\b.png"', 'a\\b.png'),
     )
 
     def _check_upload_names(self, name: str, call: Callable[..., tuple[int, bytes]]) -> None:
