@@ -4,9 +4,9 @@
 
 Y13/P12: 검증 결함 ID(라운드 1–11)를 0단계 스펙의 갭 ID(G1–G34) 또는 신규(스펙 외) 사유에 매핑하고, 현재 phase0 히스토리의 커밋마다 제목의 ID와 'Gaps:' 줄을 적는다. 라운드 3과 라운드 6의 N은 서로 다른 집합이므로 N3-x / N6-x로, 라운드 5의 G1–G16은 스펙의 G1–G34와 충돌하므로 V5-G1…V5-G16으로 표기한다. 매핑(ids[], wp_gaps, unused_ids, notes)은 손으로 관리하는 데이터이고, commits[]와 ids[].commits는 scripts/build_traceability_commits.py가 git 히스토리에서 다시 만든다(제목으로 이전 항목과 매칭).
 
-범위: `dad9730..bd798fb`(병합 커밋 제외, 커밋 475개). 이 표는 **표를 재생성한 커밋의 부모까지**를 덮는다 — 재생성 커밋 자신의 해시는 표에 없다(자기 해시를 담을 수 없음). CI(`python scripts/build_traceability_commits.py --check`)가 같은 범위를 히스토리에서 다시 만들어 커밋된 표와 비교한다.
+범위: `dad9730..6dfd3fa`(병합 커밋 제외, 커밋 484개). 이 표는 **표를 재생성한 커밋의 부모까지**를 덮는다 — 재생성 커밋 자신의 해시는 표에 없다(자기 해시를 담을 수 없음). CI(`python scripts/build_traceability_commits.py --check`)가 같은 범위를 히스토리에서 다시 만들어 커밋된 표와 비교한다.
 
-요약: ID 333개 — 스펙 갭에 매핑 232개(그중 신규 사유 병기 80개), 신규(스펙 외)만 101개.
+요약: ID 339개 — 스펙 갭에 매핑 232개(그중 신규 사유 병기 80개), 신규(스펙 외)만 107개.
 
 ## WP → 갭 (스펙 머리글)
 
@@ -360,6 +360,12 @@ Y13/P12: 검증 결함 ID(라운드 1–11)를 0단계 스펙의 갭 ID(G1–G34
 | R28-3 | 28 | R28-3 :tech2 (the only image with the PerTh weight) is a required gate image | — | 신규(스펙 외): 갭 목록 밖 항목 포함 | bd798fb |
 | R28-4 | 28 | R28-4 Opus encoder-string match item not marked self_declared goes to BACKLOG as BL-33 | — | 신규(스펙 외): 갭 목록 밖 항목 포함 | bd798fb |
 | R28-5 | 28 | R28-5 scan-status done before the job file is written goes to BACKLOG as BL-34 | — | 신규(스펙 외): 갭 목록 밖 항목 포함 | bd798fb |
+| R29-1 | 29 | R29-1 the web quick check (/api/check) analyzes a 0-byte uploaded file like /api/analyze-upload and  | — | 신규(스펙 외): 갭 목록 밖 항목 포함 | c6fd8f3, 6dfd3fa |
+| R29-2 | 29 | R29-2 an archive upload whose client name cannot be a file name here is analyzed under the stand-in  | — | 신규(스펙 외): 갭 목록 밖 항목 포함 | d543820, 6dfd3fa |
+| R29-3 | 29 | R29-3 an upload is routed as an archive or a single file by the client's base name (x.zip\ gives the | — | 신규(스펙 외): 갭 목록 밖 항목 포함 | bdc1438, 6dfd3fa |
+| R29-4 | 29 | R29-4 the upload cap counts uploaded files, not rows; every file over it is its own skipped row | — | 신규(스펙 외): 갭 목록 밖 항목 포함 | 8cbdeb3, 6dfd3fa |
+| R29-5 | 29 | R29-5 the web quick check refuses more than one file part instead of silently dropping the others | — | 신규(스펙 외): 갭 목록 밖 항목 포함 | 8b778c4, 6dfd3fa |
+| R29-6 | 29 | R29-6 /api/compare counts a 0-byte file, takes exactly two files and never answers 500 for an odd cl | — | 신규(스펙 외): 갭 목록 밖 항목 포함 | 43521d8, 6dfd3fa |
 
 커밋 제목에 쓰이지 않은 ID:
 
@@ -866,3 +872,12 @@ R18-14: ids[]의 갭 매핑을 커밋 제목·본문의 `Gaps:`에 맞췄다 —
 | c3ff620 | 27 | WP-J | Gaps: 신규(스펙 외) | subject | docs(phase0): round-28 verification findings — second round in the risk-based format: no Med+ on the verdict/signature/evidence axes, one false statement (R28-1) to fix, R28-2..R28-5 backlog candidates (WP-J; Gaps: 신규) |
 | cb7283d | 28 | R28-1 | Gaps: 신규(스펙 외) | subject | fix(upload): R28-1 a single upload is analyzed under the client's own base name in a fresh temp folder, so the file-name format check (and every other check that reads the name) checks the uploaded name like a folder scan or zip upload does, instead of reporting 「등록된 이름 형식 9개와 일치 없음 — 무정보」 for the server's temp file name (R28-1; Gaps: 신규) |
 | bd798fb | 28 | R28-2, R28-3, R28-4, R28-5 | Gaps: 신규(스펙 외) | subject | docs(phase0): R28-2..R28-5 round-28 backlog and handoff — :tech2 (the only image with the PerTh weight) is a required gate image beside :latest/:tech/:gui (R28-3), BL-23 carries the round-28 document measurement (R28-2), BL-33 Opus encoder string not self_declared (R28-4), BL-34 scan-status done before the job file is written (R28-5), BL-22 adds the FLUX.1/SD 1/SD 2 registered messages (R28-2, R28-3, R28-4, R28-5; Gaps: 신규) |
+| 6a3ad1f | 28 | WP-J | Gaps: G26, G27, G28 | subject | docs(qa): CONFORMANCE.md and commit traceability regenerated on bd798fb; round-28 IDs R28-1..R28-5 mapped (R28-1 fixed, R28-2..R28-5 to HANDOFF/BACKLOG) (WP-J; Gaps: G26, G27, G28) |
+| e3ce6e1 | 28 | WP-J | Gaps: 신규(스펙 외) | subject | docs(phase0): round-29 verification findings — third round in the risk-based format: no Med+ on the verdict/signature/evidence axes, one false statement (R29-1) to fix, R29-2 backlog candidate (WP-J; Gaps: 신규) |
+| c6fd8f3 | 29 | R29-1 | Gaps: 신규(스펙 외) | subject | fix(upload): R29-1 the web quick check (/api/check) analyzes a 0-byte uploaded file like /api/analyze-upload and a folder scan do, instead of refusing it with 「업로드된 파일이 없습니다」 (400) — every upload path selects file parts by one rule (a file name and a payload, empty or not) (R29-1; Gaps: 신규) |
+| d543820 | 29 | R29-2 | Gaps: 신규(스펙 외) | subject | fix(upload): R29-2 an archive upload whose client name cannot be a file name here (300 characters, 270 UTF-8 bytes on ext4, NUL) is analyzed under the stand-in upload.zip like a single upload, its members as rows under the client's name, instead of one failed row 「OSError: … 경로가 너무 깁니다」 on /api/analyze-upload and a 500 on the web /api/check; an analysis that raises on /api/check is the same failed row as on /api/analyze-upload, never a 500 (R29-2; Gaps: 신규) |
+| bdc1438 | 29 | R29-3 | Gaps: 신규(스펙 외) | subject | fix(upload): R29-3 an upload is routed as an archive or a single file by the name its bytes are written under (the client's base name), so "x.zip\" gives the folder scan's member rows and container row instead of only the container row (R29-3; Gaps: 신규) |
+| 8cbdeb3 | 29 | R29-4 | Gaps: 신규(스펙 외) | subject | fix(upload): R29-4 the upload cap (MAX_UPLOAD_FILES = 20) counts uploaded files, not rows, and every file over it is its own skipped row 「파일 수 상한(20개) 초과 — 이 요청의 파일 N개 중 앞의 20개만 분석함」, instead of an archive's member rows using up the cap so that the next file of a two-file upload was reported 「파일 수 상한(20) 초과」 and later files vanished (R29-4; Gaps: 신규) |
+| 8b778c4 | 29 | R29-5 | Gaps: 신규(스펙 외) | subject | fix(upload): R29-5 the web quick check (/api/check) refuses a request with more than one file part — 400 「빠른 검사는 파일 1개만 받습니다(받은 파일 N개) — …」 — instead of analyzing the first file and silently dropping the others (R29-5; Gaps: 신규) |
+| 43521d8 | 29 | R29-6 | Gaps: 신규(스펙 외) | subject | fix(upload): R29-6 the web comparison (/api/compare) counts a 0-byte file as a file and takes exactly two (else 400 「비교할 파일 2개가 필요합니다(받은 파일 N개)」), and writes each file like every upload so a client name this system cannot create no longer fails with a 500 — it said 「비교할 파일 2개가 필요합니다」 for two files when one was empty and silently ignored a third (R29-6; Gaps: 신규) |
+| 6dfd3fa | 29 | R29-1, R29-2, R29-3, R29-4, R29-5, R29-6 | Gaps: 신규(스펙 외) | subject | docs(phase0): R29-1..R29-6 round-29 handoff — the axis-product line of §8.3 names the upload entry-point equivalence table (UploadEntryPointEquivalenceTest) and asks a change adding an upload entry point or input class to add it there; §9 marks R29-1/R29-2 fixed and R29-3..R29-6 found by the sweep (R29-1, R29-2, R29-3, R29-4, R29-5, R29-6; Gaps: 신규) |

@@ -4,7 +4,7 @@
   "generated_by": "scripts/build_traceability_commits.py",
   "range": {
     "base": "dad97306212ac2fa07d3c0398c1f17682cec91b5",
-    "head": "bd798fb0aaabf53c41bb93c11cf560f8d6fb051a",
+    "head": "6dfd3fa2be7d73fdf52c795fe3daf49351261baf",
     "note": "range.base..range.head(병합 커밋 제외). range.head는 이 표를 재생성한 커밋의 부모 — 그 커밋 자신의 해시는 표에 없다."
   },
   "notes": [
@@ -4652,6 +4652,84 @@
       "new": "갭 목록 밖 항목 포함",
       "commits": [
         "bd798fb"
+      ],
+      "used_in_commit_subjects": true
+    },
+    {
+      "id": "R29-1",
+      "round": 29,
+      "source": "verify_round29.md",
+      "summary": "R29-1 the web quick check (/api/check) analyzes a 0-byte uploaded file like /api/analyze-upload and ",
+      "gaps": [],
+      "new": "갭 목록 밖 항목 포함",
+      "commits": [
+        "c6fd8f3",
+        "6dfd3fa"
+      ],
+      "used_in_commit_subjects": true
+    },
+    {
+      "id": "R29-2",
+      "round": 29,
+      "source": "verify_round29.md",
+      "summary": "R29-2 an archive upload whose client name cannot be a file name here is analyzed under the stand-in ",
+      "gaps": [],
+      "new": "갭 목록 밖 항목 포함",
+      "commits": [
+        "d543820",
+        "6dfd3fa"
+      ],
+      "used_in_commit_subjects": true
+    },
+    {
+      "id": "R29-3",
+      "round": 29,
+      "source": "verify_round29.md",
+      "summary": "R29-3 an upload is routed as an archive or a single file by the client's base name (x.zip\\ gives the",
+      "gaps": [],
+      "new": "갭 목록 밖 항목 포함",
+      "commits": [
+        "bdc1438",
+        "6dfd3fa"
+      ],
+      "used_in_commit_subjects": true
+    },
+    {
+      "id": "R29-4",
+      "round": 29,
+      "source": "verify_round29.md",
+      "summary": "R29-4 the upload cap counts uploaded files, not rows; every file over it is its own skipped row",
+      "gaps": [],
+      "new": "갭 목록 밖 항목 포함",
+      "commits": [
+        "8cbdeb3",
+        "6dfd3fa"
+      ],
+      "used_in_commit_subjects": true
+    },
+    {
+      "id": "R29-5",
+      "round": 29,
+      "source": "verify_round29.md",
+      "summary": "R29-5 the web quick check refuses more than one file part instead of silently dropping the others",
+      "gaps": [],
+      "new": "갭 목록 밖 항목 포함",
+      "commits": [
+        "8b778c4",
+        "6dfd3fa"
+      ],
+      "used_in_commit_subjects": true
+    },
+    {
+      "id": "R29-6",
+      "round": 29,
+      "source": "verify_round29.md",
+      "summary": "R29-6 /api/compare counts a 0-byte file, takes exactly two files and never answers 500 for an odd cl",
+      "gaps": [],
+      "new": "갭 목록 밖 항목 포함",
+      "commits": [
+        "43521d8",
+        "6dfd3fa"
       ],
       "used_in_commit_subjects": true
     }
@@ -13856,6 +13934,182 @@
         "R28-3: 갭 목록 밖 항목 포함",
         "R28-4: 갭 목록 밖 항목 포함",
         "R28-5: 갭 목록 밖 항목 포함"
+      ],
+      "gaps_line": "Gaps: 신규(스펙 외)",
+      "gaps_source": "subject"
+    },
+    {
+      "sha": "6a3ad1f5d53471e0e95c6e870a1f2bfef9d122b4",
+      "short": "6a3ad1f",
+      "round": "28",
+      "subject": "docs(qa): CONFORMANCE.md and commit traceability regenerated on bd798fb; round-28 IDs R28-1..R28-5 mapped (R28-1 fixed, R28-2..R28-5 to HANDOFF/BACKLOG) (WP-J; Gaps: G26, G27, G28)",
+      "pre_rewrite_subject": null,
+      "ids": [
+        "WP-J"
+      ],
+      "gaps_named_in_subject": [
+        "G26",
+        "G27",
+        "G28"
+      ],
+      "gaps": [
+        "G26",
+        "G27",
+        "G28"
+      ],
+      "new": false,
+      "new_reasons": [],
+      "gaps_line": "Gaps: G26, G27, G28",
+      "gaps_source": "subject"
+    },
+    {
+      "sha": "e3ce6e16064fd3c1191102d62e93daa01b913ab0",
+      "short": "e3ce6e1",
+      "round": "28",
+      "subject": "docs(phase0): round-29 verification findings — third round in the risk-based format: no Med+ on the verdict/signature/evidence axes, one false statement (R29-1) to fix, R29-2 backlog candidate (WP-J; Gaps: 신규)",
+      "pre_rewrite_subject": null,
+      "ids": [
+        "WP-J"
+      ],
+      "gaps_named_in_subject": [],
+      "gaps": [],
+      "new": true,
+      "new_reasons": [],
+      "gaps_line": "Gaps: 신규(스펙 외)",
+      "gaps_source": "subject"
+    },
+    {
+      "sha": "c6fd8f33eadbf70487c6ddf98d527b2c0d23e94c",
+      "short": "c6fd8f3",
+      "round": "29",
+      "subject": "fix(upload): R29-1 the web quick check (/api/check) analyzes a 0-byte uploaded file like /api/analyze-upload and a folder scan do, instead of refusing it with 「업로드된 파일이 없습니다」 (400) — every upload path selects file parts by one rule (a file name and a payload, empty or not) (R29-1; Gaps: 신규)",
+      "pre_rewrite_subject": null,
+      "ids": [
+        "R29-1"
+      ],
+      "gaps_named_in_subject": [],
+      "gaps": [],
+      "new": true,
+      "new_reasons": [
+        "R29-1: 갭 목록 밖 항목 포함"
+      ],
+      "gaps_line": "Gaps: 신규(스펙 외)",
+      "gaps_source": "subject"
+    },
+    {
+      "sha": "d543820d386431148042abc95ff0d9878a3963b9",
+      "short": "d543820",
+      "round": "29",
+      "subject": "fix(upload): R29-2 an archive upload whose client name cannot be a file name here (300 characters, 270 UTF-8 bytes on ext4, NUL) is analyzed under the stand-in upload.zip like a single upload, its members as rows under the client's name, instead of one failed row 「OSError: … 경로가 너무 깁니다」 on /api/analyze-upload and a 500 on the web /api/check; an analysis that raises on /api/check is the same failed row as on /api/analyze-upload, never a 500 (R29-2; Gaps: 신규)",
+      "pre_rewrite_subject": null,
+      "ids": [
+        "R29-2"
+      ],
+      "gaps_named_in_subject": [],
+      "gaps": [],
+      "new": true,
+      "new_reasons": [
+        "R29-2: 갭 목록 밖 항목 포함"
+      ],
+      "gaps_line": "Gaps: 신규(스펙 외)",
+      "gaps_source": "subject"
+    },
+    {
+      "sha": "bdc1438d411a248997e3cdba3867a4f08b260d0c",
+      "short": "bdc1438",
+      "round": "29",
+      "subject": "fix(upload): R29-3 an upload is routed as an archive or a single file by the name its bytes are written under (the client's base name), so \"x.zip\\\" gives the folder scan's member rows and container row instead of only the container row (R29-3; Gaps: 신규)",
+      "pre_rewrite_subject": null,
+      "ids": [
+        "R29-3"
+      ],
+      "gaps_named_in_subject": [],
+      "gaps": [],
+      "new": true,
+      "new_reasons": [
+        "R29-3: 갭 목록 밖 항목 포함"
+      ],
+      "gaps_line": "Gaps: 신규(스펙 외)",
+      "gaps_source": "subject"
+    },
+    {
+      "sha": "8cbdeb38ebdd97aa4e61675bb6ada9c137cf885b",
+      "short": "8cbdeb3",
+      "round": "29",
+      "subject": "fix(upload): R29-4 the upload cap (MAX_UPLOAD_FILES = 20) counts uploaded files, not rows, and every file over it is its own skipped row 「파일 수 상한(20개) 초과 — 이 요청의 파일 N개 중 앞의 20개만 분석함」, instead of an archive's member rows using up the cap so that the next file of a two-file upload was reported 「파일 수 상한(20) 초과」 and later files vanished (R29-4; Gaps: 신규)",
+      "pre_rewrite_subject": null,
+      "ids": [
+        "R29-4"
+      ],
+      "gaps_named_in_subject": [],
+      "gaps": [],
+      "new": true,
+      "new_reasons": [
+        "R29-4: 갭 목록 밖 항목 포함"
+      ],
+      "gaps_line": "Gaps: 신규(스펙 외)",
+      "gaps_source": "subject"
+    },
+    {
+      "sha": "8b778c4311bb7071e7d9703fe8e7f83974eaf592",
+      "short": "8b778c4",
+      "round": "29",
+      "subject": "fix(upload): R29-5 the web quick check (/api/check) refuses a request with more than one file part — 400 「빠른 검사는 파일 1개만 받습니다(받은 파일 N개) — …」 — instead of analyzing the first file and silently dropping the others (R29-5; Gaps: 신규)",
+      "pre_rewrite_subject": null,
+      "ids": [
+        "R29-5"
+      ],
+      "gaps_named_in_subject": [],
+      "gaps": [],
+      "new": true,
+      "new_reasons": [
+        "R29-5: 갭 목록 밖 항목 포함"
+      ],
+      "gaps_line": "Gaps: 신규(스펙 외)",
+      "gaps_source": "subject"
+    },
+    {
+      "sha": "43521d8adf9cafe525159aa9a41678fbd3aff343",
+      "short": "43521d8",
+      "round": "29",
+      "subject": "fix(upload): R29-6 the web comparison (/api/compare) counts a 0-byte file as a file and takes exactly two (else 400 「비교할 파일 2개가 필요합니다(받은 파일 N개)」), and writes each file like every upload so a client name this system cannot create no longer fails with a 500 — it said 「비교할 파일 2개가 필요합니다」 for two files when one was empty and silently ignored a third (R29-6; Gaps: 신규)",
+      "pre_rewrite_subject": null,
+      "ids": [
+        "R29-6"
+      ],
+      "gaps_named_in_subject": [],
+      "gaps": [],
+      "new": true,
+      "new_reasons": [
+        "R29-6: 갭 목록 밖 항목 포함"
+      ],
+      "gaps_line": "Gaps: 신규(스펙 외)",
+      "gaps_source": "subject"
+    },
+    {
+      "sha": "6dfd3fa2be7d73fdf52c795fe3daf49351261baf",
+      "short": "6dfd3fa",
+      "round": "29",
+      "subject": "docs(phase0): R29-1..R29-6 round-29 handoff — the axis-product line of §8.3 names the upload entry-point equivalence table (UploadEntryPointEquivalenceTest) and asks a change adding an upload entry point or input class to add it there; §9 marks R29-1/R29-2 fixed and R29-3..R29-6 found by the sweep (R29-1, R29-2, R29-3, R29-4, R29-5, R29-6; Gaps: 신규)",
+      "pre_rewrite_subject": null,
+      "ids": [
+        "R29-1",
+        "R29-2",
+        "R29-3",
+        "R29-4",
+        "R29-5",
+        "R29-6"
+      ],
+      "gaps_named_in_subject": [],
+      "gaps": [],
+      "new": true,
+      "new_reasons": [
+        "R29-1: 갭 목록 밖 항목 포함",
+        "R29-2: 갭 목록 밖 항목 포함",
+        "R29-3: 갭 목록 밖 항목 포함",
+        "R29-4: 갭 목록 밖 항목 포함",
+        "R29-5: 갭 목록 밖 항목 포함",
+        "R29-6: 갭 목록 밖 항목 포함"
       ],
       "gaps_line": "Gaps: 신규(스펙 외)",
       "gaps_source": "subject"
