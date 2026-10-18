@@ -4,7 +4,7 @@
   "generated_by": "scripts/build_traceability_commits.py",
   "range": {
     "base": "dad97306212ac2fa07d3c0398c1f17682cec91b5",
-    "head": "454fd848fd3ad69d50bc1b5e73e54f3f7da81bdb",
+    "head": "8514c9d6e431e6948afc0e7a4a60a9c25bdd59b7",
     "note": "range.base..range.head(병합 커밋 제외). range.head는 이 표를 재생성한 커밋의 부모 — 그 커밋 자신의 해시는 표에 없다."
   },
   "notes": [
@@ -4799,6 +4799,125 @@
         "210cf09",
         "5bed165",
         "454fd84"
+      ],
+      "used_in_commit_subjects": true
+    },
+    {
+      "id": "R31-1",
+      "round": 31,
+      "source": "verify_round31.md",
+      "summary": "R31-1 a multipart body whose lines end in LF or CR (LF-only, mixed, LF preamble) is parsed as 0cfbd0",
+      "gaps": [],
+      "new": "갭 목록 밖 항목 포함",
+      "commits": [
+        "1286f70",
+        "94ca8ea",
+        "8514c9d"
+      ],
+      "used_in_commit_subjects": true
+    },
+    {
+      "id": "R31-2",
+      "round": 31,
+      "source": "verify_round31.md",
+      "summary": "R31-2 the media type is case-insensitive (Multipart/Form-Data was 「multipart/form-data 업로드가 필요합니다」)",
+      "gaps": [],
+      "new": "갭 목록 밖 항목 포함",
+      "commits": [
+        "1286f70",
+        "8514c9d"
+      ],
+      "used_in_commit_subjects": true
+    },
+    {
+      "id": "R31-3",
+      "round": 31,
+      "source": "verify_round31.md",
+      "summary": "R31-3 an empty filename* falls back to filename (a file sent read 「업로드된 파일이 없습니다」)",
+      "gaps": [],
+      "new": "갭 목록 밖 항목 포함",
+      "commits": [
+        "1286f70",
+        "8514c9d"
+      ],
+      "used_in_commit_subjects": true
+    },
+    {
+      "id": "R31-4",
+      "round": 31,
+      "source": "verify_round31.md",
+      "summary": "R31-4 a filename* charset that raises (undefined) is skipped like an unknown one — every upload path",
+      "gaps": [],
+      "new": "갭 목록 밖 항목 포함",
+      "commits": [
+        "1286f70",
+        "8514c9d"
+      ],
+      "used_in_commit_subjects": true
+    },
+    {
+      "id": "R31-5",
+      "round": 31,
+      "source": "verify_round31.md",
+      "summary": "R31-5 the GUI quick check's archive toast counts the members analyzed and names an archive that did ",
+      "gaps": [],
+      "new": "갭 목록 밖 항목 포함",
+      "commits": [
+        "3127f14",
+        "8514c9d"
+      ],
+      "used_in_commit_subjects": true
+    },
+    {
+      "id": "R31-6",
+      "round": 31,
+      "source": "verify_round31.md",
+      "summary": "R31-6 an upload request has at most 1000 parts (nameless ones count), refused before any row is made",
+      "gaps": [],
+      "new": "갭 목록 밖 항목 포함",
+      "commits": [
+        "1286f70",
+        "8514c9d"
+      ],
+      "used_in_commit_subjects": true
+    },
+    {
+      "id": "R31-7",
+      "round": 31,
+      "source": "verify_round31.md",
+      "summary": "R31-7 a speaker comparison below 1 s or mean RMS 1e-4 shows no number (a 4-sample WAV scored 47)",
+      "gaps": [],
+      "new": "갭 목록 밖 항목 포함",
+      "commits": [
+        "e3e7c0f",
+        "94ca8ea",
+        "8514c9d"
+      ],
+      "used_in_commit_subjects": true
+    },
+    {
+      "id": "R31-8",
+      "round": 31,
+      "source": "verify_round31.md",
+      "summary": "R31-8 the stylometry floor counts visible characters only (100 zero-width spaces were 「표본 100자」)",
+      "gaps": [],
+      "new": "갭 목록 밖 항목 포함",
+      "commits": [
+        "e3e7c0f",
+        "8514c9d"
+      ],
+      "used_in_commit_subjects": true
+    },
+    {
+      "id": "R31-9",
+      "round": 31,
+      "source": "verify_round31.md",
+      "summary": "R31-9 a bare LF ends an unquoted header value (filename=a.png<LF>X-Evil: 1 named a file with a line ",
+      "gaps": [],
+      "new": "갭 목록 밖 항목 포함",
+      "commits": [
+        "1286f70",
+        "8514c9d"
       ],
       "used_in_commit_subjects": true
     }
@@ -14311,6 +14430,166 @@
         "R30-3: 갭 목록 밖 항목 포함",
         "R30-4: 갭 목록 밖 항목 포함",
         "R30-5: 갭 목록 밖 항목 포함"
+      ],
+      "gaps_line": "Gaps: 신규(스펙 외)",
+      "gaps_source": "subject"
+    },
+    {
+      "sha": "c29cbb593302ad1bc7f8e1778546e2952202b292",
+      "short": "c29cbb5",
+      "round": "30",
+      "subject": "docs(qa): CONFORMANCE.md and commit traceability regenerated on 454fd84; round-30 IDs R30-1..R30-5 mapped (R30-1, R30-2, R30-3, R30-5 fixed by the multipart/form-data parser; R30-4 by the unmeasured comparison) (WP-J; Gaps: G26, G27, G28)",
+      "pre_rewrite_subject": null,
+      "ids": [
+        "WP-J"
+      ],
+      "gaps_named_in_subject": [
+        "G26",
+        "G27",
+        "G28"
+      ],
+      "gaps": [
+        "G26",
+        "G27",
+        "G28"
+      ],
+      "new": false,
+      "new_reasons": [],
+      "gaps_line": "Gaps: G26, G27, G28",
+      "gaps_source": "subject"
+    },
+    {
+      "sha": "cce03f2bada63ba966fa7800cd567a1995d6c5e5",
+      "short": "cce03f2",
+      "round": "30",
+      "subject": "docs(phase0): round-31 verification findings — fifth round in the risk-based format: no Med+ on the verdict/signature/evidence axes, four false statements (R31-1, R31-2, R31-3, R31-5, all Low) to fix, R31-4 and four backlog candidates (WP-J; Gaps: 신규)",
+      "pre_rewrite_subject": null,
+      "ids": [
+        "WP-J"
+      ],
+      "gaps_named_in_subject": [],
+      "gaps": [],
+      "new": true,
+      "new_reasons": [],
+      "gaps_line": "Gaps: 신규(스펙 외)",
+      "gaps_source": "subject"
+    },
+    {
+      "sha": "1286f7035c5d242a4e71ca3c449a8c7c681e6050",
+      "short": "1286f70",
+      "round": "31",
+      "subject": "fix(upload): R31-1 R31-2 R31-3 R31-4 R31-6 R31-9 the multipart/form-data parser takes a bare LF or CR as a line end as the e-mail parser did (an LF-only, mixed or LF-preamble body was 「boundary와 다릅니다」/「잘렸습니다」/「업로드된 파일이 없습니다」), reads the media type and `Boundary=` case-insensitively (`Multipart/Form-Data` was 「multipart/form-data 업로드가 필요합니다」), lets an empty filename* fall back to filename, skips a filename* charset that raises (`undefined` was a 500), caps a request at 1000 parts before any row, and ends an unquoted name at a bare LF (R31-1, R31-2, R31-3, R31-4, R31-6, R31-9; Gaps: 신규)",
+      "pre_rewrite_subject": null,
+      "ids": [
+        "R31-1",
+        "R31-2",
+        "R31-3",
+        "R31-4",
+        "R31-6",
+        "R31-9"
+      ],
+      "gaps_named_in_subject": [],
+      "gaps": [],
+      "new": true,
+      "new_reasons": [
+        "R31-1: 갭 목록 밖 항목 포함",
+        "R31-2: 갭 목록 밖 항목 포함",
+        "R31-3: 갭 목록 밖 항목 포함",
+        "R31-4: 갭 목록 밖 항목 포함",
+        "R31-6: 갭 목록 밖 항목 포함",
+        "R31-9: 갭 목록 밖 항목 포함"
+      ],
+      "gaps_line": "Gaps: 신규(스펙 외)",
+      "gaps_source": "subject"
+    },
+    {
+      "sha": "3127f143c09db5ceabf9dbea3b045a2ab735a444",
+      "short": "3127f14",
+      "round": "31",
+      "subject": "fix(gui): R31-5 the quick check's archive toast counts the members it analyzed — 「압축 해제 — 구성 파일 N개 분석됨」 from member rows whose status is analyzed (plus 「M개 분석 못 함」), 「압축 파일을 열지 못했습니다」 when the archive check failed or was skipped, 「압축 파일에서 분석한 구성 파일이 없습니다」 when it opened with nothing analyzed — it said 「압축 해제 — 1개 파일 분석됨」 for a corrupt or empty zip and counted the container row (R31-5; Gaps: 신규)",
+      "pre_rewrite_subject": null,
+      "ids": [
+        "R31-5"
+      ],
+      "gaps_named_in_subject": [],
+      "gaps": [],
+      "new": true,
+      "new_reasons": [
+        "R31-5: 갭 목록 밖 항목 포함"
+      ],
+      "gaps_line": "Gaps: 신규(스펙 외)",
+      "gaps_source": "subject"
+    },
+    {
+      "sha": "e3e7c0f98ce0ff37e9d2164dcd7ee4ee7f42cff7",
+      "short": "e3e7c0f",
+      "round": "31",
+      "subject": "fix(compare): R31-7 R31-8 a comparison below its floor shows no number — a side shorter than 1 s or with mean frame RMS under 1e-4 (silence) gives raw_score null, distance null and 「비교 하한에 못 미쳐」 naming the side and its length or RMS (a 4-sample WAV scored 47, silence against silence 100 with distance 0), and the 8-character text floor counts visible characters only (100 zero-width spaces or NULs were 「표본 100자」 and compared) (R31-7, R31-8; Gaps: 신규)",
+      "pre_rewrite_subject": null,
+      "ids": [
+        "R31-7",
+        "R31-8"
+      ],
+      "gaps_named_in_subject": [],
+      "gaps": [],
+      "new": true,
+      "new_reasons": [
+        "R31-7: 갭 목록 밖 항목 포함",
+        "R31-8: 갭 목록 밖 항목 포함"
+      ],
+      "gaps_line": "Gaps: 신규(스펙 외)",
+      "gaps_source": "subject"
+    },
+    {
+      "sha": "94ca8ea1825ec838dae21daa330f2cc74804f169",
+      "short": "94ca8ea",
+      "round": "31",
+      "subject": "docs(phase0): R31-7 R31-1 round-31 backlog — BL-37 the speaker-comparison floor leaves a DC-offset WAV compared (RMS above the floor; a zero-crossing floor would skip real recordings with a large offset), BL-38 the bare-LF line end's ambiguities (a full `\\n--boundary` inside a CRLF body's data now delimits; a CR ending a part of an LF-delimited body is read as the delimiter's) (R31-1, R31-7; Gaps: 신규)",
+      "pre_rewrite_subject": null,
+      "ids": [
+        "R31-1",
+        "R31-7"
+      ],
+      "gaps_named_in_subject": [],
+      "gaps": [],
+      "new": true,
+      "new_reasons": [
+        "R31-1: 갭 목록 밖 항목 포함",
+        "R31-7: 갭 목록 밖 항목 포함"
+      ],
+      "gaps_line": "Gaps: 신규(스펙 외)",
+      "gaps_source": "subject"
+    },
+    {
+      "sha": "8514c9d6e431e6948afc0e7a4a60a9c25bdd59b7",
+      "short": "8514c9d",
+      "round": "31",
+      "subject": "docs(phase0): R31-1..R31-9 round-31 handoff — the axis-product line of §8.3 lists the equivalence table's round-31 axes (line endings and their truncations × media-type case × filename* fallbacks × the 1000-part cap); §9 marks R31-1..R31-5 fixed and names R31-6..R31-9, the backlog candidates fixed this round, and BL-37/BL-38 (R31-1, R31-2, R31-3, R31-4, R31-5, R31-6, R31-7, R31-8, R31-9; Gaps: 신규)",
+      "pre_rewrite_subject": null,
+      "ids": [
+        "R31-1",
+        "R31-2",
+        "R31-3",
+        "R31-4",
+        "R31-5",
+        "R31-6",
+        "R31-7",
+        "R31-8",
+        "R31-9"
+      ],
+      "gaps_named_in_subject": [],
+      "gaps": [],
+      "new": true,
+      "new_reasons": [
+        "R31-1: 갭 목록 밖 항목 포함",
+        "R31-2: 갭 목록 밖 항목 포함",
+        "R31-3: 갭 목록 밖 항목 포함",
+        "R31-4: 갭 목록 밖 항목 포함",
+        "R31-5: 갭 목록 밖 항목 포함",
+        "R31-6: 갭 목록 밖 항목 포함",
+        "R31-7: 갭 목록 밖 항목 포함",
+        "R31-8: 갭 목록 밖 항목 포함",
+        "R31-9: 갭 목록 밖 항목 포함"
       ],
       "gaps_line": "Gaps: 신규(스펙 외)",
       "gaps_source": "subject"
