@@ -1871,8 +1871,9 @@ class ErrorTableEveryRowTest(unittest.TestCase):
         cut, cut_type = self._multipart(("files", "photo.png", png), close=False)
         pair, pair_type = self._multipart(("a", "a.txt", "글 하나입니다. 충분히 긴 문장입니다.".encode()), ("b", "b.wav", (f / "tone.wav").read_bytes()))
         cut_pair, _ = self._multipart(("a", "a.txt", b"one"), ("b", "b.txt", b"two"), close=False)
-        # R29-5: several files on the single-file quick check.
+        # R29-5: several files on the single-file quick check; R29-6: a third file on the comparison.
         two_files, two_type = self._multipart(("file", "photo.png", png), ("file", "memo.txt", b"memo"))
+        triple, triple_type = self._multipart(("a", "a.txt", b"one"), ("b", "b.txt", b"two"), ("c", "c.txt", b"three"))
         files = [
             ("POST", "/api/analyze/image?file_path={}"), ("POST", "/api/analyze/audio?file_path={}"),
             ("POST", "/api/analyze/face?file_path={}"), ("POST", "/api/analyze/forensic?file_path={}"),
@@ -1952,7 +1953,8 @@ class ErrorTableEveryRowTest(unittest.TestCase):
                     case("api", "POST", "/api/check?text=", 400, "file_path 또는 text가 필요합니다")],
             "E24": [case("web", "POST", "/api/compare", 400, text, body, ctype) for body, ctype, text in (
                 (b"x", "text/plain", "multipart/form-data 본문이 필요합니다"),
-                (upload, upload_type, "비교할 파일 2개가 필요합니다"),
+                (upload, upload_type, webapp_api.COMPARE_TWO_FILES.format(count=1)),
+                (triple, triple_type, webapp_api.COMPARE_TWO_FILES.format(count=3)),
                 (pair, pair_type, "지원되는 쌍이 아닙니다(.txt, .wav)"),
                 (cut_pair, pair_type, "업로드 본문이 잘렸습니다"),
             )],

@@ -1186,6 +1186,9 @@ UPLOAD_FILES_OVER_CAP = "파일 수 상한({cap}개) 초과 — 이 요청의 �
 # R29-5 (round 29): /api/check is the single-file quick check; a request with several files is refused, not cut to one.
 CHECK_ONE_FILE = "빠른 검사는 파일 1개만 받습니다(받은 파일 {count}개) — 여러 파일은 업로드 검사(/api/analyze-upload)로 보내십시오"
 
+# R29-6 (round 29): /api/compare compares exactly two files; any other count is refused with the count received.
+COMPARE_TWO_FILES = "비교할 파일 2개가 필요합니다(받은 파일 {count}개)"
+
 
 @in_worker_scope  # R20-2: one audio worker for all files (was one per file)
 def _analyze_upload_payload(content_type: str, body: bytes) -> dict[str, object]:
@@ -1394,18 +1397,15 @@ def _compare_payload(content_type: str, body: bytes) -> dict[str, object]:
     message = BytesParser(policy=email_policy).parsebytes(
         b"Content-Type: " + content_type.encode("latin-1") + b"\r\n\r\n" + body
     )
-    parts = [
-        p for p in message.iter_parts() if _part_filename(p) and _part_bytes(p)
-    ]
-    if len(parts) < 2:
-        return ApiError("비교할 파일 2개가 필요합니다", 400)
-    tmp_paths: list[Path] = []
-    try:
-        for part in parts[:2]:
-            suffix = Path(_part_filename(part) or "upload").suffix[:16]
-            with tempfile.NamedTemporaryFile(suffix=suffix, delete=False, dir=scratch_dir()) as tmp:
-                tmp.write(_part_bytes(part) or b"")
-                tmp_paths.append(Path(tmp.name))
+    # R29-6 (round 29): parts as every upload path selects them — a 0-byte file is a file (it was dropped, so two
+    # files sent gave "비교할 파일 2개가 필요합니다"), and a third file is refused instead of silently ignored.
+    parts = _upload_file_parts(message)
+    if len(parts) != 2:
+        return ApiError(COMPARE_TWO_FILES.format(count=len(parts)), 400)
+    with contextlib.ExitStack() as stack:
+        # The comparison reads only each file's suffix (its kind); written like every upload (R28-1, R29-2), so a
+        # client name this system cannot create no longer makes the temp file fail (a 500).
+        tmp_paths = [stack.enter_context(_upload_copy(name, payload))[0] for name, payload in parts]
         from .core import compare_files
         result = compare_files(tmp_paths[0], tmp_paths[1])
         if isinstance(result, dict) and not result.get("error"):
@@ -1418,9 +1418,6 @@ def _compare_payload(content_type: str, body: bytes) -> dict[str, object]:
         if isinstance(result, dict) and result.get("error"):
             return ApiError(str(result["error"]), 400)  # X4: e.g. a mixed audio/text pair
         return result
-    finally:
-        for tmp_path in tmp_paths:
-            tmp_path.unlink(missing_ok=True)
 
 
 def _feedback_path() -> Path:

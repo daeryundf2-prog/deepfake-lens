@@ -640,6 +640,26 @@ class UploadEntryPointEquivalenceTest(unittest.TestCase):
                 with self.subTest(file=client, leg=leg):
                     self.assertEqual([(r["path"], r["status"], r["error"]) for r in got], [(client, "failed", "RuntimeError: 주입된 실패")])
 
+    def test_compare_takes_exactly_two_files_empty_or_not_and_never_answers_500(self) -> None:
+        # R29-6: /api/compare dropped a 0-byte file (two files sent: "비교할 파일 2개가 필요합니다"), ignored a third,
+        # and a client name this system cannot create made its temp file fail (a 500).
+        from deepfake_lens import webapp_api
+
+        _legs, web = self._upload_legs()
+        text = self.bytes["txt"]
+        for label, parts in (("two 0-byte texts", [("a.txt", b""), ("b.txt", b"")]),
+                             ("300-char and NUL names", [("A" * 300 + ".txt", text), ("n\x00.txt", text)]),
+                             ("traversal names", [("../../a.txt", text), ("C:\\x\\b.txt", text)])):
+            with self.subTest(case=label):
+                ctype, body = _form(parts)
+                status, payload = web("/api/compare", ctype, body)
+                self.assertEqual(status, 200, payload)
+                self.assertNotIn("dflens-up-", json.dumps(payload, ensure_ascii=False))
+        for count in (1, 3):
+            with self.subTest(files=count):
+                ctype, body = _form([(f"{i}.txt", text) for i in range(count)])
+                self.assertEqual(web("/api/compare", ctype, body), (400, {"error": webapp_api.COMPARE_TWO_FILES.format(count=count)}))
+
 
 if __name__ == "__main__":
     unittest.main()

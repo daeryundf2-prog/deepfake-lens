@@ -153,6 +153,18 @@ UI outside this table) are disabled and answer 404 `찾을 수 없는 경로입�
 are analyzed through the upload endpoint `POST /api/analyze-upload`
 (multipart — R9-8: this paragraph used to say there was none). Upload rows
 are marked `"source": "upload"` and are never signed by `/api/report` (P6).
+R29 (round 29): every upload entry point — `/api/analyze-upload` on both
+servers, the web GUI's `/api/check` file upload — gives, for each file part
+(a part with a file name, a 0-byte one included), the rows a folder scan
+gives for the same bytes under the client's base name (the last `/`- or
+`\`-separated component): an archive (decided on that name) its member rows
+and container row, any other file its one row. A name this system cannot
+create (too long, NUL, not encodable) is analyzed under `upload<suffix>`
+(`upload.zip`, `upload.tar.gz`) with the file-name check `skipped`; an
+analysis that raises is one `failed` row. Up to `MAX_UPLOAD_FILES` (20)
+*files* are analyzed per request; each further file is a `skipped` row
+`파일 수 상한(20개) 초과 — …`. `/api/check` takes exactly one file and
+`/api/compare` exactly two (else 400 with the count received).
 Analysis failures surface as HTTP 500 with the exception text.
 
 `/api/check/stream` emits SSE frames `event: <name>\ndata: <json>\n\n`.
@@ -301,7 +313,7 @@ endpoints (`/api/analyze/*`, `/api/classify`, `/api/check`, `/api/compare`,
 | E21 | POST `/api/check` (web) | invalid JSON / not an object / text < 8 or > 256 KB / not multipart / no file / more than one file (R29-5 — only the first was analyzed) / cut-off multipart (P8) | 400 | `JSON 본문을 해석할 수 없습니다`, `요청 본문은 JSON 객체여야 합니다`, `분석할 텍스트가 너무 짧습니다 (8자 이상).`, `빠른 검사는 파일 1개만 받습니다(받은 파일 N개) — …`, … |
 | E22 | POST `/api/check` (web) | body over `MAX_UPLOAD_BYTES` | 413 | `요청 본문이 상한(…바이트)을 초과합니다` |
 | E23 | POST `/api/check` (api) | neither `file_path` nor `text`; text > 256 KB | 400 | `file_path 또는 text가 필요합니다` / `텍스트가 256KB를 초과합니다` |
-| E24 | POST `/api/compare` (web) | not multipart / fewer than 2 files / mixed pair / cut-off multipart (P8) | 400 | `비교할 파일 2개가 필요합니다`, … |
+| E24 | POST `/api/compare` (web) | not multipart / not exactly 2 files (R29-6: a 0-byte file counts, a third is refused — it was ignored) / mixed pair / cut-off multipart (P8) | 400 | `비교할 파일 2개가 필요합니다(받은 파일 N개)`, … |
 | E25 | POST `/api/compare` (web) | comparison raised | 500 | `비교 분석 중 오류가 발생했습니다` (+ `detail`) |
 | E26 | POST `/api/compare` (api) | comparison error / raised | 400 / 500 | the comparison's Korean error |
 | E27 | POST `/api/report` (both) | malformed body (not an object, too deep — R11-3), an unknown field (P0R-6: `items`, `options`, `scan_root`, `summary`, … are no longer accepted), `scan_job` missing (without `uploads`) or not a string, `exhibit_paths` not a list of strings / empty / with a repeated path / naming a path that is not a row of the job / without a job, `side` other than `plaintiff`, a case field that is not a string, `uploads` not a list of objects or an upload row without a path or with a name outside the R22-8 form, bad `format` | 400 | see "REST API endpoints" (N11); `JSON 중첩이 너무 깊습니다` |
