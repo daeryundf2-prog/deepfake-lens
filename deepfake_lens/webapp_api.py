@@ -1183,6 +1183,9 @@ def _upload_file_parts(message: Any) -> list[tuple[str, bytes]]:
 # counted rows, so an archive with 20 members made the next file "파일 수 상한(20) 초과" in a two-file upload.
 UPLOAD_FILES_OVER_CAP = "파일 수 상한({cap}개) 초과 — 이 요청의 파일 {count}개 중 앞의 {cap}개만 분석함"
 
+# R29-5 (round 29): /api/check is the single-file quick check; a request with several files is refused, not cut to one.
+CHECK_ONE_FILE = "빠른 검사는 파일 1개만 받습니다(받은 파일 {count}개) — 여러 파일은 업로드 검사(/api/analyze-upload)로 보내십시오"
+
 
 @in_worker_scope  # R20-2: one audio worker for all files (was one per file)
 def _analyze_upload_payload(content_type: str, body: bytes) -> dict[str, object]:
@@ -1320,7 +1323,10 @@ def _check_file_payload(content_type: str, body: bytes) -> dict[str, object]:
     files = _upload_file_parts(message)  # R29-1: a 0-byte file is a file (was "업로드된 파일이 없습니다")
     if not files:
         return ApiError("업로드된 파일이 없습니다", 400)
-    filename, payload = files[0]
+    if len(files) > 1:
+        # R29-5: the quick check takes one file — the others were silently dropped (only the first was analyzed).
+        return ApiError(CHECK_ONE_FILE.format(count=len(files)), 400)
+    [(filename, payload)] = files
     from .archives import is_archive
     from .result_text import escape_row_path
     options = _web_options()

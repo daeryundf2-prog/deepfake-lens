@@ -298,7 +298,7 @@ endpoints (`/api/analyze/*`, `/api/classify`, `/api/check`, `/api/compare`,
 | E18 | POST `/api/analyze-upload` (both) | not multipart, no file part, empty body, body cut off before its closing boundary (P8 — was analyzed as a partial file, 200) | 400 | `multipart/form-data 업로드가 필요합니다`, `업로드된 파일이 없습니다`, `업로드 본문이 잘렸습니다(닫는 경계 없음) — …` |
 | E19 | POST `/api/analyze-upload` (both) | body over `MAX_UPLOAD_BYTES` | 413 | `업로드 크기가 상한(…바이트)을 초과합니다` |
 | E20 | POST `/api/analyze-upload` (web) | analysis raised | 500 | `업로드 분석 중 오류가 발생했습니다` (+ `detail`) |
-| E21 | POST `/api/check` (web) | invalid JSON / not an object / text < 8 or > 256 KB / not multipart / no file / cut-off multipart (P8) | 400 | `JSON 본문을 해석할 수 없습니다`, `요청 본문은 JSON 객체여야 합니다`, `분석할 텍스트가 너무 짧습니다 (8자 이상).`, … |
+| E21 | POST `/api/check` (web) | invalid JSON / not an object / text < 8 or > 256 KB / not multipart / no file / more than one file (R29-5 — only the first was analyzed) / cut-off multipart (P8) | 400 | `JSON 본문을 해석할 수 없습니다`, `요청 본문은 JSON 객체여야 합니다`, `분석할 텍스트가 너무 짧습니다 (8자 이상).`, `빠른 검사는 파일 1개만 받습니다(받은 파일 N개) — …`, … |
 | E22 | POST `/api/check` (web) | body over `MAX_UPLOAD_BYTES` | 413 | `요청 본문이 상한(…바이트)을 초과합니다` |
 | E23 | POST `/api/check` (api) | neither `file_path` nor `text`; text > 256 KB | 400 | `file_path 또는 text가 필요합니다` / `텍스트가 256KB를 초과합니다` |
 | E24 | POST `/api/compare` (web) | not multipart / fewer than 2 files / mixed pair / cut-off multipart (P8) | 400 | `비교할 파일 2개가 필요합니다`, … |

@@ -602,6 +602,18 @@ class UploadEntryPointEquivalenceTest(unittest.TestCase):
                                        "error": webapp_api.UPLOAD_FILES_OVER_CAP.format(cap=2, count=4)} for name in ("t.txt", "u.txt")])
                     self.assertEqual(payload["summary"]["skipped"], 2)
 
+    def test_the_quick_check_refuses_several_files_instead_of_dropping_them(self) -> None:
+        # R29-5: /api/check analyzed the first file part and silently dropped the others.
+        from deepfake_lens import webapp_api
+
+        _legs, web = self._upload_legs()
+        for parts in ([(self.K + ".png", self.bytes["png"]), ("b.txt", self.bytes["txt"])],
+                      [("a.png", b""), (None, b"field"), ("b.png", b""), ("case.zip", self.bytes["zip"])]):
+            with self.subTest(parts=[name for name, _data in parts]):
+                ctype, body = _form(parts, field="file")
+                count = sum(1 for name, _data in parts if name)
+                self.assertEqual(web("/api/check", ctype, body), (400, {"error": webapp_api.CHECK_ONE_FILE.format(count=count)}))
+
     def test_an_analysis_that_raises_is_the_same_failed_row_on_every_entry_point(self) -> None:
         # R29-2: /api/check had no handler for an exception (a 500); every leg now gives /api/analyze-upload's failed row.
         from unittest.mock import patch

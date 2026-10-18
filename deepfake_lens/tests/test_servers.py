@@ -1871,6 +1871,8 @@ class ErrorTableEveryRowTest(unittest.TestCase):
         cut, cut_type = self._multipart(("files", "photo.png", png), close=False)
         pair, pair_type = self._multipart(("a", "a.txt", "글 하나입니다. 충분히 긴 문장입니다.".encode()), ("b", "b.wav", (f / "tone.wav").read_bytes()))
         cut_pair, _ = self._multipart(("a", "a.txt", b"one"), ("b", "b.txt", b"two"), close=False)
+        # R29-5: several files on the single-file quick check.
+        two_files, two_type = self._multipart(("file", "photo.png", png), ("file", "memo.txt", b"memo"))
         files = [
             ("POST", "/api/analyze/image?file_path={}"), ("POST", "/api/analyze/audio?file_path={}"),
             ("POST", "/api/analyze/face?file_path={}"), ("POST", "/api/analyze/forensic?file_path={}"),
@@ -1941,6 +1943,7 @@ class ErrorTableEveryRowTest(unittest.TestCase):
                 ('{"text": "짧음"}'.encode(), "application/json", "분석할 텍스트가 너무 짧습니다"),
                 (b"x", "text/plain", "multipart/form-data 또는 application/json 본문이 필요합니다"),
                 (cut, cut_type, "업로드 본문이 잘렸습니다"),
+                (two_files, two_type, webapp_api.CHECK_ONE_FILE.format(count=2)),
             )],
             "E22": [case("web", "POST", "/api/check", 413, "요청 본문이 상한", upload, upload_type, patches=(patch.object(webapp_module, "MAX_UPLOAD_BYTES", 16),))],
             # (text > 256 KB cannot travel in a test client's query string; the
