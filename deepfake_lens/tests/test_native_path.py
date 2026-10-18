@@ -1772,7 +1772,7 @@ class TempFilesInTheSessionFolderTest(unittest.TestCase):
             "lipsync.py:_audio_envelope",
             "core.py:_scan_paths",  # archive extraction
             "model_adapter.py:_run_video_frames",
-            "webapp_api.py:_archive_upload_items",
+            "webapp_api.py:_upload_copy",  # R28-1/R29-2: the upload temp folder (single files and archives)
             "api_server.py:create_app",
         ):
             self.assertIn(expected, seen)

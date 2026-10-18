@@ -390,6 +390,10 @@ class UploadEntryPointEquivalenceTest(unittest.TestCase):
         ("corrupt zip", "bad.zip", "zip_corrupt"),
         ("tar.gz", "case.tar.gz", "tgz"),
         ("upper-case .ZIP", "CASE.ZIP", "zip"),
+        ("zip, 300-char name", "A" * 300 + ".zip", "zip"),  # R29-2
+        ("zip, 270-byte name", "가" * 90 + ".zip", "zip"),  # R29-2 (a file name on NTFS, not on ext4/APFS-255-byte)
+        ("zip, NUL in name", "nul\x00x.zip", "zip"),  # R29-2
+        ("tar.gz, 300-char name", "A" * 300 + ".tar.gz", "tgz"),  # R29-2: the stand-in keeps .tar.gz
         ("zip, Windows path", "C:\\Users\\me\\case.zip", "zip"),
         ("traversal", "../../../../etc/" + K + ".png", "png"),
         ("absolute", "/etc/" + K + ".png", "png"),
@@ -555,7 +559,8 @@ class UploadEntryPointEquivalenceTest(unittest.TestCase):
         b = self.bytes
         # several parts (one an archive), a duplicate name with other bytes, a 0-byte file, a part without a file name
         parts = [(self.K + ".png", b["png"]), ("case.zip", b["zip"]), (None, b"a form field, not a file"),
-                 (self.K + ".png", b["png_truncated"]), ("빈.txt", b"")]
+                 (self.K + ".png", b["png_truncated"]), ("빈.txt", b""),
+                 ("가" * 90 + ".zip", b["zip"])]  # R29-2
         expected = [(name, self._folder_rows(name, data)) for name, data in parts if name is not None]
         ctype, body = _form(parts)
         for leg, post, path in legs:
@@ -572,6 +577,32 @@ class UploadEntryPointEquivalenceTest(unittest.TestCase):
                 with self.subTest(leg=leg, parts=parts):
                     ctype, body = _form(parts, field="files" if "upload" in path else "file")
                     self.assertEqual(post(path, ctype, body), (400, {"error": "업로드된 파일이 없습니다"}))
+
+    def test_an_analysis_that_raises_is_the_same_failed_row_on_every_entry_point(self) -> None:
+        # R29-2: /api/check had no handler for an exception (a 500); every leg now gives /api/analyze-upload's failed row.
+        from unittest.mock import patch
+
+        from deepfake_lens import webapp_api
+
+        def boom(*_args, **_kwargs):
+            raise RuntimeError("주입된 실패")
+
+        legs, web = self._upload_legs()
+        for client, key, target in ((self.K + ".png", "png", "analyze_path"), ("case.zip", "zip", "analyze_rows")):
+            with patch.object(webapp_api, target, boom):
+                rows = []
+                ctype, body = _form([(client, self.bytes[key])])
+                for leg, post, path in legs:
+                    status, payload = post(path, ctype, body)
+                    self.assertEqual(status, 200, payload)
+                    rows.append((leg, payload["items"]))
+                ctype, body = _form([(client, self.bytes[key])], field="file")
+                status, payload = web("/api/check", ctype, body)
+                self.assertEqual(status, 200, payload)
+                rows.append(("web /api/check", payload["items"] if payload.get("mode") == "files" else [payload["item"]]))
+            for leg, got in rows:
+                with self.subTest(file=client, leg=leg):
+                    self.assertEqual([(r["path"], r["status"], r["error"]) for r in got], [(client, "failed", "RuntimeError: 주입된 실패")])
 
 
 if __name__ == "__main__":

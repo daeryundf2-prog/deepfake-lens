@@ -992,8 +992,22 @@ def _summarize_records(items: list[dict[str, object]], source: str) -> dict[str,
     }
 
 
+def _upload_base_name(filename: str) -> str:
+    """The name an uploaded file is written under: the last ``/``- or ``\\``-separated component of the client's name."""
+    return Path(filename.replace("\\", "/")).name
+
+
+def _stand_in_name(base: str) -> str:
+    """``upload`` + the base name's suffix — a compound archive suffix (``.tar.gz``) kept whole (R29-2)."""
+    lower = base.lower()
+    for compound in (".tar.gz", ".tar.bz2", ".tar.xz"):
+        if lower.endswith(compound):
+            return "upload" + base[-len(compound):]
+    return "upload" + Path(base).suffix[:16]
+
+
 def _archive_upload_items(
-    filename: str, suffix: str, payload: bytes, *, options: AnalysisOptions, thresholds: Any,
+    filename: str, payload: bytes, *, options: AnalysisOptions, thresholds: Any,
 ) -> list[dict[str, object]]:
     """Analyze an uploaded archive exactly as a folder scan analyzes it (B1).
 
@@ -1006,16 +1020,20 @@ def _archive_upload_items(
     limitation, an unopenable archive as a failed ``archive`` check, a
     missing extractor as a skipped one, and the uploaded archive's SHA-256.
     The temp folder (archive and extracted tree) is deleted before
-    returning. ``suffix`` is kept for the call sites; the name carries it.
-    """
-    del suffix
-    base = Path(filename.replace("\\", "/")).name or "upload.zip"
-    folder = Path(tempfile.mkdtemp(prefix="dflens-up-", dir=scratch_dir())).resolve()
-    try:
-        target = folder / base
-        target.write_bytes(payload)
-        from .result_text import escape_row_path, member_row_path
+    returning.
 
+    R29-2 (round 29): the archive is written through :func:`_upload_copy`
+    like a single upload — under the client's base name, else (a name this
+    system cannot create: too long, NUL, not encodable) under the stand-in
+    ``upload.zip`` — so its members are analyzed instead of the whole row
+    failing with "OSError: … 경로가 너무 깁니다"; the rows still carry the
+    client's name, and a name check on a row named by the stand-in is
+    marked skipped (:func:`_mark_name_not_checked`).
+    """
+    from .result_text import escape_row_path, member_row_path
+
+    with _upload_copy(filename, payload) as (target, named):
+        base = target.name
         records: list[dict[str, object]] = []
         shown = escape_row_path(filename)
         for row in analyze_rows(target, options, thresholds=thresholds):
@@ -1031,14 +1049,14 @@ def _archive_upload_items(
                     record["path"] = member_row_path(shown, row.member)
                 elif old_path == escape_row_path(base):
                     record["path"] = shown
+                    if not named:
+                        _mark_name_not_checked(record)
                 if record.get("name") == base:
                     record["name"] = filename
                 elif record.get("name") == old_path:
                     record["name"] = record["path"]
             records.append(record)
         return records
-    finally:
-        shutil.rmtree(folder, ignore_errors=True)
 
 
 # R28-1 (round 28): the reason a single upload's file-name check names when the client's
@@ -1047,36 +1065,40 @@ UPLOAD_NAME_NOT_CHECKED = "업로드 파일의 원래 이름을 이 시스템에
 
 
 @contextlib.contextmanager
-def _upload_copy(filename: str, payload: bytes, suffix: str) -> Iterator[tuple[Path, bool]]:
+def _upload_copy(filename: str, payload: bytes) -> Iterator[tuple[Path, bool]]:
     """Write one uploaded file under the client's own base name; yield ``(path, named)``.
 
     R28-1 (round 28): a single upload was analyzed as a ``NamedTemporaryFile``
     (``tmpXXXX.png``), so every check that reads the file's name — the
     platform-trace file-name format check above all — ran on the temp name
     and reported "일치 없음" for ``KakaoTalk_…png`` while a folder scan or a
-    zip upload of the same bytes matched. The bytes are now written, like
-    :func:`_archive_upload_items` writes an archive, into a fresh temp folder
-    under the base name the client sent (the last ``/``- or ``\\``-separated
-    component), so the row is the folder scan's row for that one file and no
-    temp name reaches it. When that name cannot be a file name here (empty,
-    ``.``/``..``, NUL, too long, not encodable) the bytes go under
-    ``upload<suffix>`` and ``named`` is False — the caller then marks the
+    zip upload of the same bytes matched. The bytes are now written into a
+    fresh temp folder under the base name the client sent
+    (:func:`_upload_base_name`), so the row is the folder scan's row for that
+    one file and no temp name reaches it. When that name cannot be a file
+    name here (empty, ``.``/``..``, NUL, too long, not encodable) the bytes go
+    under the stand-in :func:`_stand_in_name` (``upload.png``, ``upload.zip``,
+    ``upload.tar.gz``; plain ``upload`` when even the suffix cannot be part
+    of a name) and ``named`` is False — the caller then marks the
     name-dependent check skipped instead of reporting a check it did not run.
-    The folder is deleted on exit.
+    Used by single uploads and, since R29-2, by archive uploads. The folder
+    is deleted on exit.
     """
     folder = Path(tempfile.mkdtemp(prefix="dflens-up-", dir=scratch_dir())).resolve()
     try:
-        base = Path(filename.replace("\\", "/")).name
-        # (path, named): the client's base name first, the stand-in name last.
-        candidates = ([(folder / base, True)] if base not in ("", ".", "..") else []) + [(folder / f"upload{suffix}", False)]
-        for index, (target, named) in enumerate(candidates):
+        base = _upload_base_name(filename)
+        stand_in = _stand_in_name(base)
+        # (name, named): the client's base name first, the stand-ins last.
+        names = ([(base, True)] if base not in ("", ".", "..") else []) + [(stand_in, False)] + ([("upload", False)] if stand_in != "upload" else [])
+        for index, (name, named) in enumerate(names):
             try:
+                target = folder / name
                 target.write_bytes(payload)  # a fresh folder: nothing to overwrite
             except (OSError, ValueError, UnicodeError):
-                if index == len(candidates) - 1:
+                if index == len(names) - 1:
                     raise
                 with contextlib.suppress(OSError, ValueError, UnicodeError):
-                    target.unlink(missing_ok=True)
+                    (folder / name).unlink(missing_ok=True)
                 continue
             break
         yield target, named
@@ -1094,6 +1116,46 @@ def _mark_name_not_checked(record: dict[str, object]) -> None:
         if isinstance(entry, dict) and entry.get("check") == FILE_NAME_CHECK:
             entry["status"] = "skipped"
             entry["reason"] = UPLOAD_NAME_NOT_CHECKED
+
+
+def _failed_upload_row(filename: str, exc: BaseException) -> dict[str, object]:
+    """An upload whose analysis raised: one failed row under the client's name (never a missing file, never a 500)."""
+    from .result_text import escape_row_path
+
+    logger.exception("upload analysis failed: %s", filename)
+    return {"name": filename, "path": escape_row_path(filename), "status": "failed", "error": failure_reason(exc)}
+
+
+def _upload_part_rows(filename: str, payload: bytes, *, options: AnalysisOptions, thresholds: Any) -> list[dict[str, object]]:
+    """The rows of one uploaded file — the folder scan's rows for those bytes under the client's base name.
+
+    R29 (round 29): the one body behind ``/api/analyze-upload`` (web and api-serve) and the archive branch of
+    ``/api/check``. An archive gives its member rows and container row,
+    any other file its one row; a client name this system cannot create is analyzed under a stand-in with the name
+    check skipped (R28-1, R29-2); an analysis that raises is one failed row (R29-2: was a 500 on ``/api/check``).
+    """
+    from .archives import is_archive
+    from .result_text import escape_row_path
+
+    try:
+        if is_archive(filename):
+            return _archive_upload_items(filename, payload, options=options, thresholds=thresholds)
+        # R28-1: under the client's base name (name-dependent checks see it), never a temp name.
+        with _upload_copy(filename, payload) as (upload_path, named):
+            item = analyze_path(upload_path, options, thresholds=thresholds)
+        record = item.to_json()
+        if not named:
+            _mark_name_not_checked(record)
+        # R10-6: the row path of an uploaded file is escaped like any
+        # real file's (R9-1) — "t:::c.png" is the row "t\:\:\:c.png" and
+        # never holds "::"; ``name`` keeps the name the client sent.
+        record["path"] = escape_row_path(filename)
+        record["name"] = filename
+        return [record]
+    except Exception as exc:  # noqa: BLE001 - logged by _failed_upload_row
+        # Per-upload failure is a failed row (status "failed"), never a
+        # silently missing file.
+        return [_failed_upload_row(filename, exc)]
 
 
 def _upload_file_parts(message: Any) -> list[tuple[str, bytes]]:
@@ -1124,9 +1186,6 @@ def _analyze_upload_payload(content_type: str, body: bytes) -> dict[str, object]
         return ApiError("multipart/form-data 업로드가 필요합니다", 400)
     if _multipart_incomplete(content_type, body):
         return ApiError(MULTIPART_INCOMPLETE, 400)  # P8
-    from .archives import is_archive
-    from .result_text import escape_row_path
-
     message = BytesParser(policy=email_policy).parsebytes(
         b"Content-Type: " + content_type.encode("latin-1") + b"\r\n\r\n" + body
     )
@@ -1137,28 +1196,7 @@ def _analyze_upload_payload(content_type: str, body: bytes) -> dict[str, object]
         if len(items) >= MAX_UPLOAD_FILES:
             items.append({"name": filename, "error": f"파일 수 상한({MAX_UPLOAD_FILES}) 초과"})
             break
-        suffix = Path(filename).suffix[:16]
-        try:
-            if is_archive(filename):
-                items.extend(_archive_upload_items(filename, suffix, payload, options=options, thresholds=thresholds))
-                continue
-            # R28-1: under the client's base name (name-dependent checks see it), never a temp name.
-            with _upload_copy(filename, payload, suffix) as (upload_path, named):
-                item = analyze_path(upload_path, options, thresholds=thresholds)
-            record = item.to_json()
-            if not named:
-                _mark_name_not_checked(record)
-            # R10-6: the row path of an uploaded file is escaped like any
-            # real file's (R9-1) — "t:::c.png" is the row "t\:\:\:c.png" and
-            # never holds "::"; ``name`` keeps the name the client sent.
-            record["path"] = escape_row_path(filename)
-            record["name"] = filename
-            items.append(record)
-        except Exception as exc:
-            # Per-upload failure is a failed row (status "failed"), never a
-            # silently missing file.
-            logger.exception("upload analysis failed: %s", filename)
-            items.append({"name": filename, "path": escape_row_path(filename), "status": "failed", "error": failure_reason(exc)})
+        items.extend(_upload_part_rows(filename, payload, options=options, thresholds=thresholds))
     if not items:
         return ApiError("업로드된 파일이 없습니다", 400)
     _mark_uploads(items)  # P6
@@ -1268,13 +1306,13 @@ def _check_file_payload(content_type: str, body: bytes) -> dict[str, object]:
     if not files:
         return ApiError("업로드된 파일이 없습니다", 400)
     filename, payload = files[0]
-    suffix = Path(filename).suffix[:16]
     from .archives import is_archive
     from .result_text import escape_row_path
     options = _web_options()
     thresholds = load_thresholds(options)
     if is_archive(filename):
-        items = _mark_uploads(_archive_upload_items(filename, suffix, payload, options=options, thresholds=thresholds))  # P6
+        # R29-2: the same rows as /api/analyze-upload — a stand-in name or a failed row, never a 500.
+        items = _mark_uploads(_upload_part_rows(filename, payload, options=options, thresholds=thresholds))  # P6
         return {
             "schema_version": SCAN_JSON_SCHEMA_VERSION,
             "mode": "files",
@@ -1282,28 +1320,33 @@ def _check_file_payload(content_type: str, body: bytes) -> dict[str, object]:
             "items": items,
             **_provenance(options, thresholds),
         }
-    # R28-1: as /api/analyze-upload — under the client's base name, never a temp name.
-    with _upload_copy(filename, payload, suffix) as (tmp_path, named):
-        item = analyze_path(tmp_path, options, thresholds=thresholds)
-        record = item.to_json()
-        if not named:
-            _mark_name_not_checked(record)
-        forensic = None
-        layer_errors: dict[str, Any] = {}
-        try:
-            from .c2pa import analyze_metadata_forensic
-            forensic = _provenance_layer(analyze_metadata_forensic(tmp_path).to_json())
-        except Exception as exc:
-            logger.exception("forensic layer failed")
-            _layer_error(layer_errors, "forensic", exc)
-        advanced = None
-        if item.kind == "text":
+    forensic = None
+    advanced = None
+    layer_errors: dict[str, Any] = {}
+    try:
+        # R28-1: as /api/analyze-upload — under the client's base name, never a temp name.
+        with _upload_copy(filename, payload) as (tmp_path, named):
+            item = analyze_path(tmp_path, options, thresholds=thresholds)
+            record = item.to_json()
+            if not named:
+                _mark_name_not_checked(record)
             try:
-                from .text_advanced import analyze_text_advanced
-                advanced = _text_statistics_layer(analyze_text_advanced(payload.decode("utf-8", errors="replace")).to_json())
+                from .c2pa import analyze_metadata_forensic
+                forensic = _provenance_layer(analyze_metadata_forensic(tmp_path).to_json())
             except Exception as exc:
-                logger.exception("text-advanced layer failed")
-                _layer_error(layer_errors, "advanced", exc)
+                logger.exception("forensic layer failed")
+                _layer_error(layer_errors, "forensic", exc)
+            if item.kind == "text":
+                try:
+                    from .text_advanced import analyze_text_advanced
+                    advanced = _text_statistics_layer(analyze_text_advanced(payload.decode("utf-8", errors="replace")).to_json())
+                except Exception as exc:
+                    logger.exception("text-advanced layer failed")
+                    _layer_error(layer_errors, "advanced", exc)
+    except Exception as exc:  # noqa: BLE001 - logged by _failed_upload_row
+        # R29-2: the failed row /api/analyze-upload gives for the same file (was a 500).
+        record = _failed_upload_row(filename, exc)
+        forensic, advanced, layer_errors = None, None, {}
     _set_row_name(record, filename)
     record["path"] = escape_row_path(filename)  # R10-6: as /api/analyze-upload
     record["source"] = UPLOAD_SOURCE  # P6

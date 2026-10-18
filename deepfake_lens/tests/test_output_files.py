@@ -84,7 +84,7 @@ WRITE_SITES_ALLOWED = {
     "native_path.py": 1,  # the copy marker of a staged name (session folder)
     "model_assets.py": 2,  # the verified asset copy (session folder); assets.json temp + os.replace
     "vendor_weights.py": 2,  # the download ".part" and the pin temp, both + os.replace
-    "webapp_api.py": 3,  # an archive upload's temp copy and (R28-1) a single upload's base-named copy (session folder); feedback.jsonl append
+    "webapp_api.py": 2,  # (R28-1, R29-2) an upload's base-named copy, single file or archive (session folder); feedback.jsonl append
     "audio_worker.py": 2,  # native-stderr.log append (the worker's stderr); the worker's reply pipe (fd 1)
     "security.py": 2,  # the security self-check's fixture files in its temp folder
 }
