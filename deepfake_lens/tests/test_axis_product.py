@@ -394,6 +394,7 @@ class UploadEntryPointEquivalenceTest(unittest.TestCase):
         ("zip, 270-byte name", "가" * 90 + ".zip", "zip"),  # R29-2 (a file name on NTFS, not on ext4/APFS-255-byte)
         ("zip, NUL in name", "nul\x00x.zip", "zip"),  # R29-2
         ("tar.gz, 300-char name", "A" * 300 + ".tar.gz", "tgz"),  # R29-2: the stand-in keeps .tar.gz
+        ("zip, trailing backslash", "x.zip\\", "zip"),  # R29-3
         ("zip, Windows path", "C:\\Users\\me\\case.zip", "zip"),
         ("traversal", "../../../../etc/" + K + ".png", "png"),
         ("absolute", "/etc/" + K + ".png", "png"),

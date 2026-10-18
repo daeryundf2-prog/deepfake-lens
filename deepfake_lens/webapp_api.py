@@ -993,7 +993,12 @@ def _summarize_records(items: list[dict[str, object]], source: str) -> dict[str,
 
 
 def _upload_base_name(filename: str) -> str:
-    """The name an uploaded file is written under: the last ``/``- or ``\\``-separated component of the client's name."""
+    """The name an uploaded file is written under: the last ``/``- or ``\\``-separated component of the client's name.
+
+    R29-3 (round 29): every upload path decides *what* the bytes are (an archive or one file) and *what name* they
+    are analyzed under from this one name — ``x.zip\\`` was written as ``x.zip`` but routed by the raw name (no
+    archive suffix) to the single-file path, which gave only the container row of what a folder scan expands.
+    """
     return Path(filename.replace("\\", "/")).name
 
 
@@ -1130,7 +1135,7 @@ def _upload_part_rows(filename: str, payload: bytes, *, options: AnalysisOptions
     """The rows of one uploaded file — the folder scan's rows for those bytes under the client's base name.
 
     R29 (round 29): the one body behind ``/api/analyze-upload`` (web and api-serve) and the archive branch of
-    ``/api/check``. An archive gives its member rows and container row,
+    ``/api/check``. An archive (decided on :func:`_upload_base_name`, R29-3) gives its member rows and container row,
     any other file its one row; a client name this system cannot create is analyzed under a stand-in with the name
     check skipped (R28-1, R29-2); an analysis that raises is one failed row (R29-2: was a 500 on ``/api/check``).
     """
@@ -1138,7 +1143,7 @@ def _upload_part_rows(filename: str, payload: bytes, *, options: AnalysisOptions
     from .result_text import escape_row_path
 
     try:
-        if is_archive(filename):
+        if is_archive(_upload_base_name(filename)):
             return _archive_upload_items(filename, payload, options=options, thresholds=thresholds)
         # R28-1: under the client's base name (name-dependent checks see it), never a temp name.
         with _upload_copy(filename, payload) as (upload_path, named):
@@ -1310,7 +1315,7 @@ def _check_file_payload(content_type: str, body: bytes) -> dict[str, object]:
     from .result_text import escape_row_path
     options = _web_options()
     thresholds = load_thresholds(options)
-    if is_archive(filename):
+    if is_archive(_upload_base_name(filename)):  # R29-3: decided on the name the bytes are written under
         # R29-2: the same rows as /api/analyze-upload — a stand-in name or a failed row, never a 500.
         items = _mark_uploads(_upload_part_rows(filename, payload, options=options, thresholds=thresholds))  # P6
         return {
