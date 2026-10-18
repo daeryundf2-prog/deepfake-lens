@@ -34,6 +34,7 @@ import json
 import os
 import shutil
 import tempfile
+import unicodedata
 import unittest
 import wave
 import zipfile
@@ -286,6 +287,291 @@ class UploadPathNameDependentCheckTest(unittest.TestCase):
                 coverage = [c for c in item["result"]["coverage"] if c["check"] == FILE_NAME_CHECK]
                 self.assertEqual([(c["status"], c["reason"]) for c in coverage], [("skipped", webapp_api.UPLOAD_NAME_NOT_CHECKED)])
                 self.assertNotIn("dflens-up-", json.dumps(payload, ensure_ascii=False))
+
+
+
+# --- R29 (round 29): every upload entry point × every input class = the folder scan --------------------------------
+
+def _zip_bytes(members: list[tuple[str, bytes]]) -> bytes:
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, "w") as archive:
+        for name, data in members:
+            archive.writestr(name, data)
+    return buffer.getvalue()
+
+
+def _tgz_bytes(members: list[tuple[str, bytes]]) -> bytes:
+    import tarfile
+
+    buffer = io.BytesIO()
+    with tarfile.open(fileobj=buffer, mode="w:gz") as archive:
+        for name, data in members:
+            info = tarfile.TarInfo(name)
+            info.size = len(data)
+            archive.addfile(info, io.BytesIO(data))
+    return buffer.getvalue()
+
+
+def _form(parts: list[tuple[str | None, bytes]], field: str = "files") -> tuple[str, bytes]:
+    """A multipart body; each name travels as RFC 5987 ``filename*`` (NUL, surrogate escapes, newlines), None = no file name."""
+    from urllib.parse import quote
+
+    boundary = "r29matrix"
+    body = b""
+    for name, data in parts:
+        disposition = f'form-data; name="{field}"'
+        if name is not None:
+            disposition += "; filename=\"x\"; filename*=UTF-8''" + quote(name.encode("utf-8", "surrogateescape"), safe="")
+        body += f"--{boundary}\r\nContent-Disposition: {disposition}\r\nContent-Type: application/octet-stream\r\n\r\n".encode("ascii") + data + b"\r\n"
+    return f"multipart/form-data; boundary={boundary}", body + f"--{boundary}--\r\n".encode("ascii")
+
+
+# Identity fields an upload row takes from the client's name (R10-6, R11-14, R12-4); the rest of a row is the scan's.
+_IDENTITY = ("path", "name", "display_name", "path_b64", "container", "source")
+
+
+class UploadEntryPointEquivalenceTest(unittest.TestCase):
+    """R29: upload entry points × input classes — every row equals the folder scan's row of the same bytes.
+
+    Rounds 28 and 29 each found one more upload path that gave a different result for the same file (R28-1 the
+    temp name, R29-1 a 0-byte file refused by ``/api/check``, R29-2 an archive whose name cannot be a file name here
+    failing whole or a 500). This table runs every input class through every entry point that takes file bytes —
+    the live ``web`` server's ``/api/analyze-upload`` and ``/api/check``, api-serve's ``/api/analyze-upload``
+    (TestClient) — and requires each row to be the row ``webapp_api._scan_run`` gives for a folder holding the same
+    bytes under the client's base name: identical except the client-name fields (``_IDENTITY``), whose path is the
+    folder row's path under the client's name. A client name this system cannot create is compared with the folder
+    scan under the stand-in name (``upload.png``, ``upload.zip``, ``upload.tar.gz``) with the name check skipped and
+    its reason (R28-1, R29-2) — the folder path cannot hold that name. No request may answer 500.
+    """
+
+    maxDiff = None
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        from deepfake_lens.tests.png_fixture import write_png
+
+        cls._tmp = tempfile.TemporaryDirectory()
+        cls.base = Path(cls._tmp.name).resolve()
+        from unittest.mock import patch
+
+        cls._env = patch.dict(os.environ, {"DEEPFAKE_LENS_SCAN_JOBS": str(cls.base / "jobs")})
+        cls._env.start()
+        write_png(cls.base / "p.png", {})
+        png = (cls.base / "p.png").read_bytes()
+        _wav(cls.base / "w.wav")
+        text = "평범한 글입니다. 여러 문장이 있습니다. 사람이 쓴 메모입니다.".encode("utf-8")
+        member_zip = _zip_bytes([("in/KakaoTalk_20240101_123456789.png", png), ("t.txt", text)])
+        cls.bytes = {
+            "png": png, "zero": b"", "png_truncated": png[:40], "txt": text, "wav": (cls.base / "w.wav").read_bytes(),
+            "garbage": b"\x00\x01not a media file" * 8, "zip": member_zip,
+            "zip_nested": _zip_bytes([("inner.zip", member_zip), ("a.png", png)]),
+            "zip_corrupt": b"PK\x03\x04" + b"\x00" * 40, "tgz": _tgz_bytes([("a.png", png), ("b.txt", text)]),
+        }
+
+    @classmethod
+    def tearDownClass(cls) -> None:
+        cls._env.stop()
+        cls._tmp.cleanup()
+
+    # (label, client name, bytes key) — one file per request.
+    K = "KakaoTalk_20240101_123456789"
+    SINGLE = [
+        ("png", K + ".png", "png"),
+        ("0-byte", K + ".png", "zero"),  # R29-1
+        ("0-byte txt", "빈 메모.txt", "zero"),
+        ("truncated", K + ".png", "png_truncated"),
+        ("png named .jpg", K + ".jpg", "png"),
+        ("text named .png", "x.png", "txt"),
+        ("garbage named .mp4", "screen-20240101-123456.mp4", "garbage"),
+        ("txt", K + ".txt", "txt"),
+        ("wav", "통화 녹음 홍길동_240101_123456.wav", "wav"),
+        ("zip", "case.zip", "zip"),
+        ("nested zip", "n.zip", "zip_nested"),
+        ("corrupt zip", "bad.zip", "zip_corrupt"),
+        ("tar.gz", "case.tar.gz", "tgz"),
+        ("upper-case .ZIP", "CASE.ZIP", "zip"),
+        ("zip, Windows path", "C:\\Users\\me\\case.zip", "zip"),
+        ("traversal", "../../../../etc/" + K + ".png", "png"),
+        ("absolute", "/etc/" + K + ".png", "png"),
+        ("Windows path", "C:\\Users\\me\\" + K + ".png", "png"),
+        ("trailing slash", K + ".png/", "png"),
+        ("dot", ".", "png"),
+        ("dot-dot", "..", "png"),
+        ("slash", "/", "png"),
+        ("NUL", K + "\x00.png", "png"),
+        ("300 chars", K + "x" * 300 + ".png", "png"),
+        ("NFD", unicodedata.normalize("NFD", "스크린샷 2024-01-01 오후 1.02.03.png"), "png"),
+        ("surrogate escape", "caf\udce9.png", "png"),
+        ("colons", "t:::c.png", "png"),
+        ("newline", "a\nb.png", "png"),
+        ("trailing space", K + ".png ", "png"),
+        ("stand-in name", "upload.png", "png"),
+        ("temp prefix", "dflens-up-abc.png", "png"),
+        ("Windows device", "CON.png", "png"),
+        ("30-char suffix", "x." + "p" * 30, "png"),
+    ]
+
+    # -- the reference: a folder scan ----------------------------------------------------------------------------
+
+    def _folder_rows(self, client: str, data: bytes) -> list[dict]:
+        """The folder scan's rows for ``data`` under the client's base name (else the stand-in, name check skipped)."""
+        from urllib.parse import quote
+
+        from deepfake_lens import webapp_api
+        from deepfake_lens.platform_traces import FILE_NAME_CHECK
+        from deepfake_lens.result_text import escape_row_path, member_row_path
+
+        folder = Path(tempfile.mkdtemp(dir=self.base))
+        # The client's base name: the last "/"- or "\\"-separated component (a client OS path); the stand-in keeps
+        # the suffix that decides the kind, a compound archive suffix whole.
+        base = client.replace("\\", "/").rstrip("/").rpartition("/")[2]
+        compound = next((base[-len(s):] for s in (".tar.gz", ".tar.bz2", ".tar.xz") if base.lower().endswith(s)), None)
+        stand_in = "upload" + (compound or Path(base).suffix[:16])
+        written, named = None, False
+        for name, is_client in ([(base, True)] if base not in ("", ".", "..") else []) + [(stand_in, False)]:
+            try:
+                (folder / name).write_bytes(data)
+            except (OSError, ValueError, UnicodeError):
+                continue
+            written, named = name, is_client
+            break
+        self.assertIsNotNone(written, client)
+        payload, _context = webapp_api._scan_run(f"folder={quote(str(folder))}", default_folder=folder)
+        rows = payload["items"]
+        shown, old = escape_row_path(client), escape_row_path(written)
+        for row in rows:
+            if row.get("member") is not None:
+                row["path"] = member_row_path(shown, row["member"]) if written != client else row["path"]
+            else:
+                self.assertEqual(row["path"], old)
+                row["path"] = shown
+                if not named:
+                    for entry in (row.get("result") or {}).get("coverage") or []:
+                        if entry.get("check") == FILE_NAME_CHECK:
+                            entry.update(status="skipped", reason=webapp_api.UPLOAD_NAME_NOT_CHECKED)
+        return rows
+
+    @staticmethod
+    def _body(row: dict) -> dict:
+        return {key: value for key, value in row.items() if key not in _IDENTITY}
+
+    def _assert_rows(self, label: str, client_rows: list[tuple[str, list[dict]]], got: list[dict]) -> None:
+        """``got`` = the concatenated folder-scan rows of every (client name, rows) in order, path for path."""
+        expected = [row for _client, rows in client_rows for row in rows]
+        self.assertEqual([row.get("path") for row in got], [row["path"] for row in expected], label)
+        self.assertEqual([self._body(row) for row in got], [self._body(row) for row in expected], label)
+        tops = {client for client, _rows in client_rows}
+        for row in got:
+            self.assertEqual(row.get("source"), "upload", label)
+            if row.get("member") is None:
+                self.assertIn(row.get("name"), tops, label)  # the container/single row is named by the client
+        text = json.dumps(got, ensure_ascii=False)
+        self.assertNotIn("dflens-up-", text.replace("dflens-up-abc", ""), label)  # no temp folder reaches a row
+        self.assertNotIn(str(self.base), text, label)
+
+    # -- the entry points ----------------------------------------------------------------------------------------
+
+    def _entry_points(self):
+        """name -> post(path, content type, body) -> (status, JSON) for web (live HTTP) and api-serve (TestClient)."""
+        import threading
+        import urllib.error
+        import urllib.request
+
+        from collections import OrderedDict
+        from unittest.mock import patch
+
+        from deepfake_lens import webapp_api
+        from deepfake_lens.webapp import CLIENT_HEADER, build_server
+
+        # The servers register their folder as a read root (module state) — restored after each test.
+        roots = patch.object(webapp_api, "_READ_ROOTS", OrderedDict())
+        roots.start()
+        self.addCleanup(roots.stop)
+        server = build_server("127.0.0.1", 0, default_folder=self.base)
+        threading.Thread(target=server.serve_forever, kwargs={"poll_interval": 0.05}, daemon=True).start()
+        self.addCleanup(server.server_close)
+        self.addCleanup(server.shutdown)
+        origin = f"http://127.0.0.1:{server.server_address[1]}"
+
+        def web(path: str, ctype: str, body: bytes) -> tuple[int, object]:
+            request = urllib.request.Request(origin + path, data=body, headers={CLIENT_HEADER: "gui", "Content-Type": ctype}, method="POST")
+            try:
+                with urllib.request.urlopen(request, timeout=300) as response:
+                    return response.status, json.loads(response.read())
+            except urllib.error.HTTPError as exc:
+                raw = exc.read()
+                try:
+                    return exc.code, json.loads(raw)
+                except ValueError:
+                    return exc.code, raw.decode("utf-8", "replace")
+
+        points = {"web": web}
+        if importlib.util.find_spec("fastapi") is not None and importlib.util.find_spec("httpx") is not None:
+            from fastapi.testclient import TestClient
+
+            from deepfake_lens import api_server
+
+            client = TestClient(api_server.create_app(default_folder=self.base), raise_server_exceptions=False)
+
+            def api(path: str, ctype: str, body: bytes) -> tuple[int, object]:
+                response = client.post(path, content=body, headers={"host": "localhost", "content-type": ctype, CLIENT_HEADER: "gui"})
+                try:
+                    return response.status_code, response.json()
+                except ValueError:
+                    return response.status_code, response.text
+
+            points["api-serve"] = api
+        return points
+
+    def _upload_legs(self):
+        """(leg label, post, path) of every leg that answers with upload rows (``items``)."""
+        points = self._entry_points()
+        return [(f"{name} /api/analyze-upload", post, "/api/analyze-upload") for name, post in points.items()], points["web"]
+
+    # -- the table -----------------------------------------------------------------------------------------------
+
+    def test_one_file_per_request_every_entry_point_equals_the_folder_scan(self) -> None:
+        legs, web = self._upload_legs()
+        for label, client, key in self.SINGLE:
+            data = self.bytes[key]
+            expected = [(client, self._folder_rows(client, data))]
+            ctype, body = _form([(client, data)])
+            for leg, post, path in legs:
+                with self.subTest(case=label, leg=leg):
+                    status, payload = post(path, ctype, body)
+                    self.assertEqual(status, 200, payload)
+                    self._assert_rows(f"{label} / {leg}", expected, payload["items"])
+            with self.subTest(case=label, leg="web /api/check"):
+                ctype, body = _form([(client, data)], field="file")
+                status, payload = web("/api/check", ctype, body)
+                self.assertEqual(status, 200, payload)  # R29-1 (0-byte 400), R29-2 (bad archive name 500)
+                rows = payload["items"] if payload.get("mode") == "files" else [payload["item"]]
+                archive = any(row.get("kind") == "archive" for row in expected[0][1])
+                self.assertEqual(payload["mode"], "files" if archive else "file", label)
+                self._assert_rows(f"{label} / web /api/check", expected, rows)
+
+    def test_several_files_in_one_request(self) -> None:
+        legs, _web = self._upload_legs()
+        b = self.bytes
+        # several parts (one an archive), a duplicate name with other bytes, a 0-byte file, a part without a file name
+        parts = [(self.K + ".png", b["png"]), ("case.zip", b["zip"]), (None, b"a form field, not a file"),
+                 (self.K + ".png", b["png_truncated"]), ("빈.txt", b"")]
+        expected = [(name, self._folder_rows(name, data)) for name, data in parts if name is not None]
+        ctype, body = _form(parts)
+        for leg, post, path in legs:
+            with self.subTest(leg=leg):
+                status, payload = post(path, ctype, body)
+                self.assertEqual(status, 200, payload)
+                self._assert_rows(leg, expected, payload["items"])
+                self.assertEqual(payload["summary"]["total"], sum(len(rows) for _name, rows in expected))
+
+    def test_no_part_with_a_file_name_is_the_same_refusal_everywhere(self) -> None:
+        legs, web = self._upload_legs()
+        for leg, post, path in legs + [("web /api/check", web, "/api/check")]:
+            for parts in ([(None, b"field")], [(None, b"")], [("", b"data")]):
+                with self.subTest(leg=leg, parts=parts):
+                    ctype, body = _form(parts, field="files" if "upload" in path else "file")
+                    self.assertEqual(post(path, ctype, body), (400, {"error": "업로드된 파일이 없습니다"}))
 
 
 if __name__ == "__main__":

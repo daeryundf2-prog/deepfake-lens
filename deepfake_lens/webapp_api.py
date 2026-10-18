@@ -1096,6 +1096,22 @@ def _mark_name_not_checked(record: dict[str, object]) -> None:
             entry["reason"] = UPLOAD_NAME_NOT_CHECKED
 
 
+def _upload_file_parts(message: Any) -> list[tuple[str, bytes]]:
+    """``(client name, bytes)`` of every part that is a file: it has a file name and a payload, empty or not.
+
+    R29-1 (round 29): ``/api/check`` chose its part by ``p.get_payload(decode=True)`` being truthy, so a 0-byte file
+    was "업로드된 파일이 없습니다" there while ``/api/analyze-upload`` and a folder scan analyzed it. Every upload
+    path now selects parts here.
+    """
+    parts: list[tuple[str, bytes]] = []
+    for part in message.iter_parts():
+        filename = _part_filename(part)  # R12-10
+        payload = _part_bytes(part)
+        if filename and payload is not None:
+            parts.append((filename, payload))
+    return parts
+
+
 @in_worker_scope  # R20-2: one audio worker for all files (was one per file)
 def _analyze_upload_payload(content_type: str, body: bytes) -> dict[str, object]:
     """Analyze files uploaded via multipart/form-data.
@@ -1117,11 +1133,7 @@ def _analyze_upload_payload(content_type: str, body: bytes) -> dict[str, object]
     options = _web_options()
     thresholds = load_thresholds(options)
     items: list[dict[str, object]] = []
-    for part in message.iter_parts():
-        filename = _part_filename(part)  # R12-10
-        payload = _part_bytes(part)
-        if not filename or payload is None:
-            continue
+    for filename, payload in _upload_file_parts(message):
         if len(items) >= MAX_UPLOAD_FILES:
             items.append({"name": filename, "error": f"파일 수 상한({MAX_UPLOAD_FILES}) 초과"})
             break
@@ -1252,14 +1264,10 @@ def _check_file_payload(content_type: str, body: bytes) -> dict[str, object]:
     message = BytesParser(policy=email_policy).parsebytes(
         b"Content-Type: " + content_type.encode("latin-1") + b"\r\n\r\n" + body
     )
-    part = next(
-        (p for p in message.iter_parts() if _part_filename(p) and p.get_payload(decode=True)),
-        None,
-    )
-    if part is None:
+    files = _upload_file_parts(message)  # R29-1: a 0-byte file is a file (was "업로드된 파일이 없습니다")
+    if not files:
         return ApiError("업로드된 파일이 없습니다", 400)
-    filename = _part_filename(part) or "upload"  # R12-10
-    payload = _part_bytes(part) or b""
+    filename, payload = files[0]
     suffix = Path(filename).suffix[:16]
     from .archives import is_archive
     from .result_text import escape_row_path
