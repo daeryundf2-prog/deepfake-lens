@@ -775,8 +775,17 @@ def _stylometry_vector(text: str) -> list[float]:
     ]
 
 
-# R30-4: the shortest text compared (as /api/check's 「분석할 텍스트가 너무 짧습니다 (8자 이상)」), counted after stripping.
+# R30-4: the shortest text compared (as /api/check's 「분석할 텍스트가 너무 짧습니다 (8자 이상)」). Round 31: counted in
+# visible characters (letters, digits, punctuation, symbols) — 100 zero-width spaces or NULs were 「표본 100자」.
 MIN_COMPARE_CHARS = 8
+
+
+def visible_chars(text: str) -> int:
+    """Round 31: the characters of ``text`` that show — Unicode categories L, N, P and S (no space, control,
+    format such as U+200B, mark alone, surrogate or unassigned code point)."""
+    import unicodedata
+
+    return sum(1 for ch in text if unicodedata.category(ch)[0] in "LNPS")
 
 
 def compare_texts(text_a: str, text_b: str) -> StylometryComparison:
@@ -785,15 +794,15 @@ def compare_texts(text_a: str, text_b: str) -> StylometryComparison:
         "문체 벡터 거리 측정이며 포렌식 저자 귀속이 아닙니다.",
         "짧거나 번역된 텍스트에서는 거리가 불안정합니다.",
     ]
-    sizes = (len(text_a.strip()), len(text_b.strip()))
+    sizes = (visible_chars(text_a), visible_chars(text_b))  # round 31: was len(text.strip())
     short = [side for side, size in zip(("파일 A", "파일 B"), sizes) if size < MIN_COMPARE_CHARS]
     if short:
         # R30-4: a side under MIN_COMPARE_CHARS (an empty .txt) is not compared — no distance, no score.
         which = "두 파일 모두" if len(short) == 2 else short[0]
         return StylometryComparison(
             None, None, UNAVAILABLE_BAND,
-            f"{which}의 텍스트가 {MIN_COMPARE_CHARS}자 미만이라 문체 비교를 하지 않았습니다(유사도·거리 없음; 표본 앞뒤 공백 제외 {sizes[0]}자/{sizes[1]}자).",
-            limitations + [f"{which}의 텍스트가 {MIN_COMPARE_CHARS}자 미만입니다(앞뒤 공백 제외)."],
+            f"{which}의 텍스트가 보이는 글자 {MIN_COMPARE_CHARS}자 미만이라 문체 비교를 하지 않았습니다(유사도·거리 없음; 표본의 보이는 글자 {sizes[0]}자/{sizes[1]}자).",
+            limitations + [f"{which}의 텍스트가 보이는 글자 {MIN_COMPARE_CHARS}자 미만입니다(공백·제어·폭 없는 문자 제외)."],
         )
     vec_a = _stylometry_vector(text_a)
     vec_b = _stylometry_vector(text_b)

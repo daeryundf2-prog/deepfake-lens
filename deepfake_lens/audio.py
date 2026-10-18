@@ -957,6 +957,21 @@ def ecapa_revision(explicit: str | None = None) -> str | None:
     return value if value and is_commit_sha(value) else None
 
 
+# Round 31: the floor of a speaker comparison (MFCC path) — shorter or quieter audio is not compared (null score and
+# distance, as an unreadable side, R30-4). 1 s holds a word; mean frame RMS 1e-4 is about -80 dBFS, digital silence.
+MIN_COMPARE_SECONDS = 1.0
+MIN_COMPARE_RMS = 1e-4
+
+
+def _compare_floor_reason(features: AudioFeatures) -> str:
+    """Why ``features`` are below the comparison floor (Korean), or ``""`` when they can be compared."""
+    if features.duration_seconds < MIN_COMPARE_SECONDS:
+        return f"길이 {features.duration_seconds:.2f}초 — {MIN_COMPARE_SECONDS:.0f}초 미만"
+    if features.rms_energy < MIN_COMPARE_RMS:
+        return f"평균 RMS {features.rms_energy:.2g} — 무음 수준(하한 {MIN_COMPARE_RMS:g})"
+    return ""
+
+
 def compare_speakers(
     path_a: Path | str,
     path_b: Path | str,
@@ -998,6 +1013,21 @@ def compare_speakers(
             None, None, UNAVAILABLE_BAND,
             f"{failed}에서 오디오 특징을 추출하지 못해 화자 비교를 하지 않았습니다(유사도·거리 없음) — librosa 또는 오디오 형식을 확인하세요.",
             limitations + [f"{failed}의 특징 추출에 실패했습니다."],
+        )
+
+    # Round 31 (BACKLOG candidate): no floor — a 4-sample (0.0 s) WAV against a sine scored 47, silence against
+    # silence 100 with distance 0. Below MIN_COMPARE_SECONDS or MIN_COMPARE_RMS a side has no voice to compare.
+    floor = [
+        (side, reason) for side, feat in (("파일 A", feat_a), ("파일 B", feat_b))
+        for reason in [_compare_floor_reason(feat)] if reason
+    ]
+    if floor:
+        which = "두 파일 모두" if len(floor) == 2 else floor[0][0]
+        reasons = "; ".join(f"{side} {reason}" for side, reason in floor)
+        return SpeakerComparison(
+            None, None, UNAVAILABLE_BAND,
+            f"{which}의 오디오가 비교 하한에 못 미쳐 화자 비교를 하지 않았습니다(유사도·거리 없음; {reasons}).",
+            limitations + [f"{side}: {reason}" for side, reason in floor],
         )
 
     import math

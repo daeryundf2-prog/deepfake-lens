@@ -107,6 +107,36 @@ class SpeakerComparisonTest(unittest.TestCase):
                 self.assertEqual((both.same_speaker_score, both.distance), (None, None))
                 self.assertIn("두 파일 모두", both.reference_note)
 
+    def test_audio_below_the_floor_is_not_compared(self) -> None:
+        # Round 31 (BACKLOG candidate, fixed): no floor — a 4-sample (0.0 s) WAV against a sine gave 「코사인 거리
+        # 0.1582 (참고 원점수 47/100 …)」 and silence against silence 100/100 with distance 0.
+        from deepfake_lens.audio import MIN_COMPARE_RMS, MIN_COMPARE_SECONDS, compare_speakers
+
+        self.assertEqual((MIN_COMPARE_SECONDS, MIN_COMPARE_RMS), (1.0, 1e-4))
+        sine, other = self.dir / "sine.wav", self.dir / "other.wav"
+        _write_sine_wav(sine)
+        _write_sine_wav(other, freq=330.0)
+        _write_sine_wav(self.dir / "tiny.wav", seconds=4 / 22050)
+        _write_sine_wav(self.dir / "half.wav", seconds=0.5)
+        with wave.open(str(self.dir / "silent.wav"), "wb") as handle:
+            handle.setnchannels(1)
+            handle.setsampwidth(2)
+            handle.setframerate(22050)
+            handle.writeframes(b"\x00\x00" * 22050 * 6)
+        with self._mfcc_only():
+            for a, b, which, reason in (("tiny.wav", "sine.wav", "파일 A", "초 미만"), ("sine.wav", "half.wav", "파일 B", "초 미만"),
+                                        ("silent.wav", "silent.wav", "두 파일 모두", "무음 수준"), ("sine.wav", "silent.wav", "파일 B", "무음 수준")):
+                with self.subTest(a=a, b=b):
+                    result = compare_speakers(self.dir / a, self.dir / b)
+                    self.assertEqual((result.same_speaker_score, result.distance, result.reference_band), (None, None, "unavailable"))
+                    self.assertIn(which, result.reference_note)
+                    self.assertIn(reason, result.reference_note)
+                    self.assertNotIn("코사인 거리", result.reference_note)
+            _write_sine_wav(self.dir / "one.wav", seconds=1.0)
+            measured = compare_speakers(self.dir / "one.wav", other)
+        self.assertIsNotNone(measured.distance)
+        self.assertEqual(measured.reference_band, "reference")
+
     @unittest.skipUnless(os.environ.get("DEEPFAKE_LENS_MODEL_TESTS") == "1", "set DEEPFAKE_LENS_MODEL_TESTS=1")
     def test_ecapa_self_comparison_when_available(self) -> None:
         """With speechbrain installed, same file → ECAPA path, high score."""
@@ -164,6 +194,21 @@ class StylometryComparisonTest(unittest.TestCase):
                 self.assertIn(which, result.reference_note)
                 self.assertNotIn("상대 차이", result.reference_note)
         self.assertIsNotNone(compare_texts("x" * MIN_COMPARE_CHARS, long).distance)
+
+    def test_only_visible_characters_count_toward_the_floor(self) -> None:
+        # Round 31 (BACKLOG candidate, fixed): the floor counted len(text.strip()), so 100 zero-width spaces (U+200B) or
+        # 100 NULs were 「표본 100자」 and compared (원점수 11, 거리 0.31).
+        from deepfake_lens.text_advanced import MIN_COMPARE_CHARS, compare_texts, visible_chars
+
+        long = "평범한 글입니다. 여러 문장이 있습니다. " * 10
+        self.assertEqual(visible_chars("a\u200b b\x00\u00a0c\ufeff\u0301."), 4)
+        for invisible in ("\u200b" * 100, "\x00" * 100, "\u200b\u200c\u200d\u2060\ufeff" * 20, "a\u200b" * (MIN_COMPARE_CHARS - 1), "\x01\x02\x7f" * 40):
+            with self.subTest(text=repr(invisible[:6])):
+                result = compare_texts(invisible, long)
+                self.assertEqual((result.same_author_score, result.distance, result.reference_band), (None, None, "unavailable"))
+                self.assertIn("파일 A", result.reference_note)
+                self.assertIn("보이는 글자", result.reference_note)
+        self.assertIsNotNone(compare_texts("가나다라마바사아", long).distance)  # 8 visible characters
 
 
 class LipsyncTest(unittest.TestCase):
