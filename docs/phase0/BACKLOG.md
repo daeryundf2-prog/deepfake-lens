@@ -66,3 +66,8 @@
 
 - BL-35 — 256 MiB 상한보다 4 KiB 작은 업로드 본문 하나에 서버 최대 RSS가 web 2461 MB, api-serve 2449 MB(본문의 약 9.5배; `rfile.read` 사본 + `BytesParser`의 문자열·메시지 사본) — 동시에 두 개면 8 GB 기계에서도 OOM 가능. (30차 백로그 후보, Low, 성능·견고성) → 처리: 210cf09 「fix(upload): R30-1 R30-2 R30-3 R30-5 every upload path parses multipart/form-data with one strict parser (form_data.py) instead of the e-mail parser — …」 (같은 탐침 `probe_big.py`, `:latest`, `--cpus 2 --memory 2500m`: 0cfbd03 web 2489 MB·api-serve 2482 MB → web 582 MB·api-serve 594 MB(본문의 약 2.2배 — 본문 + 파트 바이트 사본), 응답 3.6 s → 0.4 s, 행 `analyzed`·sha256 일치; 같은 본문 두 개를 동시에 보내면 web 1100 MB·api-serve 1113 MB, 둘 다 200)
 - BL-36 — 파일 이름의 `"`는 브라우저가 `%22`로 보내고(CR·LF는 `%0D`·`%0A`) 서버는 글자 그대로의 `%22`와 구별할 수 없다(HTML Standard의 multipart/form-data 인코딩이 인정하는 모호성). R30 파서는 브라우저가 뜻한 대로 `%22`·`%0D`·`%0A`를 되돌리므로 `say "hi".png`는 맞게 보이고, 반대로 이름에 실제로 `%22`가 든 파일(예: `say %22hi%22.png`)은 행 이름이 `say "hi".png`로 보인다(다른 `%`는 그대로). GUI가 원래 이름을 별도 필드(JSON 이름 목록 등)로 함께 보내면 없앨 수 있다. (30차 백로그 후보, Cosmetic, 판정)
+
+## 31차 검증에서 넘긴 항목
+
+- BL-37 — 화자 비교의 하한(R31-7)은 길이 1초·평균 RMS 1e-4뿐이라 직류(DC) WAV(0이 아닌 같은 값의 샘플)는 RMS가 하한 위여서 여전히 비교되고 수치가 나온다(31차 「무음·직류 WAV는 특징이 추출되어 수치가 나옴」). 직류 성분을 뺀 에너지나 영교차율로 하한을 더하면 없앨 수 있으나, 직류 오프셋이 큰 실제 녹음(오프셋 > 진폭이면 영교차 0)을 비교하지 않게 될 수 있어 미뤘다. 참고 신호라 결론과 무관하고 한계 「5초 미만이라 불안정」은 그대로. (31차 백로그 후보의 남은 부분, Low, 판정·참고 계층)
+- BL-38 — R31-1로 줄 끝에 맨 LF·CR도 받으면서 생긴 모호성(이메일 파서 0cfbd03과 같음): (a) CRLF 본문에서 파일 데이터 안에 `\n--<boundary>`(경계 문자열 전체)가 있으면 그 자리가 경계로 읽힌다(이전 R30 파서에서는 데이터) — 브라우저·curl·requests는 무작위 경계를 쓰므로 실제로는 생기지 않는다; (b) 맨 LF 구분자를 쓰는 본문(API 전용)에서 데이터가 CR로 끝나면 그 CR은 `\r\n` 구분자의 일부로 읽혀 데이터에서 빠진다(CRLF 본문에서는 그대로 남는다). (31차 수정에서 기록, Cosmetic, 판정)
