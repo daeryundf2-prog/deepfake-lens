@@ -198,6 +198,7 @@ python scripts/build_traceability_commits.py --check
 | `verify_round27.md` | 27차 검증(새 형식 첫 라운드): R27-1~R27-5(R27-2·R27-5 수정됨, 나머지는 BACKLOG BL-19~BL-22) |
 | `verify_round28.md` | 28차 검증(새 형식 두 번째 라운드): R27 종료 확인, R28-1(거짓 문구 — 수정 대상), R28-2~R28-5(BACKLOG 후보) |
 | `verify_round29.md` | 29차 검증(새 형식 세 번째 라운드): R28 종료 확인, R29-1(거짓 문구 — 수정됨), R29-2(BACKLOG 후보 — 이 라운드에서 함께 수정됨). 수정 라운드의 업로드 경로 전수 점검에서 R29-3~R29-6을 찾아 수정 |
+| `verify_round30.md` | 30차 검증(새 형식 네 번째 라운드): R29 종료 확인, R30-1~R30-5(모두 Low, 사용자에게 보이는 거짓 문구 — 수정 대상), 백로그 후보 3개 |
 | `ux_audit_ec0d057.md` | 18차와 함께 한 UI/UX/AX 감사(ec0d057 기준) |
 | `BACKLOG.md` | 게이트를 막지 않는 항목(Low·Cosmetic·비게이트 명령의 지적, 1단계로 연기한 결정 — BL-1 Ed25519 등). 형식은 문서 머리말 |
 | `HANDOFF.md` | 이 문서 |
