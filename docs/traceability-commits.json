@@ -4,7 +4,7 @@
   "generated_by": "scripts/build_traceability_commits.py",
   "range": {
     "base": "dad97306212ac2fa07d3c0398c1f17682cec91b5",
-    "head": "6dfd3fa2be7d73fdf52c795fe3daf49351261baf",
+    "head": "454fd848fd3ad69d50bc1b5e73e54f3f7da81bdb",
     "note": "range.base..range.head(병합 커밋 제외). range.head는 이 표를 재생성한 커밋의 부모 — 그 커밋 자신의 해시는 표에 없다."
   },
   "notes": [
@@ -4730,6 +4730,75 @@
       "commits": [
         "43521d8",
         "6dfd3fa"
+      ],
+      "used_in_commit_subjects": true
+    },
+    {
+      "id": "R30-1",
+      "round": 30,
+      "source": "verify_round30.md",
+      "summary": "R30-1 a part a browser sends as message/* (.eml) is a file on every upload path — it vanished (「업로드된",
+      "gaps": [],
+      "new": "갭 목록 밖 항목 포함",
+      "commits": [
+        "210cf09",
+        "5bed165",
+        "454fd84"
+      ],
+      "used_in_commit_subjects": true
+    },
+    {
+      "id": "R30-2",
+      "round": 30,
+      "source": "verify_round30.md",
+      "summary": "R30-2 a part a browser sends as multipart/* (.mht) is analyzed as the bytes sent — it was re-seriali",
+      "gaps": [],
+      "new": "갭 목록 밖 항목 포함",
+      "commits": [
+        "210cf09",
+        "5bed165",
+        "454fd84"
+      ],
+      "used_in_commit_subjects": true
+    },
+    {
+      "id": "R30-3",
+      "round": 30,
+      "source": "verify_round30.md",
+      "summary": "R30-3 a backslash in a browser-sent file name is kept (a\\b.png was ab.png; a non-KakaoTalk name read",
+      "gaps": [],
+      "new": "갭 목록 밖 항목 포함",
+      "commits": [
+        "210cf09",
+        "5bed165",
+        "454fd84"
+      ],
+      "used_in_commit_subjects": true
+    },
+    {
+      "id": "R30-4",
+      "round": 30,
+      "source": "verify_round30.md",
+      "summary": "R30-4 a comparison that measured nothing shows no number (0-byte or non-audio WAV, empty text) — it ",
+      "gaps": [],
+      "new": "갭 목록 밖 항목 포함",
+      "commits": [
+        "548a168",
+        "454fd84"
+      ],
+      "used_in_commit_subjects": true
+    },
+    {
+      "id": "R30-5",
+      "round": 30,
+      "source": "verify_round30.md",
+      "summary": "R30-5 no/empty boundary and a boundary the body never uses get their own 400 — they said 「업로드 본문이 잘렸",
+      "gaps": [],
+      "new": "갭 목록 밖 항목 포함",
+      "commits": [
+        "210cf09",
+        "5bed165",
+        "454fd84"
       ],
       "used_in_commit_subjects": true
     }
@@ -14110,6 +14179,138 @@
         "R29-4: 갭 목록 밖 항목 포함",
         "R29-5: 갭 목록 밖 항목 포함",
         "R29-6: 갭 목록 밖 항목 포함"
+      ],
+      "gaps_line": "Gaps: 신규(스펙 외)",
+      "gaps_source": "subject"
+    },
+    {
+      "sha": "0cfbd03fa6ebde54eb80b1139d66f4a0a692ca4e",
+      "short": "0cfbd03",
+      "round": "29",
+      "subject": "docs(qa): CONFORMANCE.md and commit traceability regenerated on 6dfd3fa; round-29 IDs R29-1..R29-6 mapped (R29-1, R29-2 fixed from verify_round29.md; R29-3..R29-6 found and fixed by the upload entry-point sweep) (WP-J; Gaps: G26, G27, G28)",
+      "pre_rewrite_subject": null,
+      "ids": [
+        "WP-J"
+      ],
+      "gaps_named_in_subject": [
+        "G26",
+        "G27",
+        "G28"
+      ],
+      "gaps": [
+        "G26",
+        "G27",
+        "G28"
+      ],
+      "new": false,
+      "new_reasons": [],
+      "gaps_line": "Gaps: G26, G27, G28",
+      "gaps_source": "subject"
+    },
+    {
+      "sha": "aad5112040344f93def7834ade05768bcc458be0",
+      "short": "aad5112",
+      "round": "29",
+      "subject": "docs(phase0): round-30 verification findings — fourth round in the risk-based format: no Med+ on the verdict/signature/evidence axes, five false statements (R30-1..R30-5, all Low) to fix, three backlog candidates (WP-J; Gaps: 신규)",
+      "pre_rewrite_subject": null,
+      "ids": [
+        "WP-J"
+      ],
+      "gaps_named_in_subject": [],
+      "gaps": [],
+      "new": true,
+      "new_reasons": [],
+      "gaps_line": "Gaps: 신규(스펙 외)",
+      "gaps_source": "subject"
+    },
+    {
+      "sha": "210cf09de90345cf9b857d2ecb147268aefc6380",
+      "short": "210cf09",
+      "round": "30",
+      "subject": "fix(upload): R30-1 R30-2 R30-3 R30-5 every upload path parses multipart/form-data with one strict parser (form_data.py) instead of the e-mail parser — a part's bytes are taken verbatim whatever its Content-Type (a browser's .eml as message/rfc822 no longer vanishes, a .mht as multipart/related is no longer re-serialized under a wrong sha256), a quoted filename keeps its backslashes as browsers send them (a\\b.png was ab.png, a non-KakaoTalk name read 「이름 형식 일치」), and no/empty boundary or a boundary the body never uses get their own 400 instead of 「업로드 본문이 잘렸습니다」 (R30-1, R30-2, R30-3, R30-5; Gaps: 신규)",
+      "pre_rewrite_subject": null,
+      "ids": [
+        "R30-1",
+        "R30-2",
+        "R30-3",
+        "R30-5"
+      ],
+      "gaps_named_in_subject": [],
+      "gaps": [],
+      "new": true,
+      "new_reasons": [
+        "R30-1: 갭 목록 밖 항목 포함",
+        "R30-2: 갭 목록 밖 항목 포함",
+        "R30-3: 갭 목록 밖 항목 포함",
+        "R30-5: 갭 목록 밖 항목 포함"
+      ],
+      "gaps_line": "Gaps: 신규(스펙 외)",
+      "gaps_source": "subject"
+    },
+    {
+      "sha": "548a168eac13f2dbc6989a031464926edd7c5abd",
+      "short": "548a168",
+      "round": "30",
+      "subject": "fix(compare): R30-4 a comparison that measured nothing shows no number — a side whose audio features cannot be extracted (a 0-byte WAV, a PNG named .wav, no librosa) or that has under 8 characters of text gives raw_score null, distance null and reference_band \"unavailable\" with the reason naming the side (파일 A/파일 B/두 파일 모두), and the GUI shows 「없음」 and 「거리 없음 — 측정하지 않음」 — it showed 「0」 and 「거리 1」 for audio and a distance computed from an empty text (R30-4; Gaps: 신규)",
+      "pre_rewrite_subject": null,
+      "ids": [
+        "R30-4"
+      ],
+      "gaps_named_in_subject": [],
+      "gaps": [],
+      "new": true,
+      "new_reasons": [
+        "R30-4: 갭 목록 밖 항목 포함"
+      ],
+      "gaps_line": "Gaps: 신규(스펙 외)",
+      "gaps_source": "subject"
+    },
+    {
+      "sha": "5bed1651fa1d6b52d4fb32026c0fd79df4efe2ed",
+      "short": "5bed165",
+      "round": "30",
+      "subject": "docs(phase0): round-30 backlog and service doc — the upload paragraph says an analysis that raises is a `failed` row and only a failure outside a file's analysis is a 500 (E20 says the same; both said \"analysis raised → 500\"), BACKLOG gains 「30차 검증에서 넘긴 항목」: BL-35 the ~9.5x upload peak memory, closed by the R30 parser (582/594 MB for a 256 MiB body, was 2489/2482 MB), BL-36 a literal %22 in a name now reads as '\"' (R30-1, R30-2, R30-3, R30-5; Gaps: 신규)",
+      "pre_rewrite_subject": null,
+      "ids": [
+        "R30-1",
+        "R30-2",
+        "R30-3",
+        "R30-5"
+      ],
+      "gaps_named_in_subject": [],
+      "gaps": [],
+      "new": true,
+      "new_reasons": [
+        "R30-1: 갭 목록 밖 항목 포함",
+        "R30-2: 갭 목록 밖 항목 포함",
+        "R30-3: 갭 목록 밖 항목 포함",
+        "R30-5: 갭 목록 밖 항목 포함"
+      ],
+      "gaps_line": "Gaps: 신규(스펙 외)",
+      "gaps_source": "subject"
+    },
+    {
+      "sha": "454fd848fd3ad69d50bc1b5e73e54f3f7da81bdb",
+      "short": "454fd84",
+      "round": "30",
+      "subject": "docs(phase0): R30-1..R30-5 round-30 handoff — the axis-product line of §8.3 lists the equivalence table's round-30 axes (part Content-Type × browser-encoded names × boundary refusals, and the unmeasured /api/compare pairs); §9 marks R30-1..R30-5 fixed (R30-1, R30-2, R30-3, R30-4, R30-5; Gaps: 신규)",
+      "pre_rewrite_subject": null,
+      "ids": [
+        "R30-1",
+        "R30-2",
+        "R30-3",
+        "R30-4",
+        "R30-5"
+      ],
+      "gaps_named_in_subject": [],
+      "gaps": [],
+      "new": true,
+      "new_reasons": [
+        "R30-1: 갭 목록 밖 항목 포함",
+        "R30-2: 갭 목록 밖 항목 포함",
+        "R30-3: 갭 목록 밖 항목 포함",
+        "R30-4: 갭 목록 밖 항목 포함",
+        "R30-5: 갭 목록 밖 항목 포함"
       ],
       "gaps_line": "Gaps: 신규(스펙 외)",
       "gaps_source": "subject"

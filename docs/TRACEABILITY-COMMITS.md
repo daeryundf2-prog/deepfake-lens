@@ -4,9 +4,9 @@
 
 Y13/P12: 검증 결함 ID(라운드 1–11)를 0단계 스펙의 갭 ID(G1–G34) 또는 신규(스펙 외) 사유에 매핑하고, 현재 phase0 히스토리의 커밋마다 제목의 ID와 'Gaps:' 줄을 적는다. 라운드 3과 라운드 6의 N은 서로 다른 집합이므로 N3-x / N6-x로, 라운드 5의 G1–G16은 스펙의 G1–G34와 충돌하므로 V5-G1…V5-G16으로 표기한다. 매핑(ids[], wp_gaps, unused_ids, notes)은 손으로 관리하는 데이터이고, commits[]와 ids[].commits는 scripts/build_traceability_commits.py가 git 히스토리에서 다시 만든다(제목으로 이전 항목과 매칭).
 
-범위: `dad9730..6dfd3fa`(병합 커밋 제외, 커밋 484개). 이 표는 **표를 재생성한 커밋의 부모까지**를 덮는다 — 재생성 커밋 자신의 해시는 표에 없다(자기 해시를 담을 수 없음). CI(`python scripts/build_traceability_commits.py --check`)가 같은 범위를 히스토리에서 다시 만들어 커밋된 표와 비교한다.
+범위: `dad9730..454fd84`(병합 커밋 제외, 커밋 490개). 이 표는 **표를 재생성한 커밋의 부모까지**를 덮는다 — 재생성 커밋 자신의 해시는 표에 없다(자기 해시를 담을 수 없음). CI(`python scripts/build_traceability_commits.py --check`)가 같은 범위를 히스토리에서 다시 만들어 커밋된 표와 비교한다.
 
-요약: ID 339개 — 스펙 갭에 매핑 232개(그중 신규 사유 병기 80개), 신규(스펙 외)만 107개.
+요약: ID 344개 — 스펙 갭에 매핑 232개(그중 신규 사유 병기 80개), 신규(스펙 외)만 112개.
 
 ## WP → 갭 (스펙 머리글)
 
@@ -366,6 +366,11 @@ Y13/P12: 검증 결함 ID(라운드 1–11)를 0단계 스펙의 갭 ID(G1–G34
 | R29-4 | 29 | R29-4 the upload cap counts uploaded files, not rows; every file over it is its own skipped row | — | 신규(스펙 외): 갭 목록 밖 항목 포함 | 8cbdeb3, 6dfd3fa |
 | R29-5 | 29 | R29-5 the web quick check refuses more than one file part instead of silently dropping the others | — | 신규(스펙 외): 갭 목록 밖 항목 포함 | 8b778c4, 6dfd3fa |
 | R29-6 | 29 | R29-6 /api/compare counts a 0-byte file, takes exactly two files and never answers 500 for an odd cl | — | 신규(스펙 외): 갭 목록 밖 항목 포함 | 43521d8, 6dfd3fa |
+| R30-1 | 30 | R30-1 a part a browser sends as message/* (.eml) is a file on every upload path — it vanished (「업로드된 | — | 신규(스펙 외): 갭 목록 밖 항목 포함 | 210cf09, 5bed165, 454fd84 |
+| R30-2 | 30 | R30-2 a part a browser sends as multipart/* (.mht) is analyzed as the bytes sent — it was re-seriali | — | 신규(스펙 외): 갭 목록 밖 항목 포함 | 210cf09, 5bed165, 454fd84 |
+| R30-3 | 30 | R30-3 a backslash in a browser-sent file name is kept (a\b.png was ab.png; a non-KakaoTalk name read | — | 신규(스펙 외): 갭 목록 밖 항목 포함 | 210cf09, 5bed165, 454fd84 |
+| R30-4 | 30 | R30-4 a comparison that measured nothing shows no number (0-byte or non-audio WAV, empty text) — it  | — | 신규(스펙 외): 갭 목록 밖 항목 포함 | 548a168, 454fd84 |
+| R30-5 | 30 | R30-5 no/empty boundary and a boundary the body never uses get their own 400 — they said 「업로드 본문이 잘렸 | — | 신규(스펙 외): 갭 목록 밖 항목 포함 | 210cf09, 5bed165, 454fd84 |
 
 커밋 제목에 쓰이지 않은 ID:
 
@@ -881,3 +886,9 @@ R18-14: ids[]의 갭 매핑을 커밋 제목·본문의 `Gaps:`에 맞췄다 —
 | 8b778c4 | 29 | R29-5 | Gaps: 신규(스펙 외) | subject | fix(upload): R29-5 the web quick check (/api/check) refuses a request with more than one file part — 400 「빠른 검사는 파일 1개만 받습니다(받은 파일 N개) — …」 — instead of analyzing the first file and silently dropping the others (R29-5; Gaps: 신규) |
 | 43521d8 | 29 | R29-6 | Gaps: 신규(스펙 외) | subject | fix(upload): R29-6 the web comparison (/api/compare) counts a 0-byte file as a file and takes exactly two (else 400 「비교할 파일 2개가 필요합니다(받은 파일 N개)」), and writes each file like every upload so a client name this system cannot create no longer fails with a 500 — it said 「비교할 파일 2개가 필요합니다」 for two files when one was empty and silently ignored a third (R29-6; Gaps: 신규) |
 | 6dfd3fa | 29 | R29-1, R29-2, R29-3, R29-4, R29-5, R29-6 | Gaps: 신규(스펙 외) | subject | docs(phase0): R29-1..R29-6 round-29 handoff — the axis-product line of §8.3 names the upload entry-point equivalence table (UploadEntryPointEquivalenceTest) and asks a change adding an upload entry point or input class to add it there; §9 marks R29-1/R29-2 fixed and R29-3..R29-6 found by the sweep (R29-1, R29-2, R29-3, R29-4, R29-5, R29-6; Gaps: 신규) |
+| 0cfbd03 | 29 | WP-J | Gaps: G26, G27, G28 | subject | docs(qa): CONFORMANCE.md and commit traceability regenerated on 6dfd3fa; round-29 IDs R29-1..R29-6 mapped (R29-1, R29-2 fixed from verify_round29.md; R29-3..R29-6 found and fixed by the upload entry-point sweep) (WP-J; Gaps: G26, G27, G28) |
+| aad5112 | 29 | WP-J | Gaps: 신규(스펙 외) | subject | docs(phase0): round-30 verification findings — fourth round in the risk-based format: no Med+ on the verdict/signature/evidence axes, five false statements (R30-1..R30-5, all Low) to fix, three backlog candidates (WP-J; Gaps: 신규) |
+| 210cf09 | 30 | R30-1, R30-2, R30-3, R30-5 | Gaps: 신규(스펙 외) | subject | fix(upload): R30-1 R30-2 R30-3 R30-5 every upload path parses multipart/form-data with one strict parser (form_data.py) instead of the e-mail parser — a part's bytes are taken verbatim whatever its Content-Type (a browser's .eml as message/rfc822 no longer vanishes, a .mht as multipart/related is no longer re-serialized under a wrong sha256), a quoted filename keeps its backslashes as browsers send them (a\b.png was ab.png, a non-KakaoTalk name read 「이름 형식 일치」), and no/empty boundary or a boundary the body never uses get their own 400 instead of 「업로드 본문이 잘렸습니다」 (R30-1, R30-2, R30-3, R30-5; Gaps: 신규) |
+| 548a168 | 30 | R30-4 | Gaps: 신규(스펙 외) | subject | fix(compare): R30-4 a comparison that measured nothing shows no number — a side whose audio features cannot be extracted (a 0-byte WAV, a PNG named .wav, no librosa) or that has under 8 characters of text gives raw_score null, distance null and reference_band "unavailable" with the reason naming the side (파일 A/파일 B/두 파일 모두), and the GUI shows 「없음」 and 「거리 없음 — 측정하지 않음」 — it showed 「0」 and 「거리 1」 for audio and a distance computed from an empty text (R30-4; Gaps: 신규) |
+| 5bed165 | 30 | R30-1, R30-2, R30-3, R30-5 | Gaps: 신규(스펙 외) | subject | docs(phase0): round-30 backlog and service doc — the upload paragraph says an analysis that raises is a `failed` row and only a failure outside a file's analysis is a 500 (E20 says the same; both said "analysis raised → 500"), BACKLOG gains 「30차 검증에서 넘긴 항목」: BL-35 the ~9.5x upload peak memory, closed by the R30 parser (582/594 MB for a 256 MiB body, was 2489/2482 MB), BL-36 a literal %22 in a name now reads as '"' (R30-1, R30-2, R30-3, R30-5; Gaps: 신규) |
+| 454fd84 | 30 | R30-1, R30-2, R30-3, R30-4, R30-5 | Gaps: 신규(스펙 외) | subject | docs(phase0): R30-1..R30-5 round-30 handoff — the axis-product line of §8.3 lists the equivalence table's round-30 axes (part Content-Type × browser-encoded names × boundary refusals, and the unmeasured /api/compare pairs); §9 marks R30-1..R30-5 fixed (R30-1, R30-2, R30-3, R30-4, R30-5; Gaps: 신규) |
