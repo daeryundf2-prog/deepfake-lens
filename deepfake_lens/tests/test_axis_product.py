@@ -27,6 +27,7 @@ the server's temp file name and report 「일치 없음」.
 from __future__ import annotations
 
 import contextlib
+import hashlib
 import importlib.util
 import io
 import itertools
@@ -320,7 +321,11 @@ def _form(parts: list[tuple[str | None, bytes]], field: str = "files") -> tuple[
     body = b""
     for name, data in parts:
         disposition = f'form-data; name="{field}"'
-        if name is not None:
+        if name == "":
+            # R31-3 (round 31): an empty filename* now falls back to filename="x" (RFC 6266 §4.3), so the empty name
+            # is sent as the one empty filename it stands for; filename*='' + filename="a.png" is its own case.
+            disposition += '; filename=""'
+        elif name is not None:
             disposition += "; filename=\"x\"; filename*=UTF-8''" + quote(name.encode("utf-8", "surrogateescape"), safe="")
         body += f"--{boundary}\r\nContent-Disposition: {disposition}\r\nContent-Type: application/octet-stream\r\n\r\n".encode("ascii") + data + b"\r\n"
     return f"multipart/form-data; boundary={boundary}", body + f"--{boundary}--\r\n".encode("ascii")
@@ -813,6 +818,194 @@ class UploadEntryPointEquivalenceTest(unittest.TestCase):
             for ctype, sent, reason in cases:
                 with self.subTest(leg=leg, ctype=ctype, size=len(sent)):
                     self.assertEqual(post(path, ctype, sent), (400, {"error": reason}))
+
+
+    # -- R31 (round 31): line endings, media-type case, filename*, the parts cap ----------------------------------
+
+    def _check_rows(self, payload: dict) -> list[dict]:
+        return payload["items"] if payload.get("mode") == "files" else [payload["item"]]
+
+    def test_line_endings_give_the_rows_of_the_bytes_sent(self) -> None:
+        # R31-1 (round 31): the R30 parser split only on CRLF — an LF-only body was 「본문의 경계가 Content-Type의
+        # boundary와 다릅니다」 (same boundary), a body with only its opening line in CRLF or its close delimiter after
+        # a bare LF was 「업로드 본문이 잘렸습니다」 (not cut), an LF-ended preamble 「업로드된 파일이 없습니다」 (a file
+        # was sent). 0cfbd03's e-mail parser analyzed them all. A part's bytes stay verbatim (the PNG holds CR LF).
+        from deepfake_lens import form_data
+
+        legs, web = self._upload_legs()
+        b = self.bytes
+        self.assertIn(b"\r\n", b["png"])
+        files = [(self.K + ".png", b["png"], "image/png"), ("case.zip", b["zip"], "application/zip"), ("t.txt", b["txt"], None)]
+        boundary = "----WebKitFormBoundaryR31eol"
+        crlf, lf, cr = b"\r\n", b"\n", b"\r"
+
+        def body(parts, *, opening=crlf, line=crlf, headers=crlf, close=crlf, preamble=b"", before=None) -> bytes:
+            out = preamble
+            for index, (name, data, part_type) in enumerate(parts):
+                end = opening if index == 0 else line
+                out += f"--{boundary}".encode() + end
+                out += f'Content-Disposition: form-data; name="files"; filename="{name}"'.encode() + headers
+                if part_type:
+                    out += f"Content-Type: {part_type}".encode() + headers
+                out += headers + data + ((before or line) if index < len(parts) - 1 else close)
+            return out + f"--{boundary}--".encode() + close
+
+        ctype = f"multipart/form-data; boundary={boundary}"
+        variants = {
+            "CRLF": {},
+            "LF": dict(opening=lf, line=lf, headers=lf, close=lf),
+            "CR": dict(opening=cr, line=cr, headers=cr, close=cr),
+            "mixed: opening line CRLF, the rest LF": dict(line=lf, headers=lf, close=lf),
+            "mixed: LF header lines": dict(headers=lf),
+            "mixed: LF before the delimiters": dict(before=lf, close=lf),
+            "LF close": dict(close=lf),
+            "LF preamble": dict(preamble=b"This is the preamble.\n"),
+            "CRLF preamble": dict(preamble=b"This is the preamble.\r\n"),
+        }
+        expected = [(name, self._folder_rows(name, data)) for name, data, _type in files]
+        for label, eol in variants.items():
+            sent = body(files, **eol)
+            for leg, post, path in legs:
+                with self.subTest(eol=label, leg=leg):
+                    status, payload = post(path, ctype, sent)
+                    self.assertEqual(status, 200, payload)
+                    self._assert_rows(f"{label} / {leg}", expected, payload["items"])
+                    self.assertEqual(payload["items"][0]["sha256"], hashlib.sha256(b["png"]).hexdigest())
+            with self.subTest(eol=label, leg="web /api/check"):
+                status, payload = web("/api/check", ctype, body(files[:1], **eol))
+                self.assertEqual(status, 200, payload)
+                self._assert_rows(f"{label} / web /api/check", expected[:1], self._check_rows(payload))
+            with self.subTest(eol=label, leg="web /api/compare"):
+                pair = [("a.txt", b["txt"] * 4, None), ("b.txt", b["txt"] * 3, "text/plain")]
+                reference = web("/api/compare", ctype, body(pair))
+                self.assertEqual(web("/api/compare", ctype, body(pair, **eol)), reference)
+                self.assertEqual(reference[0], 200, reference)
+        # Truncation is still truncation in an LF body (P8), and a cut opening line after a preamble is too (it was
+        # 「boundary와 다릅니다」).
+        lf_body = body(files, **variants["LF"])
+        cut = [lf_body[:-4], lf_body[:-len(boundary) - 4], lf_body[:len(lf_body) // 2], lf_body[:len(lf_body) - 12],
+               b"preamble\r\n--" + boundary[:6].encode(), b"preamble\n--" + boundary.encode(), body(files, close=lf)[:-3]]
+        for leg, post, path in legs + [("web /api/check", web, "/api/check"), ("web /api/compare", web, "/api/compare")]:
+            for sent in cut:
+                with self.subTest(leg=leg, tail=sent[-12:]):
+                    self.assertEqual(post(path, ctype, sent), (400, {"error": form_data.MULTIPART_INCOMPLETE}))
+        # A bare LF ends an unquoted header value (round 31: `filename=a.png<LF>X-Evil: 1` named a file
+        # 'a.png\nX-Evil: 1'); the next line is a header of its own.
+        name = self.K + ".png"
+        sent = (f"--{boundary}\r\nContent-Disposition: form-data; name=files; filename={name}\nX-Evil: 1\r\n\r\n".encode()
+                + b["png"] + f"\r\n--{boundary}--\r\n".encode())
+        for leg, post, path in legs:
+            with self.subTest(case="bare LF in an unquoted name", leg=leg):
+                status, payload = post(path, ctype, sent)
+                self.assertEqual(status, 200, payload)
+                self._assert_rows(leg, [(name, self._folder_rows(name, b["png"]))], payload["items"])
+
+    def test_line_end_parsing_stays_linear(self) -> None:
+        # R31-1: while fixing the line ends, a delimiter check sliced the rest of the body for each candidate
+        # (`body[j:] == b"-"`) — 16 MiB of fake delimiters `\r\n--BBX` took 740 s (round 31's probe_fd.py F shape,
+        # 1.4 s before). Each shape here, 8 MiB, must stay well under a quadratic time.
+        import time
+
+        from deepfake_lens import form_data
+
+        head = b'Content-Disposition: form-data; name="f"; filename="a.png"'
+        size = 8 << 20
+        shapes = {"CRLF fake delimiters": b"--BB\r\n" + head + b"\r\n\r\n" + b"\r\n--BBX" * (size // 7),
+                  "LF fake delimiters": b"--BB\n" + head + b"\n\n" + b"\n--BBX" * (size // 6),
+                  "CR fake delimiters": b"--BB\r" + head + b"\r\r" + b"\r--BBX" * (size // 6),
+                  "preamble of fake delimiters": b"\n--BBX" * (size // 6),
+                  "header lines ending in CR": b"--BB\r\n" + b"a\r" * (size // 2) + b"\r\n--BB--"}
+        for label, body in shapes.items():
+            with self.subTest(shape=label):
+                started = time.perf_counter()
+                try:
+                    form_data.parse_form_data("multipart/form-data; boundary=BB", body)
+                except form_data.FormDataError:
+                    pass
+                self.assertLess(time.perf_counter() - started, 20.0, label)
+
+    def test_media_type_case_and_filename_star_fallbacks(self) -> None:
+        # R31-2: `Multipart/Form-Data` was 「multipart/form-data 업로드가 필요합니다」 (a case-sensitive substring test;
+        # RFC 9110 §8.3.1: type and subtype are case-insensitive). R31-3: an empty filename* won over filename="…" —
+        # 「업로드된 파일이 없습니다」. R31-4: filename*=undefined''… (Python's `undefined` codec raises UnicodeError) was a
+        # 500 on every upload path.
+        from urllib.parse import quote
+
+        legs, web = self._upload_legs()
+        png, name = self.bytes["png"], self.K + ".png"
+        expected = [(name, self._folder_rows(name, png))]
+        reference_type, reference = _browser_form([(name, png, "image/png")])
+        boundary = reference_type.split("=", 1)[1]
+        for ctype in (f"Multipart/Form-Data; boundary={boundary}", f"MULTIPART/FORM-DATA; Boundary={boundary}",
+                      f" multipart/form-data ;BOUNDARY={boundary}", f'multipart/FORM-data; charset=utf-8; boundary="{boundary}"'):
+            for leg, post, path in legs + [("web /api/check", web, "/api/check")]:
+                with self.subTest(ctype=ctype, leg=leg):
+                    status, payload = post(path, ctype, reference)
+                    self.assertEqual(status, 200, payload)
+                    self._assert_rows(leg, expected, payload["items"] if path != "/api/check" else self._check_rows(payload))
+        wrong = f"multipart/form-data-x; boundary={boundary}"
+        for leg, post, path, reason in [(leg, post, path, "multipart/form-data 업로드가 필요합니다") for leg, post, path in legs] + [
+                ("web /api/check", web, "/api/check", "multipart/form-data 또는 application/json 본문이 필요합니다"),
+                ("web /api/compare", web, "/api/compare", "multipart/form-data 본문이 필요합니다")]:
+            with self.subTest(ctype=wrong, leg=leg):
+                self.assertEqual(post(path, wrong, reference), (400, {"error": reason}))
+        text = json.dumps({"text": "평범한 글입니다. 여러 문장이 있습니다. 사람이 쓴 메모입니다."}).encode("utf-8")
+        self.assertEqual(web("/api/check", "Application/JSON; charset=UTF-8", text), web("/api/check", "application/json", text))
+        self.assertEqual(web("/api/check", "application/json", text)[1].get("mode"), "text")
+
+        def one(disposition: str) -> tuple[str, bytes]:
+            return reference_type, (f"--{boundary}\r\nContent-Disposition: form-data; name=\"files\"; {disposition}\r\n\r\n".encode()
+                                    + png + f"\r\n--{boundary}--\r\n".encode())
+
+        encoded = quote(name)
+        cases = [f"filename*=utf-8''; filename=\"{name}\"", f"filename*=UTF-8'ko'; filename=\"{name}\"",
+                 f"filename*=undefined''{encoded}", f"filename*=undefined''{encoded}; filename=\"other.png\"",
+                 f"filename*=x-no-such-codec''{encoded}", f"filename*=\"utf\x00-8''{encoded}\""]
+        for disposition in cases:
+            ctype, sent = one(disposition)
+            for leg, post, path in legs + [("web /api/check", web, "/api/check")]:
+                with self.subTest(disposition=disposition, leg=leg):
+                    status, payload = post(path, ctype, sent)
+                    self.assertEqual(status, 200, payload)
+                    self._assert_rows(leg, expected, payload["items"] if path != "/api/check" else self._check_rows(payload))
+        ctype, sent = one("filename*=utf-8''; filename=\"\"")  # both empty: still no file
+        for leg, post, path in legs + [("web /api/check", web, "/api/check")]:
+            with self.subTest(disposition="both empty", leg=leg):
+                self.assertEqual(post(path, ctype, sent), (400, {"error": "업로드된 파일이 없습니다"}))
+
+    def test_the_parts_cap_refuses_before_any_row(self) -> None:
+        # Round 31 (BACKLOG candidate, fixed): 280,000 tiny file parts gave 279,620 rows and an 81 MB answer; 24 million
+        # nameless parts took 21 s and 1 GB to say 「업로드된 파일이 없습니다」. At most MAX_UPLOAD_PARTS parts — files,
+        # fields and nameless parts alike — else a 400 naming the cap, on every leg.
+        from deepfake_lens import form_data, webapp_api
+
+        self.assertEqual(webapp_api.MAX_UPLOAD_PARTS, form_data.MAX_UPLOAD_PARTS)
+        self.assertGreater(form_data.MAX_UPLOAD_PARTS, webapp_api.MAX_UPLOAD_FILES)
+        legs, web = self._upload_legs()
+        cap = form_data.MAX_UPLOAD_PARTS
+        png, name = self.bytes["png"], self.K + ".png"
+        boundary = "r31parts"
+        ctype = f"multipart/form-data; boundary={boundary}"
+        file_part = (f"--{boundary}\r\nContent-Disposition: form-data; name=\"files\"; filename=\"{name}\"\r\n\r\n".encode()
+                     + png + b"\r\n")
+        nameless = f"--{boundary}\r\n\r\n\r\n".encode()
+        field = f"--{boundary}\r\nContent-Disposition: form-data; name=\"note\"\r\n\r\nx\r\n".encode()
+        close = f"--{boundary}--\r\n".encode()
+        at_cap = file_part + (nameless + field) * ((cap - 1) // 2) + nameless * ((cap - 1) % 2) + close
+        refusal = (400, {"error": form_data.MULTIPART_TOO_MANY_PARTS.format(cap=cap)})
+        for leg, post, path in legs + [("web /api/check", web, "/api/check")]:
+            with self.subTest(parts=cap, leg=leg):
+                status, payload = post(path, ctype, at_cap)
+                self.assertEqual(status, 200, payload)
+                self._assert_rows(leg, [(name, self._folder_rows(name, png))],
+                                  payload["items"] if path != "/api/check" else self._check_rows(payload))
+        over = [("nameless", file_part + nameless * cap + close), ("fields", field * (cap + 1) + close),
+                ("0-byte files", f"--{boundary}\r\nContent-Disposition: form-data; name=\"files\"; filename=\"a.txt\"\r\n\r\n\r\n".encode() * (cap + 1) + close),
+                ("many more, LF", (nameless.replace(b"\r\n", b"\n")) * (cap * 50) + close)]
+        for label, sent in over:
+            for leg, post, path in legs + [("web /api/check", web, "/api/check"), ("web /api/compare", web, "/api/compare")]:
+                with self.subTest(parts=label, leg=leg):
+                    self.assertEqual(post(path, ctype, sent), refusal)
 
 
 if __name__ == "__main__":

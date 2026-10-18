@@ -24,7 +24,8 @@ from urllib.parse import parse_qs
 
 from .audio_worker import in_worker_scope
 from .checks import failure_reason
-from .form_data import FormDataError, file_parts as _form_file_parts  # R30-1..R30-3, R30-5
+from .form_data import MAX_UPLOAD_PARTS as MAX_UPLOAD_PARTS  # round 31: the parts cap, beside the other upload caps
+from .form_data import FormDataError, file_parts as _form_file_parts, is_form_data  # R30-1..R30-3, R30-5, R31-2
 from .native_path import expand_user, scratch_dir
 from .result_text import display_name
 from .scan_jobs import (
@@ -71,6 +72,8 @@ MAX_SCAN_FILES = WEB_MAX_SCAN_FILES
 MAX_FILE_BYTES_CEILING = WEB_MAX_FILE_BYTES_CEILING
 MAX_UPLOAD_BYTES = 256 * 1024 * 1024
 MAX_UPLOAD_FILES = 20
+# Round 31: MAX_UPLOAD_PARTS (form_data, 1000) caps the parts of one upload request — files, form fields and
+# nameless parts alike — refused while parsing (form_data.MULTIPART_TOO_MANY_PARTS) before any row exists.
 
 # Server-level models directory override — set by run_server(--models-dir)
 # or DEEPFAKE_LENS_MODELS_DIR so every scan/check/coverage call resolves the
@@ -1119,7 +1122,7 @@ def _analyze_upload_payload(content_type: str, body: bytes) -> dict[str, object]
     engine profiles, then deleted. Archives are extracted and each member
     analyzed as its own row. The server never persists uploads.
     """
-    if "multipart/form-data" not in content_type:
+    if not is_form_data(content_type):  # R31-2: the media type, case-insensitively (was a case-sensitive substring)
         return ApiError("multipart/form-data 업로드가 필요합니다", 400)
     from .result_text import escape_row_path
 
@@ -1235,7 +1238,7 @@ def _check_text_payload(text: str, *, watermark_secret: str | None = None, water
 
 def _check_file_payload(content_type: str, body: bytes) -> dict[str, object]:
     """Unified single-file check: full scan + forensics + text probes."""
-    if "multipart/form-data" not in content_type:
+    if not is_form_data(content_type):  # R31-2: the media type, case-insensitively (was a case-sensitive substring)
         return ApiError("multipart/form-data 또는 application/json 본문이 필요합니다", 400)
     try:
         files = _upload_file_parts(content_type, body)  # R30-1..R30-3, R30-5; P8 (cut off)
@@ -1307,7 +1310,7 @@ def _check_file_payload(content_type: str, body: bytes) -> dict[str, object]:
 def _compare_payload(content_type: str, body: bytes) -> dict[str, object]:
     """Two-file comparison: speaker distance for audio pairs, stylometry
     for text/document pairs. Both parts must carry filenames."""
-    if "multipart/form-data" not in content_type:
+    if not is_form_data(content_type):  # R31-2: the media type, case-insensitively (was a case-sensitive substring)
         return ApiError("multipart/form-data 본문이 필요합니다", 400)
     # R29-6 (round 29): parts as every upload path selects them — a 0-byte file is a file (it was dropped, so two
     # files sent gave "비교할 파일 2개가 필요합니다"), and a third file is refused instead of silently ignored.

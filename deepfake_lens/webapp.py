@@ -10,6 +10,8 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
 from urllib.parse import parse_qs, urlparse
+
+from .form_data import media_type
 from .webapp_api import (
     MAX_UPLOAD_BYTES,
     USER_DATA_REFUSED_STATUS,
@@ -472,7 +474,7 @@ def build_server(
                 self.send_error(400, "요청 본문이 불완전합니다 — 업로드 중 연결이 끊겼습니다")
                 return
             content_type = self.headers.get("Content-Type") or ""
-            if "application/json" in content_type:
+            if media_type(content_type) == "application/json":  # R31-2: the media type, case-insensitively
                 try:
                     payload = load_json_body(body, errors="replace")
                 except JsonBodyError as exc:  # R10-5, R11-3: too-deep nesting is a 400 of its own

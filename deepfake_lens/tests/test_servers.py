@@ -1867,6 +1867,11 @@ class ErrorTableEveryRowTest(unittest.TestCase):
 
         png = (f / "photo.png").read_bytes()
         upload, upload_type = self._multipart(("files", "photo.png", png))
+        from deepfake_lens import form_data
+
+        too_many_type = "multipart/form-data; boundary=r31cap"
+        too_many = b"--r31cap\r\n\r\n\r\n" * (form_data.MAX_UPLOAD_PARTS + 1) + b"--r31cap--\r\n"
+        too_many_text = form_data.MULTIPART_TOO_MANY_PARTS.format(cap=form_data.MAX_UPLOAD_PARTS)
         cut, cut_type = self._multipart(("files", "photo.png", png), close=False)
         pair, pair_type = self._multipart(("a", "a.txt", "글 하나입니다. 충분히 긴 문장입니다.".encode()), ("b", "b.wav", (f / "tone.wav").read_bytes()))
         cut_pair, _ = self._multipart(("a", "a.txt", b"one"), ("b", "b.txt", b"two"), close=False)
@@ -1937,7 +1942,9 @@ class ErrorTableEveryRowTest(unittest.TestCase):
             + [case(s, "POST", "/api/analyze-upload", 400, text, upload, ctype) for s in both for ctype, text in (
                 ("multipart/form-data", "Content-Type에 multipart boundary가 없습니다"),
                 ("multipart/form-data; boundary=", "Content-Type에 multipart boundary가 없습니다"),
-                ("multipart/form-data; boundary=other", "본문의 경계가 Content-Type의 boundary와 다릅니다"))],
+                ("multipart/form-data; boundary=other", "본문의 경계가 Content-Type의 boundary와 다릅니다"))]
+            # Round 31: more parts than MAX_UPLOAD_PARTS (nameless ones count) — 400 before any row.
+            + [case(s, "POST", "/api/analyze-upload", 400, too_many_text, too_many, too_many_type) for s in both],
             "E19": [case("web", "POST", "/api/analyze-upload", 413, "업로드 크기가 상한", upload, upload_type, patches=(patch.object(webapp_module, "MAX_UPLOAD_BYTES", 16),)),
                     case("api", "POST", "/api/analyze-upload", 413, "업로드 크기가 상한", upload, upload_type, patches=(patch.object(webapp_api, "MAX_UPLOAD_BYTES", 16),))],
             "E20": [case("web", "POST", "/api/analyze-upload", 500, "업로드 분석 중 오류가 발생했습니다", upload, upload_type,
@@ -1951,6 +1958,7 @@ class ErrorTableEveryRowTest(unittest.TestCase):
                 (two_files, two_type, webapp_api.CHECK_ONE_FILE.format(count=2)),
                 (upload, "multipart/form-data", "Content-Type에 multipart boundary가 없습니다"),  # R30-5
                 (upload, "multipart/form-data; boundary=other", "본문의 경계가 Content-Type의 boundary와 다릅니다"),
+                (too_many, too_many_type, too_many_text),  # round 31
             )],
             "E22": [case("web", "POST", "/api/check", 413, "요청 본문이 상한", upload, upload_type, patches=(patch.object(webapp_module, "MAX_UPLOAD_BYTES", 16),))],
             # (text > 256 KB cannot travel in a test client's query string; the
@@ -1965,6 +1973,7 @@ class ErrorTableEveryRowTest(unittest.TestCase):
                 (cut_pair, pair_type, "업로드 본문이 잘렸습니다"),
                 (pair, "multipart/form-data", "Content-Type에 multipart boundary가 없습니다"),  # R30-5
                 (pair, "multipart/form-data; boundary=other", "본문의 경계가 Content-Type의 boundary와 다릅니다"),
+                (too_many, too_many_type, too_many_text),  # round 31
             )],
             "E25": [case("web", "POST", "/api/compare", 500, "비교 분석 중 오류가 발생했습니다", pair, pair_type,
                          patches=(patch.object(webapp_module, "_compare_payload", raise_),))],

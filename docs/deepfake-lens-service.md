@@ -177,6 +177,21 @@ at the first `"`, a backslash is an ordinary character (it was read as an
 escape and removed, R30-3), and only `%22`, `%0D`, `%0A` are decoded (to `"`,
 CR, LF — so a name that really contains `%22` reads as `"`); the name's bytes
 are UTF-8, else CP949, else kept as surrogate escapes (R12-10).
+R31 (round 31): a line may end in CRLF (RFC 2046, what browsers, curl,
+requests and undici send) or in a bare LF or CR, as the e-mail parser
+accepted — an LF-only body, a mixed one or a preamble ended by LF was refused
+as 「boundary와 다릅니다」/「잘렸습니다」/「업로드된 파일이 없습니다」 (R31-1);
+the line end before a delimiter is the delimiter's, the bytes of a part are
+otherwise verbatim (its own LF bytes included), and a bare LF ends an unquoted
+header value. The media type is compared case-insensitively
+(`Multipart/Form-Data`, R31-2; `/api/check`'s `application/json` too) and so
+is the `boundary` parameter name. An empty `filename*` falls back to
+`filename` (R31-3), and a `filename*` charset Python cannot decode with
+(e.g. `undefined`, which was a 500) is skipped like an unknown one (R31-4).
+A request has at most `MAX_UPLOAD_PARTS` (1000) parts — files, form fields and
+nameless parts alike, counted while parsing; one more is a 400
+`업로드 본문의 파트(파일·폼 필드)가 상한(1000개)보다 많습니다 — …` before any row
+is made (E18, E21, E24; 280,000 tiny parts made 279,620 rows).
 A file whose analysis raises is a `failed` row (`<Exception>: …`, R29-2), not
 an HTTP error; only a failure outside a file's analysis (the request
 handling itself) is a 500 `업로드 분석 중 오류가 발생했습니다` with a `detail`
@@ -322,13 +337,13 @@ endpoints (`/api/analyze/*`, `/api/classify`, `/api/check`, `/api/compare`,
 | E15 | GET `/api/analyze-file` (both) | outside the read roots (`file` or `file_b64`) | 403 | `허용되지 않은 경로` |
 | E16 | GET `/api/analyze-file` (both) | analysis raised | 500 | `파일 분석 중 오류가 발생했습니다` (+ `detail`) |
 | E17 | GET `/api/heatmap`, `/api/preview` (both) | outside the roots / not found / not media (P8: preview of a non-media file inside the roots was 403) | 403 / 404 / 400 | plain text `허용되지 않은 경로` / `파일을 찾을 수 없습니다` / `미리보기를 지원하지 않는 형식입니다: …` + `X-Deepfake-Lens-Error` header |
-| E18 | POST `/api/analyze-upload` (both) | not multipart, no file part, empty body, body cut off before its closing boundary (P8 — was analyzed as a partial file, 200), no or an empty `boundary=` / a boundary the body never uses (R30-5 — both said the body was cut off), a part whose headers never end | 400 | `multipart/form-data 업로드가 필요합니다`, `업로드된 파일이 없습니다`, `업로드 본문이 잘렸습니다(닫는 경계 없음) — …`, `Content-Type에 multipart boundary가 없습니다 — …`, `본문의 경계가 Content-Type의 boundary와 다릅니다 — …`, `업로드 본문의 파트 헤더가 끝나지 않습니다(빈 줄 없음) — …` |
+| E18 | POST `/api/analyze-upload` (both) | not multipart, no file part, empty body, body cut off before its closing boundary (P8 — was analyzed as a partial file, 200), no or an empty `boundary=` / a boundary the body never uses (R30-5 — both said the body was cut off), a part whose headers never end, more than `MAX_UPLOAD_PARTS` (1000) parts (round 31) | 400 | `multipart/form-data 업로드가 필요합니다`, `업로드된 파일이 없습니다`, `업로드 본문이 잘렸습니다(닫는 경계 없음) — …`, `Content-Type에 multipart boundary가 없습니다 — …`, `본문의 경계가 Content-Type의 boundary와 다릅니다 — …`, `업로드 본문의 파트 헤더가 끝나지 않습니다(빈 줄 없음) — …`, `업로드 본문의 파트(파일·폼 필드)가 상한(1000개)보다 많습니다 — …` |
 | E19 | POST `/api/analyze-upload` (both) | body over `MAX_UPLOAD_BYTES` | 413 | `업로드 크기가 상한(…바이트)을 초과합니다` |
 | E20 | POST `/api/analyze-upload` (web) | the request handling raised outside a file's analysis (a file whose analysis raises is a `failed` row of a 200 — R29-2) | 500 | `업로드 분석 중 오류가 발생했습니다` (+ `detail`) |
-| E21 | POST `/api/check` (web) | invalid JSON / not an object / text < 8 or > 256 KB / not multipart / no file / more than one file (R29-5 — only the first was analyzed) / cut-off multipart (P8) / no boundary or a boundary the body never uses (R30-5, as E18) | 400 | `JSON 본문을 해석할 수 없습니다`, `요청 본문은 JSON 객체여야 합니다`, `분석할 텍스트가 너무 짧습니다 (8자 이상).`, `빠른 검사는 파일 1개만 받습니다(받은 파일 N개) — …`, … |
+| E21 | POST `/api/check` (web) | invalid JSON / not an object / text < 8 or > 256 KB / not multipart / no file / more than one file (R29-5 — only the first was analyzed) / cut-off multipart (P8) / no boundary or a boundary the body never uses (R30-5, as E18) / more than 1000 parts (round 31, as E18) | 400 | `JSON 본문을 해석할 수 없습니다`, `요청 본문은 JSON 객체여야 합니다`, `분석할 텍스트가 너무 짧습니다 (8자 이상).`, `빠른 검사는 파일 1개만 받습니다(받은 파일 N개) — …`, … |
 | E22 | POST `/api/check` (web) | body over `MAX_UPLOAD_BYTES` | 413 | `요청 본문이 상한(…바이트)을 초과합니다` |
 | E23 | POST `/api/check` (api) | neither `file_path` nor `text`; text > 256 KB | 400 | `file_path 또는 text가 필요합니다` / `텍스트가 256KB를 초과합니다` |
-| E24 | POST `/api/compare` (web) | not multipart / not exactly 2 files (R29-6: a 0-byte file counts, a third is refused — it was ignored) / mixed pair / cut-off multipart (P8) / no boundary or a boundary the body never uses (R30-5, as E18) | 400 | `비교할 파일 2개가 필요합니다(받은 파일 N개)`, … |
+| E24 | POST `/api/compare` (web) | not multipart / not exactly 2 files (R29-6: a 0-byte file counts, a third is refused — it was ignored) / mixed pair / cut-off multipart (P8) / no boundary or a boundary the body never uses (R30-5, as E18) / more than 1000 parts (round 31, as E18) | 400 | `비교할 파일 2개가 필요합니다(받은 파일 N개)`, … |
 | E25 | POST `/api/compare` (web) | comparison raised | 500 | `비교 분석 중 오류가 발생했습니다` (+ `detail`) |
 | E26 | POST `/api/compare` (api) | comparison error / raised | 400 / 500 | the comparison's Korean error |
 | E27 | POST `/api/report` (both) | malformed body (not an object, too deep — R11-3), an unknown field (P0R-6: `items`, `options`, `scan_root`, `summary`, … are no longer accepted), `scan_job` missing (without `uploads`) or not a string, `exhibit_paths` not a list of strings / empty / with a repeated path / naming a path that is not a row of the job / without a job, `side` other than `plaintiff`, a case field that is not a string, `uploads` not a list of objects or an upload row without a path or with a name outside the R22-8 form, bad `format` | 400 | see "REST API endpoints" (N11); `JSON 중첩이 너무 깊습니다` |
