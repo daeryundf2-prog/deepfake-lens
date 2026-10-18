@@ -4,9 +4,9 @@
 
 Y13/P12: 검증 결함 ID(라운드 1–11)를 0단계 스펙의 갭 ID(G1–G34) 또는 신규(스펙 외) 사유에 매핑하고, 현재 phase0 히스토리의 커밋마다 제목의 ID와 'Gaps:' 줄을 적는다. 라운드 3과 라운드 6의 N은 서로 다른 집합이므로 N3-x / N6-x로, 라운드 5의 G1–G16은 스펙의 G1–G34와 충돌하므로 V5-G1…V5-G16으로 표기한다. 매핑(ids[], wp_gaps, unused_ids, notes)은 손으로 관리하는 데이터이고, commits[]와 ids[].commits는 scripts/build_traceability_commits.py가 git 히스토리에서 다시 만든다(제목으로 이전 항목과 매칭).
 
-범위: `dad9730..8514c9d`(병합 커밋 제외, 커밋 497개). 이 표는 **표를 재생성한 커밋의 부모까지**를 덮는다 — 재생성 커밋 자신의 해시는 표에 없다(자기 해시를 담을 수 없음). CI(`python scripts/build_traceability_commits.py --check`)가 같은 범위를 히스토리에서 다시 만들어 커밋된 표와 비교한다.
+범위: `dad9730..c15ed6e`(병합 커밋 제외, 커밋 499개). 이 표는 **표를 재생성한 커밋의 부모까지**를 덮는다 — 재생성 커밋 자신의 해시는 표에 없다(자기 해시를 담을 수 없음). CI(`python scripts/build_traceability_commits.py --check`)가 같은 범위를 히스토리에서 다시 만들어 커밋된 표와 비교한다.
 
-요약: ID 353개 — 스펙 갭에 매핑 232개(그중 신규 사유 병기 80개), 신규(스펙 외)만 121개.
+요약: ID 354개 — 스펙 갭에 매핑 232개(그중 신규 사유 병기 80개), 신규(스펙 외)만 122개.
 
 ## WP → 갭 (스펙 머리글)
 
@@ -380,6 +380,7 @@ Y13/P12: 검증 결함 ID(라운드 1–11)를 0단계 스펙의 갭 ID(G1–G34
 | R31-7 | 31 | R31-7 a speaker comparison below 1 s or mean RMS 1e-4 shows no number (a 4-sample WAV scored 47) | — | 신규(스펙 외): 갭 목록 밖 항목 포함 | e3e7c0f, 94ca8ea, 8514c9d |
 | R31-8 | 31 | R31-8 the stylometry floor counts visible characters only (100 zero-width spaces were 「표본 100자」) | — | 신규(스펙 외): 갭 목록 밖 항목 포함 | e3e7c0f, 8514c9d |
 | R31-9 | 31 | R31-9 a bare LF ends an unquoted header value (filename=a.png<LF>X-Evil: 1 named a file with a line  | — | 신규(스펙 외): 갭 목록 밖 항목 포함 | 1286f70, 8514c9d |
+| R31 | 31 | R31 gate 0's blocking false-statement scope: verdicts, evidence identity, signed outputs, GUI; non-browser API refusal reasons are Low | — | 신규(스펙 외): 갭 목록 밖 항목 포함 | c15ed6e |
 
 커밋 제목에 쓰이지 않은 ID:
 
@@ -404,6 +405,8 @@ P14: Gaps를 제목 괄호에만 적은 커밋(예: `(Z1-Z5; Gaps: G7, 신규)`)
 R17-11: 0ce6d1b의 제목은 R16-13(Ctrl-C → 정리 후 '중단됨' exit 130)에 G13(사진/비사진 게이트)을 인용했다 — 잘못된 인용이다. R16-13의 매핑은 G34(R-SYS-3: 종료·자원 정리)로 정정했다. commits[]의 `gaps`/`gaps_line`은 커밋 제목을 그대로 옮긴 값이라(히스토리는 고치지 않음) 0ce6d1b 행에는 G13이 남는다 — 기준은 ids[]의 매핑.
 
 R18-14: ids[]의 갭 매핑을 커밋 제목·본문의 `Gaps:`에 맞췄다 — R13-2(+G34), R13-6(G12→G30), R15-2(G9 제거, 신규만), R15-3(G10→G1), R15-4(+G34), R15-6(G12→G34), R16-2(G10→G1), R16-3(G10 제거 — 프로필 revision 핀과 무관), R16-8(G13→G29), R16-9(+G9), R16-10(G30→G34), R16-12(G27→G26). `--check`는 이제 ids[]의 갭이 그 ID를 인용한 커밋의 Gaps에 없거나, 그 ID만 다룬 커밋이 인용한 갭이 ids[]에 없으면 실패한다(`gaps_note`로 이유를 적은 항목은 제외).
+
+R31: c15ed6e의 제목 ID `R31`은 라운드 2의 R1–R16(R10–R15 미사용)과 다른 것으로, 27~31차 결과에 따른 게이트 0 거짓 문구 범위 결정(HANDOFF §8.1 (b), 사용자 결정 2026-10-19)이다 — 검증 지적 ID가 아니라 라운드 31의 결정 커밋을 가리킨다.
 
 ## 커밋별 `Gaps:` 줄
 
@@ -908,3 +911,5 @@ R18-14: ids[]의 갭 매핑을 커밋 제목·본문의 `Gaps:`에 맞췄다 —
 | e3e7c0f | 31 | R31-7, R31-8 | Gaps: 신규(스펙 외) | subject | fix(compare): R31-7 R31-8 a comparison below its floor shows no number — a side shorter than 1 s or with mean frame RMS under 1e-4 (silence) gives raw_score null, distance null and 「비교 하한에 못 미쳐」 naming the side and its length or RMS (a 4-sample WAV scored 47, silence against silence 100 with distance 0), and the 8-character text floor counts visible characters only (100 zero-width spaces or NULs were 「표본 100자」 and compared) (R31-7, R31-8; Gaps: 신규) |
 | 94ca8ea | 31 | R31-1, R31-7 | Gaps: 신규(스펙 외) | subject | docs(phase0): R31-7 R31-1 round-31 backlog — BL-37 the speaker-comparison floor leaves a DC-offset WAV compared (RMS above the floor; a zero-crossing floor would skip real recordings with a large offset), BL-38 the bare-LF line end's ambiguities (a full `\n--boundary` inside a CRLF body's data now delimits; a CR ending a part of an LF-delimited body is read as the delimiter's) (R31-1, R31-7; Gaps: 신규) |
 | 8514c9d | 31 | R31-1, R31-2, R31-3, R31-4, R31-5, R31-6, R31-7, R31-8, R31-9 | Gaps: 신규(스펙 외) | subject | docs(phase0): R31-1..R31-9 round-31 handoff — the axis-product line of §8.3 lists the equivalence table's round-31 axes (line endings and their truncations × media-type case × filename* fallbacks × the 1000-part cap); §9 marks R31-1..R31-5 fixed and names R31-6..R31-9, the backlog candidates fixed this round, and BL-37/BL-38 (R31-1, R31-2, R31-3, R31-4, R31-5, R31-6, R31-7, R31-8, R31-9; Gaps: 신규) |
+| 8202f4e | 31 | WP-J | Gaps: G26, G27, G28 | subject | docs(qa): CONFORMANCE.md and commit traceability regenerated on 8514c9d; round-31 IDs R31-1..R31-9 mapped (R31-1, R31-2, R31-3, R31-4, R31-6, R31-9 fixed by the multipart/form-data parser; R31-5 by the quick-check archive toast; R31-7, R31-8 by the comparison floors) (WP-J; Gaps: G26, G27, G28) |
+| c15ed6e | 31 | R31 | Gaps: 신규(스펙 외) | subject | docs(phase0): R31 gate 0's false-statement rule covers verdicts, evidence identity, signed outputs and the GUI (and the requests browsers and the GUI send); a wrong refusal reason for a hand-made non-browser API request is Low and goes to BACKLOG unless it causes a 500, a stop, an evidence write or a wrong verdict or signature (user decision 2026-10-19) (R31; Gaps: 신규) |
