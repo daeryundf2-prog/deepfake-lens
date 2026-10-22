@@ -373,6 +373,39 @@ class RiskB4B5B13B17Test(unittest.TestCase):
         self.assertIn("return box;", _function("showError"))
 
 
+class RiskB25ImeEnterTest(unittest.TestCase):
+    """RISK B25: the Enter that ends a Korean IME composition (isComposing, keyCode 229) must not submit a form — the
+    last syllable was lost and the scan could start twice."""
+
+    @unittest.skipUnless(_js_engine(), "no JavaScript engine (node or osascript)")
+    def test_the_guard(self) -> None:
+        body = _function("isImeEnter") + (
+            "var out = JSON.stringify(["
+            "isImeEnter({key: 'Enter', code: 'Enter', isComposing: true, keyCode: 229}),"
+            "isImeEnter({key: 'Process', code: 'Enter', isComposing: true, keyCode: 229}),"
+            "isImeEnter({key: 'Enter', code: 'Enter', isComposing: false, keyCode: 229}),"  # Safari, after compositionend
+            "isImeEnter({key: 'Enter', code: 'NumpadEnter', isComposing: true, keyCode: 13}),"
+            "isImeEnter({key: 'Enter', code: 'Enter', isComposing: false, keyCode: 13}),"  # a plain Enter submits
+            "isImeEnter({key: 'a', code: 'KeyA', isComposing: true, keyCode: 229})]);"  # typing is never blocked
+        )
+        self.assertEqual(json.loads(_run_js(body)), [True, True, True, True, False, False])
+
+    def test_every_form_ignores_it(self) -> None:
+        source = _source()
+        forms = re.findall(r'<form\b[^>]*\bid="([^"]+)"', _html())
+        self.assertEqual(sorted(forms), ["scan-form", "token-form"])
+        for form in forms:
+            with self.subTest(form=form):
+                self.assertIn(f"$('{form}').addEventListener('keydown', e => {{ if (isImeEnter(e)) e.preventDefault(); }});", source)
+        # a keydown handler that acts on Enter itself must check the guard too — today only the guard reads Enter
+        for match in re.finditer(r"addEventListener\('keydown', (?:async )?e => \{", source):
+            handler = source[match.start():source.index("\n        });", match.start())]
+            if "Enter" in handler:
+                with self.subTest(handler=handler[:80]):
+                    self.assertIn("isImeEnter(e)", handler)
+        self.assertNotIn("Enter'", source.replace(_function("isImeEnter"), ""), "an Enter action outside isImeEnter")
+
+
 class Desk6StatusChipsTest(unittest.TestCase):
     """DESK-6: PDF and signing chips next to the version; the report checklist says where the signing key comes from."""
 

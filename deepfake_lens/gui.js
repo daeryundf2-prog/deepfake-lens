@@ -1471,6 +1471,16 @@
             return shown.join(', ') + (roots.length > shown.length ? ` 외 ${roots.length - shown.length}개` : '');
         }
 
+        // RISK B25: the Enter that ends a Korean IME composition (isComposing; keyCode 229 where the browser reports the
+        // key as processed by the IME, e.g. Safari's keydown after compositionend) also submitted the form — the last
+        // syllable was lost or the scan started twice. Such an Enter is ignored by every form; the plain Enter that
+        // follows submits. The other text boxes (case fields, quick-check text, review memo, filter) do nothing on Enter.
+        function isImeEnter(e) {
+            return (e.key === 'Enter' || e.code === 'Enter' || e.code === 'NumpadEnter') && (e.isComposing === true || e.keyCode === 229);
+        }
+        $('scan-form').addEventListener('keydown', e => { if (isImeEnter(e)) e.preventDefault(); });
+        $('token-form').addEventListener('keydown', e => { if (isImeEnter(e)) e.preventDefault(); });
+
         $('scan-form').addEventListener('submit', async e => {
             e.preventDefault();
             // GUI-REV7 F-6: scanBusy is set only when /api/scan has answered; the button is marked busy
