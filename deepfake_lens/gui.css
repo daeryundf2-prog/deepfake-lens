@@ -216,6 +216,8 @@ select.field { padding-right: 8px; }
 .radios { display: flex; flex-wrap: wrap; gap: 0 18px; }
 .opt-row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 16px; }
 .opt-row .field { width: 140px; }
+.field-error { flex-basis: 100%; margin: 0; font-size: 13px; font-weight: 600; color: var(--manip); }
+.field[aria-invalid="true"] { border-color: var(--manip); border-width: 2px; }
 .drop {
     border: 1px dashed var(--field-line); border-radius: 4px; padding: 16px; background: var(--panel);
     display: flex; flex-wrap: wrap; align-items: center; gap: 10px;

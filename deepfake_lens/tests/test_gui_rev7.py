@@ -9,6 +9,7 @@ forced-colors capture) are in ``scripts/gui_smoke.py`` and the commit bodies.
 from __future__ import annotations
 
 import json
+import re
 import subprocess
 import tempfile
 import unittest
@@ -232,6 +233,60 @@ class F6ScanSubmitIsNotDoubledTest(unittest.TestCase):
         # nothing between the guard and the busy mark waits (the second event cannot slip in between)
         self.assertNotIn("await", handler[guard:busy])
         self.assertIn("setBusyButton($('analyze-btn'), false);", handler[request:])
+
+
+class F7MaxFilesFollowsTheServerCeilingTest(unittest.TestCase):
+    """F-7 (Med): 「최대 파일 수」 allowed up to 10000 while the server scans at most WEB_MAX_SCAN_FILES (2000; more is
+    lowered without a word), the over-cap banner said to raise it, and 0 or an empty box reached the server
+    (novalidate) — its 400 shown only at the top, not tied to the box."""
+
+    def test_the_gui_ceiling_equals_the_servers(self) -> None:
+        from deepfake_lens.analysis_api import WEB_MAX_SCAN_FILES
+
+        tag = re.search(r'<input[^>]*id="max-files"[^>]*>', _html())
+        assert tag is not None
+        self.assertIn(f'max="{WEB_MAX_SCAN_FILES}"', tag.group(0))
+        self.assertIn('min="1"', tag.group(0))
+        self.assertIn(f"<span class=\"hint\">서버 상한 {WEB_MAX_SCAN_FILES}개</span>", _html())
+        self.assertIn(f"const SERVER_MAX_SCAN_FILES = {WEB_MAX_SCAN_FILES};", _source())
+
+    def test_the_banner_no_longer_says_raise_it_unconditionally(self) -> None:
+        source = _source()
+        self.assertNotIn("— '최대 파일 수'를 늘려 다시 검사하십시오.`", source)
+        self.assertIn("${escapeHtml(overCapAdvice(lastScanOptions.max_files))}", _function("provenanceBannerHtml"))
+
+    def test_the_submit_handler_stops_at_a_bad_value_next_to_the_box(self) -> None:
+        source = _source()
+        start = source.index("$('scan-form').addEventListener('submit', async e => {")
+        handler = source[start:source.index("\n        });\n", start)]
+        check = handler.index("const maxFilesNote = maxFilesProblem($('max-files').value);")
+        self.assertLess(check, handler.index("setBusyButton($('analyze-btn'), true);"))
+        self.assertIn("$('max-files').focus();", handler[check:handler.index("const params", check)])
+        self.assertIn('<p class="field-error" id="max-files-err" hidden></p>', _html())
+        show = _function("showMaxFilesProblem")
+        self.assertIn("field.setAttribute('aria-invalid', 'true');", show)
+        self.assertIn("field.setAttribute('aria-describedby', 'max-files-err');", show)
+
+    @unittest.skipUnless(_js_engine(), "no JavaScript engine (node or osascript)")
+    def test_advice_and_problems(self) -> None:
+        body = "var SERVER_MAX_SCAN_FILES = 2000;\n" + _function("overCapAdvice") + _function("maxFilesProblem") + (
+            "var out = JSON.stringify({advice: [overCapAdvice('1000'), overCapAdvice('2000'), overCapAdvice(undefined)],"
+            " problems: ['', '  ', '0', '-3', '1.5', 'abc', '1', '2000', '2001', '10000'].map(maxFilesProblem)});"
+        )
+        got = json.loads(_run_js(body))
+        self.assertEqual(got["advice"], [
+            "'최대 파일 수'(이번 검사 1000개)를 늘리거나 폴더를 나누어 다시 검사하십시오(서버 상한 2000개).",
+            "서버 상한 2000개 — 폴더를 나누어 검사하십시오.",
+            "서버 상한 2000개 — 폴더를 나누어 검사하십시오.",
+        ])
+        self.assertEqual(got["problems"], [
+            "최대 파일 수를 입력하십시오(1~2000).", "최대 파일 수를 입력하십시오(1~2000).",
+            "최대 파일 수는 1 이상이어야 합니다(서버 상한 2000개).", "최대 파일 수는 1 이상이어야 합니다(서버 상한 2000개).",
+            "최대 파일 수는 1~2000 사이의 정수여야 합니다.", "최대 파일 수는 1~2000 사이의 정수여야 합니다.",
+            "", "",
+            "최대 파일 수는 서버 상한 2000개를 넘을 수 없습니다 — 폴더를 나누어 검사하십시오.",
+            "최대 파일 수는 서버 상한 2000개를 넘을 수 없습니다 — 폴더를 나누어 검사하십시오.",
+        ])
 
 
 if __name__ == "__main__":

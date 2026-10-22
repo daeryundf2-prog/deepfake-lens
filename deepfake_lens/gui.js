@@ -303,6 +303,41 @@
             return entry.score != null ? escapeHtml(String(entry.score)) : '없음';
         }
 
+        // GUI-REV7 F-7: the server scans at most analysis_api.WEB_MAX_SCAN_FILES files (a larger 최대 파일 수 is
+        // lowered to it without a word); test_gui_rev7 keeps this copy and gui.html's max equal to it.
+        const SERVER_MAX_SCAN_FILES = 2000;
+        // GUI-REV7 F-7: "'최대 파일 수'를 늘려 다시 검사하십시오" could not be followed at the server's ceiling.
+        function overCapAdvice(maxFiles) {
+            const asked = Number.parseInt(String(maxFiles == null ? '' : maxFiles), 10);
+            if (Number.isInteger(asked) && asked < SERVER_MAX_SCAN_FILES) {
+                return `'최대 파일 수'(이번 검사 ${asked}개)를 늘리거나 폴더를 나누어 다시 검사하십시오(서버 상한 ${SERVER_MAX_SCAN_FILES}개).`;
+            }
+            return `서버 상한 ${SERVER_MAX_SCAN_FILES}개 — 폴더를 나누어 검사하십시오.`;
+        }
+        // GUI-REV7 F-7: the form is novalidate — a 최대 파일 수 the server would refuse (0, empty: HTTP 400 shown
+        // only at the top) or lower (above the ceiling) is said next to the box before the scan is sent.
+        function maxFilesProblem(raw) {
+            const text = String(raw == null ? '' : raw).trim();
+            if (!text) return `최대 파일 수를 입력하십시오(1~${SERVER_MAX_SCAN_FILES}).`;
+            if (!/^-?\d+$/.test(text)) return `최대 파일 수는 1~${SERVER_MAX_SCAN_FILES} 사이의 정수여야 합니다.`;
+            const n = Number.parseInt(text, 10);
+            if (n < 1) return `최대 파일 수는 1 이상이어야 합니다(서버 상한 ${SERVER_MAX_SCAN_FILES}개).`;
+            if (n > SERVER_MAX_SCAN_FILES) return `최대 파일 수는 서버 상한 ${SERVER_MAX_SCAN_FILES}개를 넘을 수 없습니다 — 폴더를 나누어 검사하십시오.`;
+            return '';
+        }
+        function showMaxFilesProblem(message) {
+            const field = $('max-files'), note = $('max-files-err');
+            note.textContent = message;
+            note.hidden = !message;
+            if (message) {
+                field.setAttribute('aria-invalid', 'true');
+                field.setAttribute('aria-describedby', 'max-files-err');
+            } else {
+                field.removeAttribute('aria-invalid');
+                field.removeAttribute('aria-describedby');
+            }
+        }
+
         function provenanceBannerHtml() {
             const cov = lastProvenance.coverage || {};
             const thr = lastProvenance.thresholds || {};
@@ -329,7 +364,7 @@
             if (skippedDirs) parts.push(`하위 폴더 <b>${skippedDirs}개(안의 파일 ${skippedDirFiles}개)는 검사하지 않았습니다</b> — 포함하려면 '하위 폴더 포함' 옵션을 켜고 다시 검사하십시오.`);
             // X1: files beyond the file-count cap are never silently omitted.
             const overCap = (lastProvenance.summary || {}).files_over_cap || 0;
-            if (overCap) parts.push(`파일 수 상한에 도달해 <b>${overCap}개 파일은 검사·기록하지 않았습니다</b> — '최대 파일 수'를 늘려 다시 검사하십시오.`);
+            if (overCap) parts.push(`파일 수 상한에 도달해 <b>${overCap}개 파일은 검사·기록하지 않았습니다</b> — ${escapeHtml(overCapAdvice(lastScanOptions.max_files))}`);
             if (!parts.length) return '';
             return `${parts.map(p => `<p>${p}</p>`).join('')}<p class="note">이 결과는 결론과 근거로 읽으십시오; 점수는 보정된 경우에만 표시됩니다. 유죄·불법성의 확정 판정이 아닙니다.</p>`;
         }
@@ -1367,6 +1402,13 @@
             if (scanBusy || isBusyButton($('analyze-btn'))) return;
             const folderPath = $('folder-path').value.trim();
             if (!folderPath) { toast('폴더 경로를 입력하세요', true, '', 'scan'); $('folder-path').focus(); return; }
+            const maxFilesNote = maxFilesProblem($('max-files').value);
+            showMaxFilesProblem(maxFilesNote);
+            if (maxFilesNote) {
+                $('scan-options').open = true;
+                $('max-files').focus();
+                return;
+            }
             const params = new URLSearchParams({
                 folder: folderPath,
                 pixel: pixelMode(),
@@ -1410,6 +1452,8 @@
                 setBusyButton($('analyze-btn'), false);
             }
         });
+
+        $('max-files').addEventListener('input', () => { if (!$('max-files-err').hidden) showMaxFilesProblem(maxFilesProblem($('max-files').value)); });
 
         $('scan-cancel').addEventListener('click', async () => {
             if (!currentJobId || isBusyButton($('scan-cancel'))) return;

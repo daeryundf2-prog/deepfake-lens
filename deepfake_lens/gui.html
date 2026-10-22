@@ -92,7 +92,9 @@
                                     </fieldset>
                                     <div class="opt-row">
                                         <label class="lbl" for="max-files">최대 파일 수</label>
-                                        <input type="number" class="field" id="max-files" value="1000" min="1" max="10000">
+                                        <input type="number" class="field" id="max-files" value="1000" min="1" max="2000">
+                                        <span class="hint">서버 상한 2000개</span>
+                                        <p class="field-error" id="max-files-err" hidden></p>
                                     </div>
                                     <label class="check"><input type="checkbox" id="opt-recursive">하위 폴더 포함</label>
                                     <label class="check"><input type="checkbox" id="opt-dedupe">같은 내용의 파일은 한 번만 검사</label>
