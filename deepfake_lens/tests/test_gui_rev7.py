@@ -332,5 +332,33 @@ class F8ForcedColorsShowTheStatesTest(unittest.TestCase):
         self.assertIn(".mk-m, .mk-a, .mk-x { background: CanvasText; forced-color-adjust: none; }", blocks[0])
 
 
+class F9ExportNoteIsNotRereadWhileTypingTest(unittest.TestCase):
+    """F-9 (Med): each keystroke in a case field re-rendered the report screen, rewrote the aria-live #export-note
+    (read out again even with the same text) and sent a preview POST 250 ms after the key."""
+
+    def test_render_report_leaves_the_note_alone_while_typing(self) -> None:
+        source = _source()
+        self.assertIn('<p class="hint" id="export-note" aria-live="polite"></p>', _html())
+        render = _function("renderReport")
+        self.assertNotIn("$('export-note').textContent =", render)
+        self.assertIn("if (!typing) setExportNote([exportNote(sel), exportStickyNote].filter(Boolean).join(' '));", render)
+        self.assertIn("renderA4(sel, typing ? 500 : 250);", render)
+        self.assertIn("a4Timer = setTimeout(() => loadA4(seq), delay || 250);", _function("renderA4"))
+        self.assertIn("if (currentView === 'report') renderReport(Boolean(event && event.type === 'input'));", source)
+        self.assertIn("$(id).addEventListener('change', onCaseChange);", source)
+        # no handler passes an event object as `typing`
+        self.assertNotRegex(source, r"addEventListener\('[a-z]+', renderReport\)")
+
+    @unittest.skipUnless(_js_engine(), "no JavaScript engine (node or osascript)")
+    def test_the_note_is_written_only_when_its_text_changes(self) -> None:
+        body = (
+            "var writes = 0;\nvar note = {_t: '', get textContent() { return this._t; }, set textContent(v) { writes += 1; this._t = v; }};\n"
+            "function $(id) { return note; }\n" + _function("setExportNote")
+            + "setExportNote('a'); setExportNote('a'); setExportNote('b'); setExportNote('b');\n"
+            "var out = JSON.stringify([writes, note.textContent]);"
+        )
+        self.assertEqual(json.loads(_run_js(body)), [2, "b"])
+
+
 if __name__ == "__main__":
     unittest.main()

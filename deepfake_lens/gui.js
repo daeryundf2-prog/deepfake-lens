@@ -1028,9 +1028,14 @@
             if (identity && caseScope()) caseFolder = caseScope();
             saveCase();
             updateCaseLine();
-            if (currentView === 'report') renderReport();
+            // GUI-REV7 F-9: a keystroke re-renders without the live export note and with the longer preview delay;
+            // leaving the field (change) and the side choice render everything.
+            if (currentView === 'report') renderReport(Boolean(event && event.type === 'input'));
         };
-        Object.keys(CASE_FIELDS).forEach(id => $(id).addEventListener('input', onCaseChange));
+        Object.keys(CASE_FIELDS).forEach(id => {
+            $(id).addEventListener('input', onCaseChange);
+            $(id).addEventListener('change', onCaseChange);
+        });
         document.querySelectorAll('input[name="submitter-side"]').forEach(el => el.addEventListener('change', onCaseChange));
 
         /* ── scan: progress panel ────────────────── */
@@ -2496,7 +2501,14 @@
         }
         const EXPORT_LABELS = { evidence: '증거설명서 PDF', pdf: '감정 보고서 PDF', html: 'HTML 보고서', json: '서명된 JSON' };
         const EXPORT_BUTTONS = { evidence: 'exp-evidence', pdf: 'exp-pdf', html: 'exp-report', json: 'exp-signed' };
-        function renderReport() {
+        // GUI-REV7 F-9: #export-note is aria-live — it is written only when its text changes (a rewrite with the
+        // same text was read out again), and not while the examiner types a case field (renderReport(true) from
+        // its input event): the note follows when the field is left (change) or on the next full render.
+        function setExportNote(text) {
+            const note = $('export-note');
+            if (note.textContent !== text) note.textContent = text;
+        }
+        function renderReport(typing) {
             const b = bandCounts();
             const sel = selectedEntries();
             // J-8: the group counts are the rows that can become exhibits (no uploads).
@@ -2505,8 +2517,8 @@
             $('inc-label').textContent = `${sel.length}개 선택`;
             renderChecks(sel);
             Object.entries(EXPORT_BUTTONS).forEach(([kind, id]) => setBusyButton($(id), Boolean(exportBlockReason(kind, sel))));
-            $('export-note').textContent = [exportNote(sel), exportStickyNote].filter(Boolean).join(' ');
-            renderA4(sel);
+            if (!typing) setExportNote([exportNote(sel), exportStickyNote].filter(Boolean).join(' '));
+            renderA4(sel, typing ? 500 : 250);
         }
         function renderChecks(sel) {
             const list = $('report-checks');
@@ -2538,7 +2550,8 @@
         let a4Timer = null;
         let a4Seq = 0;
         let a4Listing = null;  // R22-1 merge: {source, not_in_report, reason} of the last preview
-        function renderA4(sel) {
+        // GUI-REV7 F-9: while a case field is typed in, the preview POST waits 500 ms after the last key (250 ms otherwise).
+        function renderA4(sel, delay) {
             clearTimeout(a4Timer);
             a4Seq += 1;
             const box = $('a4');
@@ -2553,7 +2566,7 @@
                 return;
             }
             const seq = a4Seq;
-            a4Timer = setTimeout(() => loadA4(seq), 250);
+            a4Timer = setTimeout(() => loadA4(seq), delay || 250);
         }
         async function loadA4(seq) {
             const box = $('a4');
