@@ -258,8 +258,13 @@ class DesktopServerTest(_ServerMixin, unittest.TestCase):
                 self.assertEqual(self.call(self.base + path, "POST", header=False)[0], 401)
 
     def test_shutdown_refuses_while_a_scan_runs_then_stops_the_server(self) -> None:
-        from deepfake_lens.scan_jobs import SOURCE_ASYNC, STORE
+        from deepfake_lens import scan_jobs
+        from deepfake_lens.scan_jobs import SOURCE_ASYNC, JobStore
 
+        STORE = JobStore()  # a store of this test's own: another test file may leave a running job in the global one
+        patcher = mock.patch.object(scan_jobs, "STORE", STORE)
+        patcher.start()
+        self.addCleanup(patcher.stop)
         job_id, _cancel = STORE.start("local", SOURCE_ASYNC)
         try:
             status, body = self.call(self.base + "/api/shutdown", "POST")

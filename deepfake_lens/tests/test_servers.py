@@ -1520,26 +1520,37 @@ class DocumentedEndpointsExistTest(unittest.TestCase):
     DOC = Path(__file__).resolve().parents[2] / "docs" / "deepfake-lens-service.md"
 
     def _tables(self) -> tuple[set[tuple[str, str]], set[tuple[str, str]]]:
-        """((method, path) of the REST table, (method, path) of the web GUI table)."""
+        """((method, path) of the REST table, (method, path) of the web GUI table — the desktop rows included)."""
+        rest_rows, web_rows, desktop_rows = self._three_tables()
+        return rest_rows, web_rows | desktop_rows
+
+    def _three_tables(self) -> tuple[set[tuple[str, str]], set[tuple[str, str]], set[tuple[str, str]]]:
+        """DESK: the 데스크톱 모드 table (routes of a server built with desktop=True) is read apart from the web table."""
         import re
 
         text = self.DOC.read_text(encoding="utf-8")
         rest = text[text.index("## REST API endpoints"):text.index("## Web GUI endpoints")]
-        web = text[text.index("## Web GUI endpoints"):text.index("## Error status codes")]
+        web = text[text.index("## Web GUI endpoints"):text.index("## 데스크톱 모드")]
+        desk = text[text.index("## 데스크톱 모드"):text.index("## Error status codes")]
         rest_rows: set[tuple[str, str]] = set()
         for line in rest.splitlines():
             cells = [cell.strip() for cell in line.strip().strip("|").split("|")]
             if len(cells) == 4 and re.fullmatch(r"(GET|POST|PUT|DELETE)", cells[0]):
                 for path in re.findall(r"`(/[^`]*)`", cells[1]):
                     rest_rows.add((cells[0], path))
-        web_rows: set[tuple[str, str]] = set()
-        for line in web.splitlines():
-            cells = [cell.strip() for cell in re.split(r"(?<!\\)\|", line.strip().strip("|"))]
-            # R11-12: the GUI paths (/, /gui, /gui.css, /gui.js) are rows of the table too.
-            match = re.fullmatch(r"(?:(GET|POST|PUT) )?`(/[^`]*)`", cells[0]) if len(cells) == 3 else None
-            if match:
-                web_rows.add((match.group(1) or "GET", match.group(2)))
-        return rest_rows, web_rows
+        def rows_of(section: str) -> set[tuple[str, str]]:
+            found: set[tuple[str, str]] = set()
+            for line in section.splitlines():
+                cells = [cell.strip() for cell in re.split(r"(?<!\\)\|", line.strip().strip("|"))]
+                # R11-12: the GUI paths (/, /gui, /gui.css, /gui.js) are rows of the table too.
+                match = re.fullmatch(r"(?:(GET|POST|PUT) )?`(/[^`]*)`", cells[0]) if len(cells) == 3 else None
+                if match:
+                    # the web table says the method before the path; the desktop table has a method column
+                    method = match.group(1) or (cells[1] if cells[1] in ("GET", "POST", "PUT") else "GET")
+                    found.add((method, match.group(2)))
+            return found
+
+        return rest_rows, rows_of(web), rows_of(desk)
 
     def test_rest_table_matches_api_serve_routes(self) -> None:
         if not HAVE_FASTAPI:
@@ -1582,8 +1593,9 @@ class DocumentedEndpointsExistTest(unittest.TestCase):
 
         from deepfake_lens.webapp import CLIENT_HEADER, build_server
 
-        _, web_rows = self._tables()
+        _, web_rows, desktop_rows = self._three_tables()
         self.assertGreaterEqual(len(web_rows), 15, web_rows)
+        self.assertEqual(desktop_rows, {("GET", "/api/roots"), ("POST", "/api/pick-folder"), ("POST", "/api/shutdown"), ("POST", "/api/heartbeat")})
         roots = patch.object(webapp_api, "_READ_ROOTS", OrderedDict())  # the server registers its folder
         roots.start()
         self.addCleanup(roots.stop)
@@ -1619,6 +1631,30 @@ class DocumentedEndpointsExistTest(unittest.TestCase):
                 # the route the document used to list is not one
                 status, text = status_and_text("GET", "/api/review-marks")
                 self.assertEqual((status, _json.loads(text)["error"]), (404, "찾을 수 없는 경로입니다"))
+                # DESK: the desktop table's routes are 404 on the plain server …
+                for method, path in sorted(desktop_rows):
+                    with self.subTest(method=method, path=path, server="web"):
+                        status, text = status_and_text(method, path)
+                        self.assertEqual((status, _json.loads(text)["error"]), (404, "찾을 수 없는 경로입니다"))
+            # … and exist on a desktop server (the dialog is stubbed as cancelled; shutdown is not called)
+            from deepfake_lens import desktop as _desktop
+
+            desk_server = build_server("127.0.0.1", 0, default_folder=Path(tmp), desktop=_desktop.DesktopState())
+            threading.Thread(target=desk_server.serve_forever, kwargs={"poll_interval": 0.05}, daemon=True).start()
+            self.addCleanup(desk_server.server_close)
+            self.addCleanup(desk_server.shutdown)
+            self.addCleanup(setattr, _desktop, "STATE", None)
+            desk_base = f"http://127.0.0.1:{desk_server.server_address[1]}"
+            with patch.dict(os.environ, {_desktop.PICK_FOLDER_STUB_ENV: ""}):
+                for method, path in sorted(desktop_rows):
+                    if path == "/api/shutdown":
+                        continue  # it would stop the server; test_desktop_mode covers it
+                    with self.subTest(method=method, path=path, server="desktop"):
+                        request = urllib.request.Request(desk_base + path, data=b"" if method != "GET" else None,
+                                                         headers={CLIENT_HEADER: "qa"}, method=method)
+                        with urllib.request.urlopen(request, timeout=60) as response:
+                            self.assertEqual(response.status, 200)
+        web_rows = web_rows | desktop_rows
         for method, path in (("GET", "/api/reviews"), ("GET", "/api/review"), ("POST", "/api/review"),
                              ("POST", "/api/check"), ("POST", "/api/compare")):
             self.assertIn((method, path), web_rows)

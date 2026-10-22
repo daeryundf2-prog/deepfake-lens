@@ -354,7 +354,7 @@ def build_server(
 
         def _route_post(self, parsed: Any) -> None:
             state = self._desktop_state()
-            if state is not None and parsed.path in ("/api/pick-folder", "/api/shutdown", "/api/heartbeat"):
+            if state is not None and (parsed.path == "/api/pick-folder" or parsed.path == "/api/shutdown" or parsed.path == "/api/heartbeat"):
                 self._route_desktop(parsed.path, state)
                 return
             if parsed.path == "/api/analyze-upload":
