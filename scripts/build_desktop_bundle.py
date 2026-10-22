@@ -10,7 +10,8 @@
    with ``pip install --target python/Lib/site-packages --platform win_amd64 --python-version 3.12
    --only-binary=:all: --no-deps``. Because of ``--no-deps`` the set is explicit; :func:`missing_requirements`
    reads every installed dist's ``Requires-Dist`` (markers evaluated for win32 / CPython 3.12, extras off) and the
-   build fails when a required dist is not installed;
+   build fails when a required dist is not installed; the C++ runtime ``msvcp140*.dll`` from the pinned
+   msvc-runtime wheel goes into ``python/`` and every ``.pyd``/``.dll``'s import table is checked (RISK A1);
 4. ``Deepfake Lens.cmd``, ``문제 확인.cmd``, ``읽어보세요.txt``, ``VERSION.txt``;
 5. a zip with ``/`` separators and UTF-8 names;
 6. a check of the folder (python.exe, the ``._pth`` lines, ``deepfake_lens/gui.js``, ``pymupdf``) and its size.
@@ -62,6 +63,29 @@ DEPENDENCIES = (
 WINDOWS_WHEELS = TOP_LEVEL + DEPENDENCIES
 MAC_PYTHONS = ("3.12", "3.13")
 MAC_PLATFORM = "macosx_14_0_arm64"
+
+MSVC_RUNTIME_VERSION = "14.51.36231"
+MSVC_RUNTIME_WHEEL = f"msvc_runtime-{MSVC_RUNTIME_VERSION}-cp312-cp312-win_amd64.whl"
+MSVC_RUNTIME_SHA256 = "89f70d1a37bb64164cdb09d02dd82d6b1400e1310be2995b4ed5a9f23efe2222"
+"""sha256 of the wheel from ``pip download msvc-runtime==14.51.36231 --platform win_amd64 --python-version 3.12``
+on 2026-10-23 (2,052,033 bytes; the same digest PyPI's JSON API lists for that file)."""
+MSVC_RUNTIME_DLLS = ("msvcp140.dll", "msvcp140_1.dll", "msvcp140_2.dll", "msvcp140_atomic_wait.dll", "msvcp140_codecvt_ids.dll")
+"""RISK A1: the C++ runtime that PyMuPDF's ``_mupdf.pyd``/``mupdfcpp64.dll``/``_extra.pyd`` import. The embeddable
+Python ships only ``vcruntime140.dll``/``vcruntime140_1.dll``; these go into ``python\\`` (the application folder,
+searched for every extension's imports) from the wheel's ``msvc_runtime-<v>.data/data/``."""
+
+SYSTEM_DLLS = frozenset({
+    "kernel32.dll", "kernelbase.dll", "ntdll.dll", "user32.dll", "gdi32.dll", "advapi32.dll", "shell32.dll", "ole32.dll",
+    "oleaut32.dll", "ws2_32.dll", "ucrtbase.dll", "msvcrt.dll", "crypt32.dll", "bcrypt.dll", "ncrypt.dll", "secur32.dll",
+    "shlwapi.dll", "version.dll", "winmm.dll", "comdlg32.dll", "comctl32.dll", "iphlpapi.dll", "psapi.dll", "rpcrt4.dll",
+    "setupapi.dll", "userenv.dll", "dbghelp.dll", "normaliz.dll", "wldap32.dll", "winhttp.dll", "wininet.dll",
+    "imm32.dll", "powrprof.dll", "pdh.dll", "netapi32.dll", "mswsock.dll", "dnsapi.dll", "cfgmgr32.dll", "propsys.dll",
+    "shcore.dll", "dwmapi.dll", "uxtheme.dll", "opengl32.dll", "dxgi.dll", "d3d11.dll", "d3d12.dll", "dwrite.dll",
+    "d2d1.dll", "windowscodecs.dll", "cabinet.dll", "wtsapi32.dll", "wintrust.dll", "msimg32.dll", "usp10.dll",
+    "bcryptprimitives.dll", "ntmarta.dll", "sspicli.dll", "mpr.dll", "mscoree.dll", "oleacc.dll", "winspool.drv", "msi.dll",
+})
+"""DLLs every supported Windows 10/11 x64 has in System32 (RISK A1's import check accepts them by name)."""
+SYSTEM_DLL_PREFIXES = ("api-ms-win-", "ext-ms-")
 
 WIN_DIR = "DeepfakeLens-win64"
 MAC_DIR = "DeepfakeLens-mac"
@@ -356,8 +380,13 @@ def verify_windows_bundle(folder: Path) -> list[str]:
     for need in (WIN_LAUNCHER, WIN_DOCTOR, WIN_README, "VERSION.txt"):
         if not (folder / need).is_file():
             problems.append(f"{need} 없음")
+    for need in MSVC_RUNTIME_DLLS:  # RISK A1
+        if not (python / need).is_file():
+            problems.append(f"python/{need} 없음")
     if site.is_dir():
         problems.extend(missing_requirements(site_packages_dists(site), marker_environment("windows")))
+    if python.is_dir():
+        problems.extend(unresolved_imports(python)[0])
     return problems
 
 
@@ -399,6 +428,118 @@ def prune_site_packages(site: Path) -> tuple[int, int]:
     return count, freed
 
 
+# ── RISK A1: a minimal PE import-table reader (names only) ───────────────────────────────────────────────────────
+
+
+class PEFormatError(ValueError):
+    """Not a PE image this reader understands."""
+
+
+def _u16(data: bytes, at: int) -> int:
+    if at < 0 or at + 2 > len(data):
+        raise PEFormatError(f"offset {at} outside the file")
+    return int.from_bytes(data[at:at + 2], "little")
+
+
+def _u32(data: bytes, at: int) -> int:
+    if at < 0 or at + 4 > len(data):
+        raise PEFormatError(f"offset {at} outside the file")
+    return int.from_bytes(data[at:at + 4], "little")
+
+
+def pe_imported_dlls(data: bytes) -> list[str]:
+    """The DLL names in a PE image's import table (data directory 1), in table order.
+
+    DOS header ``e_lfanew`` (0x3C) → ``PE\\0\\0`` → COFF header (number of sections at +2, optional-header size at
+    +16) → optional header (magic 0x10B PE32 or 0x20B PE32+; ``NumberOfRvaAndSizes`` at 92/108, data directories at
+    96/112) → import directory RVA → file offset through the section table → 20-byte descriptors until an all-zero
+    one, each with the name's RVA at +12. Delay-load imports (directory 13) are not read: Windows loads them on first
+    use, not when the module is loaded.
+    """
+    if data[:2] != b"MZ":
+        raise PEFormatError("no MZ header")
+    pe = _u32(data, 0x3C)
+    if data[pe:pe + 4] != b"PE\0\0":
+        raise PEFormatError("no PE signature")
+    coff = pe + 4
+    sections_count = _u16(data, coff + 2)
+    optional_size = _u16(data, coff + 16)
+    optional = coff + 20
+    magic = _u16(data, optional)
+    if magic == 0x10B:
+        count_at, dirs_at = 92, 96
+    elif magic == 0x20B:
+        count_at, dirs_at = 108, 112
+    else:
+        raise PEFormatError(f"unknown optional-header magic {magic:#x}")
+    if _u32(data, optional + count_at) < 2:
+        return []
+    import_rva = _u32(data, optional + dirs_at + 8)
+    if import_rva == 0:
+        return []
+    sections = []
+    table = optional + optional_size
+    for index in range(sections_count):
+        entry = table + 40 * index
+        virtual_size, virtual_address = _u32(data, entry + 8), _u32(data, entry + 12)
+        raw_size, raw_pointer = _u32(data, entry + 16), _u32(data, entry + 20)
+        sections.append((virtual_address, max(virtual_size, raw_size), raw_pointer))
+
+    def offset_of(rva: int) -> int:
+        for virtual_address, size, raw_pointer in sections:
+            if virtual_address <= rva < virtual_address + size:
+                return raw_pointer + rva - virtual_address
+        raise PEFormatError(f"RVA {rva:#x} is in no section")
+
+    names: list[str] = []
+    descriptor = offset_of(import_rva)
+    while True:
+        fields = [_u32(data, descriptor + 4 * i) for i in range(5)]
+        if not any(fields):
+            return names
+        start = offset_of(fields[3])
+        end = data.find(b"\0", start)
+        if end < 0:
+            raise PEFormatError("unterminated DLL name")
+        names.append(bytes(data[start:end]).decode("ascii", "replace"))
+        descriptor += 20
+        if len(names) > 4096:
+            raise PEFormatError("import table without an end")
+
+
+def is_system_dll(name: str) -> bool:
+    lower = name.lower()
+    return lower in SYSTEM_DLLS or lower.startswith(SYSTEM_DLL_PREFIXES)
+
+
+def unresolved_imports(python_dir: Path) -> tuple[list[str], int]:
+    """RISK A1: every ``.pyd``/``.dll`` under ``python_dir`` whose import table names a DLL that is not a system DLL,
+    not in the importing file's own folder, not in ``python_dir`` (the application folder — Windows searches it for
+    every module), and not in a ``site-packages/*.libs`` folder (delvewheel's folders, added with
+    ``os.add_dll_directory`` by the package's ``__init__``). Returns ``(problems, files checked)``."""
+    site = python_dir / "Lib" / "site-packages"
+    shared = {p.name.lower() for p in python_dir.iterdir() if p.is_file()}
+    for libs in site.glob("*.libs") if site.is_dir() else ():
+        shared |= {p.name.lower() for p in libs.iterdir() if p.is_file()}
+    problems: list[str] = []
+    checked = 0
+    for path in sorted(python_dir.rglob("*")):
+        if path.suffix.lower() not in (".pyd", ".dll") or not path.is_file():
+            continue
+        try:
+            imported = pe_imported_dlls(path.read_bytes())
+        except PEFormatError as exc:
+            problems.append(f"{path.relative_to(python_dir).as_posix()}: PE를 읽지 못함({exc})")
+            continue
+        checked += 1
+        beside = {p.name.lower() for p in path.parent.iterdir() if p.is_file()}
+        for name in imported:
+            lower = name.lower()
+            if not (is_system_dll(name) or lower in beside or lower in shared):
+                problems.append(f"{path.relative_to(python_dir).as_posix()}: {name}을(를) 찾을 수 없음")
+    return problems, checked
+
+
 # ── network and process steps (not called by the unit tests) ───────────────────────────────────────────────────
 
 
@@ -424,6 +565,36 @@ def fetch_embed(cache: Path) -> Path:
     if actual != EMBED_SHA256:
         raise BuildError(f"{EMBED_NAME}의 sha256이 고정값과 다릅니다: {actual} (기대 {EMBED_SHA256}) — 파일을 지우고 다시 받으십시오: {target}")
     return target
+
+
+def fetch_msvc_runtime(cache: Path) -> Path:
+    """RISK A1: the msvc-runtime wheel (``pip download``, cached), refused when its sha256 is not pinned."""
+    dest = cache / "msvc-runtime"
+    target = dest / MSVC_RUNTIME_WHEEL
+    if not target.is_file():
+        _run([
+            sys.executable, "-m", "pip", "download", "--quiet", "--disable-pip-version-check", "--no-deps",
+            "--only-binary=:all:", "--platform", "win_amd64", "--python-version", "3.12", "--dest", str(dest),
+            f"msvc-runtime=={MSVC_RUNTIME_VERSION}",
+        ])
+    if not target.is_file():
+        raise BuildError(f"{MSVC_RUNTIME_WHEEL}을(를) 받지 못했습니다")
+    actual = sha256_of(target)
+    if actual != MSVC_RUNTIME_SHA256:
+        raise BuildError(f"{MSVC_RUNTIME_WHEEL}의 sha256이 고정값과 다릅니다: {actual} (기대 {MSVC_RUNTIME_SHA256}) — 파일을 지우고 다시 받으십시오: {target}")
+    return target
+
+
+def install_msvc_runtime(wheel: Path, python_dir: Path) -> list[str]:
+    """Copy :data:`MSVC_RUNTIME_DLLS` from the wheel's ``msvc_runtime-<v>.data/data/`` into ``python_dir``."""
+    prefix = f"msvc_runtime-{MSVC_RUNTIME_VERSION}.data/data/"
+    with zipfile.ZipFile(wheel) as archive:
+        names = set(archive.namelist())
+        for dll in MSVC_RUNTIME_DLLS:
+            if prefix + dll not in names:
+                raise BuildError(f"{wheel.name}에 {prefix + dll}이(가) 없습니다")
+            (python_dir / dll).write_bytes(archive.read(prefix + dll))
+    return list(MSVC_RUNTIME_DLLS)
 
 
 def _run(command: list[str], **kwargs: object) -> None:
@@ -526,6 +697,12 @@ def build_windows(out_parent: Path, cache: Path) -> Path:
     problems = missing_requirements(site_packages_dists(site), marker_environment("windows"))
     if problems:
         raise BuildError("의존성 검사 실패:\n  " + "\n  ".join(problems))
+    runtime = install_msvc_runtime(fetch_msvc_runtime(cache), python)
+    print(f"  C++ 런타임(msvc-runtime {MSVC_RUNTIME_VERSION}): {', '.join(runtime)}", flush=True)
+    unresolved, checked = unresolved_imports(python)
+    print(f"  DLL import 검사: .pyd/.dll {checked}개, 찾지 못한 DLL {len(unresolved)}건", flush=True)
+    if unresolved:
+        raise BuildError("DLL import 검사 실패:\n  " + "\n  ".join(unresolved))
     print("[4/6] 실행 파일·안내문", flush=True)
     _write(folder / WIN_LAUNCHER, windows_launcher_text())
     _write(folder / WIN_DOCTOR, doctor_launcher_text())

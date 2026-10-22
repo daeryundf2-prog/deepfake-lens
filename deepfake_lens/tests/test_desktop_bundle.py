@@ -223,6 +223,115 @@ class ZipAndVerifyTest(unittest.TestCase):
         self.assertFalse(fits("numpy-2.5.4-cp312-cp312-macosx_14_0_x86_64.whl", "macosx_14_0_arm64", "cp312"))
         self.assertTrue(fits("olefile-0.47-py2.py3-none-any.whl", "win_amd64", "cp312"))
 
+    def test_verify_names_the_cpp_runtime(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            (Path(tmp) / "python").mkdir()
+            joined = "\n".join(bundle.verify_windows_bundle(Path(tmp)))
+            for dll in bundle.MSVC_RUNTIME_DLLS:
+                self.assertIn(f"python/{dll} 없음", joined)  # RISK A1
+
+    def test_pinned_runtime(self) -> None:
+        self.assertEqual(bundle.MSVC_RUNTIME_DLLS, ("msvcp140.dll", "msvcp140_1.dll", "msvcp140_2.dll", "msvcp140_atomic_wait.dll", "msvcp140_codecvt_ids.dll"))
+        self.assertRegex(bundle.MSVC_RUNTIME_SHA256, r"^[0-9a-f]{64}$")
+        self.assertIn(bundle.MSVC_RUNTIME_VERSION, bundle.MSVC_RUNTIME_WHEEL)
+        self.assertTrue(bundle.MSVC_RUNTIME_WHEEL.endswith("-cp312-cp312-win_amd64.whl"))
+
+    def test_install_msvc_runtime_takes_the_data_folder(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            wheel = Path(tmp) / bundle.MSVC_RUNTIME_WHEEL
+            prefix = f"msvc_runtime-{bundle.MSVC_RUNTIME_VERSION}.data/data/"
+            with zipfile.ZipFile(wheel, "w") as archive:
+                for dll in (*bundle.MSVC_RUNTIME_DLLS, "vcomp140.dll"):
+                    archive.writestr(prefix + dll, dll.encode())
+                    archive.writestr(prefix + "Scripts/" + dll, b"wrong copy")
+            python = Path(tmp) / "python"
+            python.mkdir()
+            self.assertEqual(bundle.install_msvc_runtime(wheel, python), list(bundle.MSVC_RUNTIME_DLLS))
+            self.assertEqual(sorted(p.name for p in python.iterdir()), sorted(bundle.MSVC_RUNTIME_DLLS))
+            self.assertEqual((python / "msvcp140.dll").read_bytes(), b"msvcp140.dll")
+
+
+def _pe(imports: list[str], *, pe32: bool = False) -> bytes:
+    """A minimal PE image: DOS header, PE signature, COFF header, optional header with 16 data directories, one
+    section `.idata` (RVA 0x1000, file offset 0x200) holding the import descriptors and the DLL names."""
+    optional_size = (96 if pe32 else 112) + 16 * 8
+    out = bytearray(0x200)
+    out[0:2] = b"MZ"
+    out[0x3C:0x40] = (0x40).to_bytes(4, "little")
+    out[0x40:0x44] = b"PE\0\0"
+    coff = 0x44
+    out[coff:coff + 2] = (0x14C if pe32 else 0x8664).to_bytes(2, "little")
+    out[coff + 2:coff + 4] = (1).to_bytes(2, "little")
+    out[coff + 16:coff + 18] = optional_size.to_bytes(2, "little")
+    optional = coff + 20
+    out[optional:optional + 2] = (0x10B if pe32 else 0x20B).to_bytes(2, "little")
+    count_at, dirs_at = (92, 96) if pe32 else (108, 112)
+    out[optional + count_at:optional + count_at + 4] = (16).to_bytes(4, "little")
+    descriptors = 20 * (len(imports) + 1)
+    out[optional + dirs_at + 8:optional + dirs_at + 12] = (0x1000).to_bytes(4, "little")
+    out[optional + dirs_at + 12:optional + dirs_at + 16] = descriptors.to_bytes(4, "little")
+    section = optional + optional_size
+    out[section:section + 8] = b".idata\0\0"
+    for at, value in ((8, 0x400), (12, 0x1000), (16, 0x400), (20, 0x200)):
+        out[section + at:section + at + 4] = value.to_bytes(4, "little")
+    body = bytearray(0x400)
+    name_at = descriptors
+    for index, name in enumerate(imports):
+        body[20 * index + 12:20 * index + 16] = (0x1000 + name_at).to_bytes(4, "little")
+        body[20 * index + 16:20 * index + 20] = (0x1000 + 0x300).to_bytes(4, "little")  # FirstThunk (unused here)
+        body[name_at:name_at + len(name) + 1] = name.encode("ascii") + b"\0"
+        name_at += len(name) + 1
+    return bytes(out + body)
+
+
+class PEImportTableTest(unittest.TestCase):
+    """RISK A1: PyMuPDF imported MSVCP140.dll, which neither the embeddable Python nor the bundle had."""
+
+    def test_reads_the_import_names_pe32_plus_and_pe32(self) -> None:
+        names = ["mupdfcpp64.dll", "python3.dll", "MSVCP140.dll", "KERNEL32.dll", "api-ms-win-crt-heap-l1-1-0.dll"]
+        self.assertEqual(bundle.pe_imported_dlls(_pe(names)), names)
+        self.assertEqual(bundle.pe_imported_dlls(_pe(names[:2], pe32=True)), names[:2])
+        self.assertEqual(bundle.pe_imported_dlls(_pe([])), [])
+
+    def test_rejects_what_is_not_a_pe(self) -> None:
+        for data in (b"", b"#!/bin/sh\n", b"MZ" + b"\0" * 0x3A + (0x40).to_bytes(4, "little") + b"ELF\0"):
+            with self.assertRaises(bundle.PEFormatError):
+                bundle.pe_imported_dlls(data)
+        broken = bytearray(_pe(["a.dll"]))
+        broken[0x44 + 20:0x44 + 22] = (0x999).to_bytes(2, "little")
+        with self.assertRaises(bundle.PEFormatError):
+            bundle.pe_imported_dlls(bytes(broken))
+
+    def test_unresolved_imports(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            python = Path(tmp) / "python"
+            pymupdf = python / "Lib" / "site-packages" / "pymupdf"
+            libs = python / "Lib" / "site-packages" / "numpy.libs"
+            pymupdf.mkdir(parents=True)
+            libs.mkdir()
+            (python / "python3.dll").write_bytes(_pe(["KERNEL32.dll"]))
+            (python / "vcruntime140.dll").write_bytes(_pe(["api-ms-win-crt-runtime-l1-1-0.dll"]))
+            (libs / "msvcp140-abc.dll").write_bytes(_pe(["kernel32.dll"]))
+            (pymupdf / "mupdfcpp64.dll").write_bytes(_pe(["MSVCP140.dll", "VCRUNTIME140.dll"]))
+            (pymupdf / "_mupdf.pyd").write_bytes(_pe(["mupdfcpp64.dll", "python3.dll", "MSVCP140.dll", "KERNEL32.dll", "msvcp140-ABC.dll"]))
+            (pymupdf / "README.txt").write_text("not a binary", encoding="utf-8")
+            problems, checked = bundle.unresolved_imports(python)
+            self.assertEqual(checked, 5)
+            self.assertEqual(problems, [
+                "Lib/site-packages/pymupdf/_mupdf.pyd: MSVCP140.dll을(를) 찾을 수 없음",
+                "Lib/site-packages/pymupdf/mupdfcpp64.dll: MSVCP140.dll을(를) 찾을 수 없음",
+            ])
+            (python / "msvcp140.dll").write_bytes(_pe(["VCRUNTIME140.dll", "api-ms-win-crt-heap-l1-1-0.dll"]))
+            self.assertEqual(bundle.unresolved_imports(python), ([], 6))
+            (pymupdf / "_extra.pyd").write_bytes(b"MZ not really")
+            self.assertIn("PE를 읽지 못함", "\n".join(bundle.unresolved_imports(python)[0]))
+
+    def test_system_dlls(self) -> None:
+        for name in ("KERNEL32.dll", "api-ms-win-crt-runtime-l1-1-0.dll", "ucrtbase.dll", "WS2_32.dll", "ext-ms-win-x.dll"):
+            self.assertTrue(bundle.is_system_dll(name), name)
+        for name in ("MSVCP140.dll", "VCRUNTIME140.dll", "python312.dll", "mupdfcpp64.dll"):
+            self.assertFalse(bundle.is_system_dll(name), name)
+
 
 if __name__ == "__main__":
     unittest.main()
