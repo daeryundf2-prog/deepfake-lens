@@ -1738,6 +1738,7 @@
 
         function renderResults() {
             const has = results.length > 0;
+            $('scan-guide').hidden = has;  // DESK-7: the first-use steps stand only while there are no results
             $('ledger-empty').hidden = has;
             $('results-section').hidden = !has;
             if (!has) { $('detail').innerHTML = ''; return; }
@@ -3255,6 +3256,7 @@
             $('desk-bar').hidden = false;
             $('pick-row').hidden = false;
             $('folder-label').textContent = '또는 폴더 경로 직접 입력';
+            $('guide-step1').textContent = '"검사할 폴더 고르기"를 누르고 폴더를 고르면 바로 검사가 시작됩니다.';
             // DESK-4: uploads are the exception here (unsigned, never an exhibit) — folded, unless files are waiting.
             if (!selectedFiles.length) $('upload-block').open = false;
             startHeartbeat();

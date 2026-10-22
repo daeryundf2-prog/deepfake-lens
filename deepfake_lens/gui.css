@@ -600,6 +600,21 @@ select.field { padding-right: 8px; }
 .status-chip { border: 1px solid var(--line); border-radius: 999px; padding: 0 8px; color: var(--ink-2); }
 .status-chip.chip-off { border-color: var(--warn); color: var(--warn); }
 
+/* DESK-7: the three first-use steps on the scan screen while there are no results. */
+.scan-guide {
+    list-style: none; margin: 0 0 24px; padding: 14px 16px; border: 1px solid var(--line); border-radius: 4px;
+    background: var(--panel); display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px 24px;
+}
+.scan-guide li { display: flex; align-items: flex-start; gap: 10px; min-width: 0; }
+.scan-guide .guide-n {
+    flex: none; width: 26px; height: 26px; border: 2px solid var(--ink); border-radius: 50%;
+    display: inline-flex; align-items: center; justify-content: center; font-weight: 700;
+}
+.scan-guide .hint { display: block; margin-top: 2px; }
+@media (max-width: 900px) {
+    .scan-guide { grid-template-columns: minmax(0, 1fr); }
+}
+
 /* GUI-REV7 F-8: Windows contrast themes (forced colors) drop backgrounds and box-shadows — the current row,
    a pressed verdict filter, a pressed review star, the progress fill, a changed row, the drop zone while a
    file is held over it and the active studio mode were told only by them. Here they get a border, an

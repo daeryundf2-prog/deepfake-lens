@@ -13,7 +13,7 @@ import re
 import unittest
 
 from deepfake_lens.tests.test_gui_model_score import _function, _js_engine
-from deepfake_lens.tests.test_gui_rev7 import _css, _html, _run_js, _source
+from deepfake_lens.tests.test_gui_rev7 import GUI_JS, _css, _html, _run_js, _source
 
 
 def _element(html: str, element_id: str) -> str:
@@ -288,6 +288,40 @@ class Desk6StatusChipsTest(unittest.TestCase):
         from deepfake_lens.signing import REPORT_KEY_ENV
 
         self.assertIn(f"서명 키: 환경 변수({REPORT_KEY_ENV})", _function("signingCheck"))
+
+
+class Desk7EmptyStateTest(unittest.TestCase):
+    """DESK-7: three first-use steps on the scan screen while there are no results."""
+
+    def test_the_steps_stand_only_without_results(self) -> None:
+        html = _html()
+        guide = html[html.index('<ol class="scan-guide" id="scan-guide"'):html.index("</ol>", html.index('id="scan-guide"'))]
+        self.assertIn('aria-label="처음 쓰는 순서" hidden', guide)
+        for step in ("<b>폴더 고르기</b>", "<b>결과 확인</b>", "<b>감정서</b>"):
+            self.assertIn(step, guide)
+        self.assertLess(html.index('<section id="view-scan"'), html.index('id="scan-guide"'))
+        self.assertLess(html.index('id="scan-guide"'), html.index('<div class="scan-grid">'))
+        self.assertIn("$('scan-guide').hidden = has;", _function("renderResults"))
+        helper = _function("applyDesktopStats")
+        self.assertLess(helper.index("if (!desktopMode) return;"), helper.index("$('guide-step1').textContent"))
+
+
+class DeskMarkupRulesTest(unittest.TestCase):
+    """GUI-REV7 rules kept by the new markup: no inline style or script (CSP 'self'), the new routes exist."""
+
+    def test_no_inline_style_or_script(self) -> None:
+        html = _html()
+        self.assertNotIn(" style=", html)
+        self.assertEqual(re.findall(r"<script(?![^>]*\bsrc=)[^>]*>", html), [])
+
+    def test_the_routes_the_gui_calls_are_the_servers(self) -> None:
+        from pathlib import Path
+
+        server = (Path(GUI_JS).parent / "webapp.py").read_text(encoding="utf-8") + (Path(GUI_JS).parent / "desktop.py").read_text(encoding="utf-8")
+        for route in ("/api/pick-folder", "/api/shutdown", "/api/heartbeat", "/api/roots"):
+            with self.subTest(route=route):
+                self.assertIn(route, _source())
+                self.assertIn(route, server)
 
 
 if __name__ == "__main__":
