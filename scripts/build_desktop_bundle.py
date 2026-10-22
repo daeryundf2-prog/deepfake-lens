@@ -10,8 +10,10 @@
    with ``pip install --target python/Lib/site-packages --platform win_amd64 --python-version 3.12
    --only-binary=:all: --no-deps``. Because of ``--no-deps`` the set is explicit; :func:`missing_requirements`
    reads every installed dist's ``Requires-Dist`` (markers evaluated for win32 / CPython 3.12, extras off) and the
-   build fails when a required dist is not installed; the C++ runtime ``msvcp140*.dll`` from the pinned
-   msvc-runtime wheel goes into ``python/`` and every ``.pyd``/``.dll``'s import table is checked (RISK A1);
+   build fails when a required dist is not installed; ``site-packages/bin/`` and ``direct_url.json`` are deleted
+   (RISK B22); the C++ runtime ``msvcp140*.dll`` from the pinned msvc-runtime wheel goes into ``python/`` and every
+   ``.pyd``/``.dll``'s import table is checked (RISK A1); site-packages is precompiled with the build machine's
+   CPython 3.12 (``compileall --invalidation-mode unchecked-hash``, RISK A7);
 4. ``Deepfake Lens.cmd``, ``문제 확인.cmd``, ``읽어보세요.txt``, ``VERSION.txt``;
 5. a zip with ``/`` separators and UTF-8 names;
 6. a check of the folder (python.exe, the ``._pth`` lines, ``deepfake_lens/gui.js``, ``pymupdf``) and its size.
@@ -87,6 +89,10 @@ SYSTEM_DLLS = frozenset({
 """DLLs every supported Windows 10/11 x64 has in System32 (RISK A1's import check accepts them by name)."""
 SYSTEM_DLL_PREFIXES = ("api-ms-win-", "ext-ms-")
 
+PYC_MAGIC_312 = (3531).to_bytes(2, "little") + b"\r\n"
+"""``importlib.util.MAGIC_NUMBER`` of CPython 3.12.x (3531 for the whole 3.12 series): the bytecode of the build
+machine's python3.12 is what the embeddable 3.12.10 reads (RISK A7)."""
+
 WIN_DIR = "DeepfakeLens-win64"
 MAC_DIR = "DeepfakeLens-mac"
 WIN_LAUNCHER = "Deepfake Lens.cmd"
@@ -131,25 +137,96 @@ def _crlf(lines: Iterable[str]) -> str:
     return "\r\n".join(lines) + "\r\n"
 
 
-def windows_launcher_text() -> str:
-    """``Deepfake Lens.cmd`` (plan §5). A folder dropped on it (``%1`` is a folder) starts with ``--folder``.
+LOCATION_CHECKS = (
+    'set "DFL_HERE=%~dp0"',
+    'if not "%DFL_HERE:\\Temp\\=%"=="%DFL_HERE%" goto not_extracted',
+    'if not "%DFL_HERE:Rar$=%"=="%DFL_HERE%" goto not_extracted',
+    'if not "%DFL_HERE:\\7zO=%"=="%DFL_HERE%" goto not_extracted',
+    'if not "%DFL_HERE:\\7zE=%"=="%DFL_HERE%" goto not_extracted',
+    'set "DFL_ARCH=%PROCESSOR_ARCHITECTURE%"',
+    'if defined PROCESSOR_ARCHITEW6432 set "DFL_ARCH=%PROCESSOR_ARCHITEW6432%"',
+    'if /i not "%DFL_ARCH%"=="AMD64" goto not_x64',
+    'if not "%DFL_HERE:OneDrive=%"=="%DFL_HERE%" echo 주의: OneDrive 폴더에서 실행 중입니다. 느리거나 실행되지 않으면 C:\\DeepfakeLens 같은 로컬 폴더에 다시 푸십시오.',
+    'if not exist "python\\python.exe" goto no_python',
+)
+"""Lines run right after ``pushd``: an unextracted zip (Explorer runs a .cmd opened inside a zip from
+``%TEMP%``/``AppData\\Local\\Temp``; WinRAR and 7-Zip use ``Rar$…`` and ``7zO…``/``7zE…`` temp folders — a bare ``7z`` would also match a folder such
+as ``D:\\7zip``), a non-x64 Windows
+(``PROCESSOR_ARCHITEW6432`` is set when a 32-bit cmd runs on 64-bit Windows), an OneDrive folder (warning only).
+``%var:x=%`` is case-insensitive. No parenthesised blocks — a ``)`` in a folder name would end the block early."""
 
-    UTF-8 without BOM (a BOM breaks ``@echo off``); ``chcp 65001`` comes before the first Korean line.
+LOCATION_LABELS = (
+    ":not_extracted",
+    "echo 압축 파일 안이나 임시 폴더에서 실행했습니다.",
+    "echo 압축을 먼저 푸십시오(오른쪽 클릭 → 모두 압축 풀기). 그다음 압축을 푼 폴더의 「Deepfake Lens.cmd」를 실행하십시오.",
+    "pause",
+    'set "DFL_CODE=2"',
+    "goto end",
+    ":not_x64",
+    "echo 이 프로그램은 x64 Windows 전용입니다. 32비트·ARM Windows에서는 실행할 수 없습니다(감지된 종류: %DFL_ARCH%).",
+    "pause",
+    'set "DFL_CODE=2"',
+    "goto end",
+    ":no_python",
+    "echo python 폴더가 없습니다. 압축을 전부 풀었는지 확인하십시오.",
+    "pause",
+    'set "DFL_CODE=2"',
+    "goto end",
+    ":no_folder",
+    'echo 이 폴더로 이동하지 못했습니다: "%~dp0"',
+    "pause",
+    "exit /b 2",
+    ":end",
+    "popd",
+    "exit /b %DFL_CODE%",
+)
+
+
+def windows_launcher_text() -> str:
+    """``Deepfake Lens.cmd`` (plan §5; RISK A6 A7 B11 B12).
+
+    UTF-8 without BOM (a BOM breaks ``@echo off``); ``chcp 65001`` comes before the first Korean line. ``pushd``
+    instead of ``cd /d`` so a UNC folder gets a temporary drive letter (B12); every exit goes through ``popd``.
+    ``%1`` is used only through ``DFL_FOLDER`` (``%*`` is never passed): a dropped folder as is, a dropped file as
+    its folder ``%~dp1`` (B11), anything else as no argument. A trailing ``\\`` is removed — ``"C:\\x\\"`` makes the
+    C runtime read ``\\"`` as a literal quote — and a bare drive (``C:``) becomes ``C:\\.``.
+    The exit code is compared as a string (A6): ``if errorlevel 1`` means ``>= 1`` and never matches the negative
+    codes of a native crash (0xC0000005) or a missing DLL (0xC0000135); 130, and -1073741510 (0xC000013A,
+    STATUS_CONTROL_C_EXIT — how CPython on Windows exits on an uncaught KeyboardInterrupt), is a Ctrl-C stop.
     """
     return _crlf([
         "@echo off",
         "chcp 65001 >nul",
+        "setlocal",
         "title Deepfake Lens — 이 창을 닫으면 프로그램이 꺼집니다",
-        'cd /d "%~dp0"',
-        'if not exist "python\\python.exe" ( echo python 폴더가 없습니다. 압축을 전부 풀었는지 확인하십시오. & pause & exit /b 2 )',
-        'if "%~1"=="" goto run_plain',
-        'if not exist "%~1\\" goto run_plain',
-        '"python\\python.exe" -X utf8 -m deepfake_lens desktop --folder "%~1"',
+        'set "DFL_CODE=0"',
+        'pushd "%~dp0" || goto no_folder',
+        *LOCATION_CHECKS,
+        'set "DFL_FOLDER="',
+        'if "%~1"=="" goto run',
+        'if exist "%~1\\" set "DFL_FOLDER=%~1"',
+        'if not defined DFL_FOLDER if exist "%~1" set "DFL_FOLDER=%~dp1"',
+        "if not defined DFL_FOLDER goto run",
+        'if "%DFL_FOLDER:~-1%"=="\\" set "DFL_FOLDER=%DFL_FOLDER:~0,-1%"',
+        'if "%DFL_FOLDER:~-1%"==":" set "DFL_FOLDER=%DFL_FOLDER%\\."',
+        ":run",
+        "echo 시작하는 중입니다. 처음에는 1분 정도 걸릴 수 있으니 기다려 주십시오...",
+        "if defined DFL_FOLDER goto run_folder",
+        '"python\\python.exe" -X utf8 -m deepfake_lens desktop',
         "goto after_run",
-        ":run_plain",
-        '"python\\python.exe" -X utf8 -m deepfake_lens desktop %*',
+        ":run_folder",
+        '"python\\python.exe" -X utf8 -m deepfake_lens desktop --folder "%DFL_FOLDER%"',
         ":after_run",
-        "if errorlevel 1 ( echo. & echo 프로그램이 오류로 끝났습니다. 위 내용을 캡처해 보내 주십시오. & pause )",
+        'set "DFL_CODE=%errorlevel%"',
+        'if "%DFL_CODE%"=="0" goto end',
+        'if "%DFL_CODE%"=="-1073741510" set "DFL_CODE=130"',
+        'if "%DFL_CODE%"=="130" echo 사용자가 중단했습니다.',
+        'if "%DFL_CODE%"=="130" goto end',
+        "echo.",
+        "echo 프로그램이 오류로 끝났습니다(코드 %DFL_CODE%). 위 내용을 캡처해 보내 주십시오.",
+        "pause",
+        "goto end",
+        *LOCATION_LABELS,
     ])
 
 
@@ -157,53 +234,77 @@ def doctor_launcher_text() -> str:
     """``문제 확인.cmd``: ``doctor``, then the log folder (as ``cli_logging.default_log_dir`` places it on Windows).
 
     ``DEEPFAKE_LENS_LOG_DIR`` wins; otherwise ``%USERPROFILE%\\.cache\\deepfake-lens\\logs``, or the relocated
-    ``%LOCALAPPDATA%\\deepfake-lens\\logs`` when only that one exists (R21-10).
+    ``%LOCALAPPDATA%\\deepfake-lens\\logs`` when only that one exists (R21-10). The same ``pushd`` and location
+    checks as the launcher (RISK B12).
     """
     return _crlf([
         "@echo off",
         "chcp 65001 >nul",
+        "setlocal",
         "title Deepfake Lens — 문제 확인",
-        'cd /d "%~dp0"',
-        'if not exist "python\\python.exe" ( echo python 폴더가 없습니다. 압축을 전부 풀었는지 확인하십시오. & pause & exit /b 2 )',
+        'set "DFL_CODE=0"',
+        'pushd "%~dp0" || goto no_folder',
+        *LOCATION_CHECKS,
         '"python\\python.exe" -X utf8 -m deepfake_lens doctor',
         "echo.",
         'set "DFL_LOGS=%USERPROFILE%\\.cache\\deepfake-lens\\logs"',
         'if not exist "%DFL_LOGS%\\" if exist "%LOCALAPPDATA%\\deepfake-lens\\logs\\" set "DFL_LOGS=%LOCALAPPDATA%\\deepfake-lens\\logs"',
         'if defined DEEPFAKE_LENS_LOG_DIR set "DFL_LOGS=%DEEPFAKE_LENS_LOG_DIR%"',
         'echo 로그 폴더: "%DFL_LOGS%"',
-        'if exist "%DFL_LOGS%\\" ( start "" explorer "%DFL_LOGS%" ) else ( echo 아직 로그 폴더가 없습니다. 「Deepfake Lens.cmd」를 한 번 실행한 뒤 다시 확인하십시오. )',
+        'if exist "%DFL_LOGS%\\" start "" explorer "%DFL_LOGS%"',
+        'if not exist "%DFL_LOGS%\\" echo 아직 로그 폴더가 없습니다. 「Deepfake Lens.cmd」를 한 번 실행한 뒤 다시 확인하십시오.',
         "echo.",
         "echo 문제를 알릴 때는 이 창의 내용과 로그 폴더의 파일을 함께 보내 주십시오.",
         "pause",
+        "goto end",
+        *LOCATION_LABELS,
     ])
 
 
 def readme_text() -> str:
-    """``읽어보세요.txt`` (plan §1, §5, §6)."""
+    """``읽어보세요.txt`` (plan §1, §5, §6; RISK B3 B8 B13 B18 B19 B20 B21 C8)."""
     return _crlf([
-        "Deepfake Lens — 설치 없이 쓰는 꾸러미 (Windows 10/11, 64비트 x64 전용)",
+        "Deepfake Lens — 설치 없이 쓰는 꾸러미",
         "",
-        "■ 사용법 (3단계)",
-        "  1. 이 zip을 C:\\DeepfakeLens 같은 로컬 폴더에 전부 풉니다(zip 안에서 바로 실행하지 마십시오).",
-        "  2. 「Deepfake Lens.cmd」를 더블클릭합니다. 검은 창이 뜨고 브라우저에 검사 화면이 열립니다.",
-        "  3. 화면의 「검사할 폴더 고르기」로 폴더를 고르면 검사가 시작됩니다. 결과 화면에서 감정서(PDF)를 받습니다.",
-        "  폴더를 「Deepfake Lens.cmd」 위에 끌어다 놓으면 그 폴더를 연 채로 시작합니다.",
+        "■ 지원 사양",
+        "  Windows 10/11 64비트(x64) 전용입니다. 32비트·ARM Windows에서는 실행되지 않습니다.",
+        "  CPU는 2010년 이후의 x64 CPU(SSE4.2 지원)여야 합니다. 더 오래된 CPU나 CPU 기능을 가린 가상 PC에서는 시작되지 않습니다.",
+        "  관리자 권한·설치·PATH 변경은 필요 없습니다. 지우려면 폴더를 삭제하면 됩니다.",
+        "",
+        "■ 사용법",
+        "  1. zip 파일을 오른쪽 클릭 → 속성 → 「차단 해제」를 체크하고 확인을 누릅니다(풀기 전에).",
+        "  2. 오른쪽 클릭 → 모두 압축 풀기로 C:\\DeepfakeLens 같은 로컬 폴더에 전부 풉니다. zip 안에서 바로 실행하지 마십시오.",
+        "  3. 압축을 푼 폴더의 「Deepfake Lens.cmd」를 더블클릭합니다. 검은 창이 뜨고 브라우저에 검사 화면이 열립니다.",
+        "     처음에는 시작까지 1분쯤 걸릴 수 있습니다. 기다리는 동안 다시 누르지 마십시오.",
+        "  4. 화면의 「검사할 폴더 고르기」로 폴더를 고르면 검사가 시작됩니다. 결과 화면에서 감정서(PDF)를 받습니다.",
+        "  폴더(또는 그 안의 파일)를 「Deepfake Lens.cmd」 위에 끌어다 놓으면 그 폴더를 연 채로 시작합니다.",
         "",
         "■ 끄는 방법",
-        "  화면 위쪽의 「종료」 단추를 누르거나 검은 창을 닫습니다. 검은 창을 닫으면 진행 중인 검사도 멈춥니다.",
+        "  화면 위쪽의 종료 단추를 누르거나 검은 창을 닫습니다. 검은 창을 닫으면 진행 중인 검사도 멈춥니다.",
+        "  검은 창에서 Ctrl+C를 누르면 「일괄 작업을 끝내시겠습니까 (Y/N)?」가 나옵니다. Y를 누르십시오.",
         "  브라우저 탭만 닫으면 프로그램은 남아 있다가, 20분 동안 화면도 검사도 없으면 스스로 꺼집니다.",
+        "  꺼진 뒤 다시 쓰려면 압축을 푼 폴더의 「Deepfake Lens.cmd」를 다시 실행하십시오.",
         "  두 번 실행하면 새로 켜지 않고 이미 실행 중인 화면을 브라우저로 엽니다.",
         "",
-        "■ 처음 실행할 때 경고가 뜨면",
-        "  인터넷에서 받은 zip에는 차단 표시가 붙어 Windows SmartScreen이 「Windows의 PC 보호」 창을 띄울 수 있습니다.",
-        "  「추가 정보」를 누른 뒤 「실행」을 누르십시오. 이 .cmd 파일들은 코드 서명이 되어 있지 않습니다.",
-        "  미리 막으려면 풀기 전에 zip 파일의 속성에서 「차단 해제」를 체크하거나, PowerShell에서",
-        "    Get-ChildItem -Recurse C:\\DeepfakeLens | Unblock-File",
-        "  을 실행합니다. 백신 프로그램이 막으면 이 폴더를 예외로 등록하십시오.",
+        "■ 브라우저",
+        "  Edge나 Chrome을 쓰십시오. Edge는 오래 둔 탭을 절전시키므로 그사이 프로그램이 꺼질 수 있습니다.",
+        "  Edge 설정 → 시스템 및 성능에서 절전하지 않을 사이트 목록에 127.0.0.1을 추가하십시오.",
         "",
-        "■ 풀 위치",
-        "  OneDrive·네트워크 드라이브 아래에는 풀지 마십시오(느리고, 파일이 온라인 전용으로 바뀌면 실행되지 않습니다).",
-        "  32비트·ARM Windows는 지원하지 않습니다. 관리자 권한·설치·PATH 변경은 필요 없고, 지우려면 폴더를 삭제하면 됩니다.",
+        "■ 실행이 막힐 때",
+        "  「Windows의 PC 보호」 창: 「추가 정보」를 누른 뒤 「실행」을 누르십시오(이 .cmd 파일들은 코드 서명이 없습니다).",
+        "  이미 풀었다면 PowerShell에서 다음을 실행해 차단을 풉니다.",
+        "    Get-ChildItem -Recurse C:\\DeepfakeLens | Unblock-File",
+        "  Windows 11 스마트 앱 컨트롤(SAC)이 켜진 PC는 풀기 전에 zip의 차단 해제가 꼭 필요합니다.",
+        "    그래도 「실행」 단추 없이 막히면 이 PC에서는 쓸 수 없습니다. 담당자에게 알리십시오.",
+        "  회사 PC에서 AppLocker·그룹 정책으로 막히면 IT 담당자에게 이 폴더의 실행 허용을 요청하십시오.",
+        "  백신이 막거나 파일을 격리하면 이 폴더를 검사 예외로 등록하십시오.",
+        "    V3: 환경 설정 → 검사 예외 설정에 이 폴더를 추가합니다.",
+        "",
+        "■ 풀 위치와 검사할 파일",
+        "  OneDrive·네트워크 드라이브 아래에는 풀지 마십시오(느리고, 파일이 온라인 전용이면 실행되지 않습니다).",
+        "  바탕 화면·문서 폴더가 OneDrive로 옮겨진 PC가 많습니다. 그 아래의 증거 폴더는 오른쪽 클릭 →",
+        "    「항상 이 디바이스에 유지」로 모두 내려받은 뒤 검사하십시오.",
+        "  문서보안(DRM)이 걸린 파일은 읽지 못해 손상된 파일처럼 보입니다. 보안을 해제한 사본을 검사하십시오.",
         "",
         "■ 기록과 서명 키",
         "  검토 기록·검사 작업·보고서 서명 키는 %APPDATA%\\deepfake-lens\\ 에 남습니다(꾸러미를 새로 받아도 유지).",
@@ -385,6 +486,9 @@ def verify_windows_bundle(folder: Path) -> list[str]:
             problems.append(f"python/{need} 없음")
     if site.is_dir():
         problems.extend(missing_requirements(site_packages_dists(site), marker_environment("windows")))
+        problems.extend(f"{trace} 남음" for trace in build_traces(site))  # RISK B22
+        if not (site / "deepfake_lens" / "__pycache__").is_dir():  # RISK A7
+            problems.append("site-packages/deepfake_lens/__pycache__ 없음(미리 컴파일 안 됨)")
     if python.is_dir():
         problems.extend(unresolved_imports(python)[0])
     return problems
@@ -426,6 +530,27 @@ def prune_site_packages(site: Path) -> tuple[int, int]:
             path.unlink()
             count += 1
     return count, freed
+
+
+def remove_build_traces(site: Path) -> list[str]:
+    """RISK B22: delete ``site-packages/bin/`` (console scripts whose shebang names the build machine's Python) and
+    every ``*.dist-info/direct_url.json`` (the build machine's wheel paths). Returns what was removed (relative)."""
+    removed: list[str] = []
+    bin_dir = site / "bin"
+    if bin_dir.is_dir():
+        shutil.rmtree(bin_dir)
+        removed.append("bin/")
+    for path in sorted(site.glob("*.dist-info/direct_url.json")):
+        path.unlink()
+        removed.append(path.relative_to(site).as_posix())
+    return removed
+
+
+def build_traces(site: Path) -> list[str]:
+    """What :func:`remove_build_traces` would remove (the verify step's view)."""
+    found = ["site-packages/bin/"] if (site / "bin").exists() else []
+    found += [f"site-packages/{p.relative_to(site).as_posix()}" for p in sorted(site.glob("*.dist-info/direct_url.json"))]
+    return found
 
 
 # ── RISK A1: a minimal PE import-table reader (names only) ───────────────────────────────────────────────────────
@@ -597,6 +722,44 @@ def install_msvc_runtime(wheel: Path, python_dir: Path) -> list[str]:
     return list(MSVC_RUNTIME_DLLS)
 
 
+def python312_for_bytecode() -> str:
+    """RISK A7: a CPython 3.12 on the build machine whose ``importlib.util.MAGIC_NUMBER`` is :data:`PYC_MAGIC_312`
+    (the embeddable 3.12.10 reads that bytecode). ``sys.executable`` when it is 3.12, else ``python3.12`` on PATH."""
+    candidates = [sys.executable] if sys.version_info[:2] == (3, 12) else []
+    found = shutil.which("python3.12")
+    if found:
+        candidates.append(found)
+    for candidate in candidates:
+        done = subprocess.run(
+            [candidate, "-I", "-c", "import importlib.util, sys; print(sys.version_info[0], sys.version_info[1], importlib.util.MAGIC_NUMBER.hex())"],
+            capture_output=True, text=True, check=False,
+        )
+        if done.returncode == 0 and done.stdout.split() == ["3", "12", PYC_MAGIC_312.hex()]:
+            return candidate
+    raise BuildError("미리 컴파일에 쓸 Python 3.12가 없습니다(바이트코드 매직이 3.12와 같아야 합니다) — python3.12를 설치하십시오")
+
+
+def precompile(site: Path) -> None:
+    """RISK A7: ``compileall --invalidation-mode unchecked-hash`` over ``site`` with a 3.12 build interpreter, so the
+    first start does not compile 1,000+ modules while antivirus scans each new file."""
+    python = python312_for_bytecode()
+    done = subprocess.run(
+        [python, "-I", "-m", "compileall", "-q", "-j", "0", "--invalidation-mode", "unchecked-hash", str(site)],
+        capture_output=True, text=True, check=False,
+    )
+    if done.returncode != 0:
+        raise BuildError("미리 컴파일 실패:\n" + (done.stdout + done.stderr)[-4000:])
+    pycs = sorted(site.rglob("__pycache__/*.pyc"))
+    tags = {p.name.split(".")[-2] for p in pycs}
+    if tags != {"cpython-312"}:
+        raise BuildError(f"미리 컴파일된 .pyc의 태그가 cpython-312만이 아닙니다: {sorted(tags)}")
+    # header: magic, then flags 0b01 (hash-based, source not checked — PEP 552 unchecked-hash)
+    wrong = [p for p in pycs if p.read_bytes()[:8] != PYC_MAGIC_312 + (1).to_bytes(4, "little")]
+    if wrong:
+        raise BuildError(f".pyc {len(wrong)}개의 머리(매직·unchecked-hash 플래그)가 다릅니다: {wrong[0]}")
+    print(f"  .pyc {len(pycs)}개(cpython-312, unchecked-hash, {python})", flush=True)
+
+
 def _run(command: list[str], **kwargs: object) -> None:
     print("  $ " + " ".join(command[:8]) + (" …" if len(command) > 8 else ""), flush=True)
     done = subprocess.run(command, check=False, **kwargs)  # type: ignore[call-overload]
@@ -694,6 +857,8 @@ def build_windows(out_parent: Path, cache: Path) -> Path:
     ])
     pruned, freed = prune_site_packages(site)
     print(f"  링커·디버그 파일 {pruned}개 삭제({freed / 1e6:.1f} MB)", flush=True)
+    removed = remove_build_traces(site)
+    print(f"  빌드 흔적 {len(removed)}개 삭제(bin/, direct_url.json)", flush=True)
     problems = missing_requirements(site_packages_dists(site), marker_environment("windows"))
     if problems:
         raise BuildError("의존성 검사 실패:\n  " + "\n  ".join(problems))
@@ -703,6 +868,7 @@ def build_windows(out_parent: Path, cache: Path) -> Path:
     print(f"  DLL import 검사: .pyd/.dll {checked}개, 찾지 못한 DLL {len(unresolved)}건", flush=True)
     if unresolved:
         raise BuildError("DLL import 검사 실패:\n  " + "\n  ".join(unresolved))
+    precompile(site)
     print("[4/6] 실행 파일·안내문", flush=True)
     _write(folder / WIN_LAUNCHER, windows_launcher_text())
     _write(folder / WIN_DOCTOR, doctor_launcher_text())
