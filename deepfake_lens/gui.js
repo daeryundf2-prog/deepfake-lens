@@ -2421,6 +2421,8 @@
             const on = new Set(GROUPS.filter(([, id]) => $(id).checked).map(([band]) => band));
             // GUI-REV2 H-1: uploaded files are never exhibits (the server lists them as
             // 서명 제외); the order here is the order the statement numbers them in.
+            // GUI-REV7 F-13: the exhibits are numbered in this order (the ledger's 결론순), not in the order the
+            // examiner ticked the groups — the hint and the checklist say so.
             return results.filter(e => on.has(itemBand(e)) && e.item.source !== 'upload').sort(byVerdict);
         }
         const TAGS = { req: ['필수', 'tag-req'], ok: ['확인됨', 'tag-ok'], info: ['알림', 'tag-info'], warn: ['주의', 'tag-warn'] };
@@ -2465,7 +2467,7 @@
                 if (uploads) out.push({ tag: 'info', text: `올린 파일 ${uploads}개는 증거설명서의 서증이 될 수 없습니다 — 서버가 보관한 검사 작업의 행이 아니어서 서명 제외(클라이언트 제공 결과)로 실립니다.` });
                 if (!scanned) out.push({ tag: 'req', text: '올린 파일만 있어 증거설명서를 만들 수 없습니다 — 폴더를 검사하십시오. 감정 보고서·HTML·서명된 JSON은 만들 수 있습니다.', act: ['검사 화면으로', () => navigate('scan')] });
                 else if (!sel.length) out.push({ tag: 'req', text: '증거설명서의 서증으로 넣을 파일을 고르십시오. 근거 있는 파일이 없으면 판단 불가 칸을 고를 수 있습니다.', act: ['고르기', () => $('inc-manip').focus()] });
-                else if (sel.length < scanned) out.push({ tag: 'info', text: `서증 ${sel.length}개(고른 순서로 번호) · 나머지 ${scanned - sel.length}개는 증거설명서 표에 번호 없이 "서증 외(검사 행)"로 남습니다. 다른 형식에는 ${results.length}개가 모두 실립니다.` });
+                else if (sel.length < scanned) out.push({ tag: 'info', text: `서증 ${sel.length}개(사건 대장의 결론순으로 번호) · 나머지 ${scanned - sel.length}개는 증거설명서 표에 번호 없이 "서증 외(검사 행)"로 남습니다. 다른 형식에는 ${results.length}개가 모두 실립니다.` });
                 // GUI-REV2 H-4: say which appendix rows carry more than a verdict.
                 const appendix = results.filter(e => !sel.includes(e) && e.item.source !== 'upload' && itemBand(e) === 'undetermined');
                 const cueRows = appendix.filter(e => cueEvidence(e.item.result).length).length;

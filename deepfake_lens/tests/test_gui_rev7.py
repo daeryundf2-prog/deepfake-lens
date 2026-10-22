@@ -481,5 +481,25 @@ class F12UnmeasuredComparisonDoesNotLeadWithANumberTest(unittest.TestCase):
         ])
 
 
+class F13ExhibitOrderTextMatchesTheSortTest(unittest.TestCase):
+    """F-13 (Med, false text): the report screen said the exhibits are numbered "고른 순서대로" / "고른 순서로 번호";
+    the chosen rows are sorted by byVerdict (verdict, then — inside 판단 불가 — its kind, then path), and the only
+    choice is four group boxes."""
+
+    def test_the_texts_name_the_order_the_code_uses(self) -> None:
+        source, html = _source(), _html()
+        self.assertNotIn("고른 순서", source)
+        self.assertNotIn("고른 순서", html)
+        self.assertIn("고른 칸의 파일에 사건 대장의 결론순(조작·생성 근거 → 원본성 근거 → 판단 불가 → 분석 못 함, 같은 결론 안에서는 경로순"
+                      " — 판단 불가는 단서 있는 행부터)과 같은 순서로 증거설명서의 호증 번호가 붙습니다.", html)
+        self.assertIn("서증 ${sel.length}개(사건 대장의 결론순으로 번호)", source)
+        # the order the texts describe
+        self.assertIn("return results.filter(e => on.has(itemBand(e)) && e.item.source !== 'upload').sort(byVerdict);", _function("selectedEntries"))
+        self.assertIn("const BAND_ORDER = { manipulation_evidence: 0, authenticity_evidence: 1, undetermined: 2, other: 3 };", source)
+        self.assertIn("const UNDET_SPLIT = ['cue', 'c2pa', 'failed', 'none', 'reference'];", source)
+        self.assertIn("const byVerdict = (a, b) => (rank(a) - rank(b)) || byName(a, b);", source)
+        self.assertIn("extra.exhibit_paths = selectedEntries().map(e => e.item.path);", source)
+
+
 if __name__ == "__main__":
     unittest.main()
