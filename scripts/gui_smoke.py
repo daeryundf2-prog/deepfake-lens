@@ -131,9 +131,10 @@ def main() -> int:
             page.wait_for_selector("#results-section:not([hidden])", timeout=180_000)
             # A11Y-4: focus lands on the conclusion headline, never on <body>.
             page.wait_for_function("() => document.activeElement && document.activeElement.id === 'sum-h'", timeout=10_000)
-            stale = page.locator("#error-region .err-item[data-scan]")
-            assert stale.count() >= 1 and all("이전 검사" in stale.nth(i).inner_text() for i in range(stale.count())), \
-                "an earlier attempt's error must be marked 이전 검사 (G-4)"
+            # GUI-REV7 F-4: the earlier attempt's error (marked 이전 검사 while this scan ran — G-4, checked in
+            #     step 5b) is removed once this scan's results are on screen.
+            assert page.locator("#error-region .err-item[data-scan]").count() == 0, \
+                "an earlier attempt's error outlived a successful scan (F-4)"
             other = page.locator("#error-region .err-item:not([data-scan])")
             assert other.count() >= 1 and all("이전 검사" not in other.nth(i).inner_text() for i in range(other.count())), \
                 "a quick-check error must not be marked 이전 검사 (H-10)"
@@ -392,8 +393,15 @@ def main() -> int:
             if not page.locator("#scan-options").evaluate("d => d.open"):
                 page.locator("#scan-options summary").click()
             page.check("input[name='pixel-mode'][value='fast']")
+            # GUI-REV G-4 / GUI-REV7 F-4: an error of an earlier scan is marked 이전 검사 (an aria-hidden tag — the
+            #     title in the assertive live region is not rewritten) while the new scan runs.
+            page.evaluate("toast('시험용 이전 검사 오류', true, '', 'scan')")
             page.click("#analyze-btn")
             page.wait_for_function("() => scanBusy === true", timeout=10_000)
+            stale = page.locator("#error-region .err-item[data-scan]", has_text="시험용 이전 검사 오류")
+            assert stale.count() == 1 and "이전 검사" in stale.inner_text(), "an earlier scan's error must be marked 이전 검사 (G-4)"
+            assert stale.locator(".err-old-tag[aria-hidden='true']").count() == 1
+            assert stale.locator(".err-text b").inner_text().strip() == "오류", "the error's title was rewritten inside the live region"
             page.evaluate("location.hash = '#/ledger'")
             assert page.locator("#busy-band").is_visible(), "no 'new scan running' band over the previous results"
             assert "이전 결과" in page.locator("#busy-band").inner_text()
@@ -410,6 +418,7 @@ def main() -> int:
             assert page.evaluate("location.hash") == "#/report", "a finished scan must not move the examiner off the report screen"
             assert page.evaluate("document.activeElement.id") == "case-name", "a finished scan must not take the focus"
             assert "검사가 끝났습니다" in page.locator("#busy-band").inner_text()
+            assert page.locator("#error-region .err-item", has_text="시험용 이전 검사 오류").count() == 0, "F-4: the retired error outlived the scan"
             page.click("#busy-band-link")
             page.wait_for_function("() => currentView === 'ledger' && document.getElementById('busy-band').hidden", timeout=10_000)
 

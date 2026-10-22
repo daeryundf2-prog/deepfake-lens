@@ -156,15 +156,30 @@
         // GUI-REV G-4: an error belongs to the scan it was raised in. When a new
         // scan starts, the earlier ones stay readable but are marked "이전 검사"
         // (they no longer describe the results on screen).
+        // GUI-REV7 F-4: the mark is a new aria-hidden node, not a rewrite of the box's title — #error-region is
+        // aria-live="assertive" and every title rewrite read the old error out again when a scan started.
         let scanGeneration = 0;
         function retireErrors() {
             scanGeneration += 1;
             document.querySelectorAll('#error-region .err-item[data-scan]').forEach(box => {
                 if (box.classList.contains('err-old')) return;
                 box.classList.add('err-old');
-                const head = box.querySelector('.err-text b');
-                head.textContent = '이전 검사 · ' + head.textContent;
+                const tag = document.createElement('span');
+                tag.className = 'err-old-tag';
+                tag.setAttribute('aria-hidden', 'true');
+                tag.textContent = '이전 검사 · ';
+                const text = box.querySelector('.err-text');
+                text.insertBefore(tag, text.firstChild);
             });
+        }
+        // GUI-REV7 F-4: once a new scan's results are on screen (done or cancelled), the earlier scans'
+        // errors are removed — they stood above every screen after a successful scan. Errors of this scan
+        // and errors that are not a scan's (quick check, export) stay.
+        function dropRetiredErrors() {
+            const old = Array.from(document.querySelectorAll('#error-region .err-item.err-old'));
+            const hadFocus = old.some(box => box.contains(document.activeElement));
+            old.forEach(box => box.remove());
+            if (hadFocus) $('main').focus();
         }
 
         function toast(msg, isErr, label, scope) {
@@ -1082,6 +1097,7 @@
             $('cancel-note').hidden = true;
             $('progress').classList.remove('indeterminate');
             const rows = data && Array.isArray(data.items) ? data.items.length : 0;
+            if (kind === 'done' || kind === 'cancelled') dropRetiredErrors();
             if (kind === 'done') {
                 $('prog-h').textContent = '검사 완료';
                 if (prog.total == null) { prog.total = rows; prog.done = rows; paintCounts(); }
@@ -2856,6 +2872,7 @@
                     lastScanJobNote = '';
                     retireErrors();
                     processResults(data);
+                    dropRetiredErrors();  // GUI-REV7 F-4: the archive's rows replaced the scan they described
                     toast(archiveCheckToast(data.items || []));  // R31-5: what was analyzed, not the row count
                     navigate('ledger', $('sum-h'));
                     return;

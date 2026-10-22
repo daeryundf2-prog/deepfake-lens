@@ -146,5 +146,45 @@ class F3DefaultFolderDoesNotOverwriteTypingTest(unittest.TestCase):
         self.assertEqual(json.loads(_run_js(body)), [base + " 이 서버의 기본 폴더: /srv/case", base, ""])
 
 
+class F4RetiredErrorsAreRemovedTest(unittest.TestCase):
+    """F-4 (Med): an earlier scan's error box stayed above every screen after the next scan succeeded, and
+    retireErrors rewrote its title inside the aria-live="assertive" region (the old error was read out again)."""
+
+    def test_the_mark_is_an_aria_hidden_node_and_the_title_is_not_rewritten(self) -> None:
+        source = _source()
+        retire = _function("retireErrors")
+        self.assertNotIn("head.textContent = '이전 검사 · ' + head.textContent;", source)
+        self.assertNotIn("textContent =", retire.replace("tag.textContent = '이전 검사 · ';", ""))
+        self.assertIn("tag.setAttribute('aria-hidden', 'true');", retire)
+        self.assertIn('<div id="error-region" class="error-region" aria-live="assertive"></div>', _html())
+        self.assertIn(".err-item.err-old .err-old-tag {", _css())
+
+    def test_a_finished_scan_and_an_archive_check_drop_the_retired_errors(self) -> None:
+        source = _source()
+        finish = _function("progressFinish")
+        self.assertIn("if (kind === 'done' || kind === 'cancelled') dropRetiredErrors();", finish)
+        start = source.index("if (data.mode === 'files') {")
+        branch = source[start:source.index("renderQuickCheck(data);", start)]
+        self.assertLess(branch.index("processResults(data);"), branch.index("dropRetiredErrors();"))
+
+    @unittest.skipUnless(_js_engine(), "no JavaScript engine (node or osascript)")
+    def test_only_retired_boxes_go_and_focus_inside_one_moves_to_main(self) -> None:
+        body = (
+            "var focused = '';\n"
+            "function Box(id, old) { this.id = id; this.old = old; this.removed = false; }\n"
+            "Box.prototype.remove = function () { this.removed = true; };\n"
+            "Box.prototype.contains = function (el) { return el === this.id + ':close'; };\n"
+            "var boxes = [new Box('a', true), new Box('b', false), new Box('c', true)];\n"
+            "var document = {activeElement: 'c:close', querySelectorAll: function (sel) {\n"
+            "  if (sel !== '#error-region .err-item.err-old') throw new Error(sel);\n"
+            "  return boxes.filter(function (b) { return b.old; }); }};\n"
+            "function $(id) { return {focus: function () { focused = id; }}; }\n"
+            + _function("dropRetiredErrors")
+            + "dropRetiredErrors();\n"
+            "var out = JSON.stringify([boxes.map(function (b) { return b.removed; }), focused]);"
+        )
+        self.assertEqual(json.loads(_run_js(body)), [[True, False, True], "main"])
+
+
 if __name__ == "__main__":
     unittest.main()
