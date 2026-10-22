@@ -120,7 +120,9 @@ class F3DefaultFolderDoesNotOverwriteTypingTest(unittest.TestCase):
         source = _source()
         self.assertNotIn("if (!$('folder-path').value) $('folder-path').value = d.default_folder;", source)
         self.assertIn("applyDefaultFolder(d.default_folder, typeof d.default_folder_b64 === 'string' ? d.default_folder_b64 : '');", source)
-        self.assertIn("const hint = deniedFolderHint(error.message, defaultFolder);", source)
+        # DESK-3: the refusal also gets the registered folders (/api/stats roots) — the F-3 text without them is
+        # unchanged (test_the_refusal_names_the_servers_folder below; the list: test_gui_desktop).
+        self.assertIn("const hint = deniedFolderHint(error.message, defaultFolder, readRoots, desktopMode);", source)
 
     @unittest.skipUnless(_js_engine(), "no JavaScript engine (node or osascript)")
     def test_a_focused_or_filled_box_is_left_alone(self) -> None:

@@ -8,11 +8,12 @@ desktop step of ``scripts/gui_smoke.py``. The server routes themselves are teste
 
 from __future__ import annotations
 
+import json
 import re
 import unittest
 
-from deepfake_lens.tests.test_gui_model_score import _function
-from deepfake_lens.tests.test_gui_rev7 import _html, _source
+from deepfake_lens.tests.test_gui_model_score import _function, _js_engine
+from deepfake_lens.tests.test_gui_rev7 import _html, _run_js, _source
 
 
 def _element(html: str, element_id: str) -> str:
@@ -76,6 +77,110 @@ class Desk2TopBarAndShutdownTest(unittest.TestCase):
         self.assertIn('<span class="brand-name">Deepfake Lens</span>', _html())
         self.assertIn("$('shutdown-alert').replaceChildren(head, next);", page)
         self.assertIn("head.focus();", page)
+
+
+class Desk3FolderPickerTest(unittest.TestCase):
+    """DESK-3: 「검사할 폴더 고르기」 above the folder box (desktop only) — the OS dialog, the box filled and the scan
+    started; the list of folders that can be scanned; the 허용되지 않은 경로 refusal names them."""
+
+    def test_the_button_sits_above_the_box_and_its_note_describes_both(self) -> None:
+        html = _html()
+        self.assertIn("hidden", _element(html, "pick-row"))
+        button = _element(html, "pick-folder-btn")
+        self.assertIn('class="btn btn-primary btn-lg"', button)
+        self.assertIn('aria-describedby="pick-note"', button)
+        self.assertIn('<p class="hint pick-note" id="pick-note" role="status"></p>', html)
+        self.assertLess(html.index('id="pick-row"'), html.index('id="folder-path"'))
+        self.assertLess(html.index('<form id="scan-form"'), html.index('id="pick-row"'))
+        describedby = re.search(r'aria-describedby="([^"]+)"', _element(html, "folder-path"))
+        assert describedby is not None
+        self.assertEqual(describedby.group(1).split(), ["pick-note", "folder-hint", "folder-roots"])
+        self.assertIn("'pick-folder-btn'", _source()[_source().index("const SCAN_INPUTS = ["):][:200])
+
+    def test_the_click_waits_fills_and_submits(self) -> None:
+        handler = _handler(_source(), "$('pick-folder-btn').addEventListener('click', async () => {")
+        self.assertIn("const PICK_WAIT = '폴더 선택 창이 떠 있습니다 — 보이지 않으면 작업 표시줄을 확인하십시오';", _source())
+        order = ["setBusyButton(btn, true);", "setPickNote(PICK_WAIT, false);", "apiFetch('/api/pick-folder', { method: 'POST' })",
+                 "setBusyButton(btn, false);", "refreshRoots();", "$('folder-path').value = outcome.folder;", "$('scan-form').requestSubmit();"]
+        self.assertEqual([handler.index(step) for step in order], sorted(handler.index(step) for step in order))
+        # cancel: nothing changes but the waiting note
+        self.assertIn("if (outcome.kind === 'cancel') { setPickNote('', false); return; }", handler)
+        # 501/409/400: the server's text in the box's hint, the box focused for 501 (type the path instead)
+        self.assertIn("setPickNote(outcome.text, true);", handler)
+        self.assertIn("if (outcome.status === 501) $('folder-path').focus();", handler)
+        # the chosen folder is sent by its bytes
+        submit = _handler(_source(), "$('scan-form').addEventListener('submit', async e => {")
+        self.assertIn("} else if (pickedFolder && pickedFolder.b64 && folderPath === pickedFolder.folder) {", submit)
+        self.assertIn("params.set('folder_b64', pickedFolder.b64);", submit)
+        self.assertIn("const hint = deniedFolderHint(error.message, defaultFolder, readRoots, desktopMode);", submit)
+
+    @unittest.skipUnless(_js_engine(), "no JavaScript engine (node or osascript)")
+    def test_pick_outcomes(self) -> None:
+        body = _function("pickOutcome") + (
+            "var out = JSON.stringify(["
+            "pickOutcome(200, {folder: '/srv/사건', folder_b64: 'L3Nydi8'}),"
+            "pickOutcome(200, {folder: null, folder_b64: null}),"
+            "pickOutcome(409, {error: '폴더 선택 창이 이미 열려 있습니다'}),"
+            "pickOutcome(501, {error: '이 환경에서는 폴더 선택 창을 열 수 없습니다 — 경로를 직접 입력하십시오'}),"
+            "pickOutcome(400, {error: '고른 경로가 폴더가 아닙니다: /x'}),"
+            "pickOutcome(404, null)]);"
+        )
+        self.assertEqual(json.loads(_run_js(body)), [
+            {"kind": "picked", "folder": "/srv/사건", "b64": "L3Nydi8"},
+            {"kind": "cancel"},
+            {"kind": "error", "text": "폴더 선택 창이 이미 열려 있습니다", "status": 409},
+            {"kind": "error", "text": "이 환경에서는 폴더 선택 창을 열 수 없습니다 — 경로를 직접 입력하십시오", "status": 501},
+            {"kind": "error", "text": "고른 경로가 폴더가 아닙니다: /x", "status": 400},
+            {"kind": "error", "text": "폴더 선택 창을 열지 못했습니다 (HTTP 404)", "status": 404},
+        ])
+
+    @unittest.skipUnless(_js_engine(), "no JavaScript engine (node or osascript)")
+    def test_the_roots_list_shows_five_and_counts_the_rest(self) -> None:
+        roots = [f"/r/{n}" for n in range(7)]
+        body = "var ROOTS_SHOWN = 5;\n" + _function("rootsView") + (
+            f"var out = JSON.stringify([rootsView({json.dumps(roots)}, true), rootsView(['/a'], false), rootsView([], true), rootsView([], false)]);"
+        )
+        many, one, none_desktop, none_web = json.loads(_run_js(body))
+        self.assertEqual(many["items"], roots[:5])
+        self.assertEqual(many["more"], "외 2개")
+        self.assertIn("검사할 폴더 고르기", many["head"])
+        self.assertEqual((one["items"], one["more"]), (["/a"], ""))
+        self.assertIn("--allow-root", one["head"])
+        self.assertEqual(none_desktop["items"], [])
+        self.assertTrue(none_desktop["head"].startswith("아직 검사할 수 있는 폴더가 없습니다"))
+        self.assertEqual(none_web["head"], "서버를 시작할 때 등록한 폴더(--folder, --allow-root) 안만 검사할 수 있습니다.")
+
+    @unittest.skipUnless(_js_engine(), "no JavaScript engine (node or osascript)")
+    def test_the_refusal_lists_the_registered_folders(self) -> None:
+        body = "var ROOTS_SHOWN = 5;\n" + _function("rootsSummary") + _function("deniedFolderHint") + (
+            "var out = JSON.stringify(["
+            "deniedFolderHint('허용되지 않은 경로', '/srv/case', ['/srv/case', '/srv/b'], false),"
+            "deniedFolderHint('허용되지 않은 경로', '', ['/1', '/2', '/3', '/4', '/5', '/6'], true),"
+            "deniedFolderHint('허용되지 않은 경로', '', [], true),"
+            "deniedFolderHint('허용되지 않은 경로', '/srv/case', [], false),"
+            "deniedFolderHint('폴더를 찾을 수 없습니다', '/srv/case', ['/srv/case'], true)]);"
+        )
+        pick = ' 다른 폴더는 위의 "검사할 폴더 고르기"로 고르십시오.'
+        self.assertEqual(json.loads(_run_js(body)), [
+            " — 지금 검사할 수 있는 폴더(그 안의 폴더 포함): /srv/case, /srv/b.",
+            " — 지금 검사할 수 있는 폴더(그 안의 폴더 포함): /1, /2, /3, /4, /5 외 1개." + pick,
+            " — 아직 검사할 수 있는 폴더가 없습니다." + pick,
+            # GUI-REV7 F-3's text when the list is not known (an older server) — unchanged
+            " — 서버를 시작할 때 --folder 또는 --allow-root로 등록한 폴더 안만 검사할 수 있습니다. 이 서버의 기본 폴더: /srv/case",
+            "",
+        ])
+
+    def test_the_list_is_filled_from_stats_and_after_a_pick(self) -> None:
+        html = _html()
+        self.assertIn('<div class="hint roots" id="folder-roots"><p id="roots-head">', html)
+        self.assertIn('<ul class="roots-list mono" id="roots-list" hidden></ul>', html)
+        helper = _function("applyDesktopStats")
+        self.assertIn("readRoots = Array.isArray(d.roots) ? d.roots.filter(root => typeof root === 'string') : [];", helper)
+        self.assertLess(helper.index("renderRoots();"), helper.index("if (!desktopMode) return;"))  # the plain server too
+        refresh = _async_function("refreshRoots")
+        self.assertIn("apiJson('/api/roots')", refresh)
+        self.assertIn("readRoots = data.roots.map(root => root && root.path)", refresh)
+        self.assertIn("li.textContent = displayName(text);", _function("renderRoots"))  # never innerHTML
 
 
 if __name__ == "__main__":

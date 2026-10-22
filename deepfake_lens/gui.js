@@ -34,6 +34,8 @@
         // DESK-2: the desktop mode (`deepfake-lens desktop`, /api/stats desktop) and whether the page has been shut down.
         let desktopMode = false;
         let appShutDown = false;
+        // DESK-3: the registered read roots as /api/stats and /api/roots list them (display text).
+        let readRoots = [];
 
         /* Review marks stored locally and synchronized with backend API */
         const REVIEW_KEY = 'dflens-review-v1';
@@ -1193,7 +1195,7 @@
         /* ── scan: controls ──────────────────────── */
         // R19-3: the export buttons too — a report made while a scan runs would
         // mix the rows on screen with the options of the scan in progress.
-        const SCAN_INPUTS = ['folder-path', 'analyze-btn', 'max-files',
+        const SCAN_INPUTS = ['folder-path', 'analyze-btn', 'pick-folder-btn', 'max-files',
             'opt-recursive', 'opt-dedupe', 'opt-heatmaps', 'opt-model',
             'opt-deep', 'file-picker-btn', 'dir-picker-btn', 'upload-btn', 'upload-clear',
             'exp-json', 'exp-csv', 'exp-report', 'exp-pdf', 'exp-evidence', 'exp-signed', 'exp-clear'];
@@ -1435,11 +1437,20 @@
         }
 
         // U-8: an out-of-root folder says which folders can be scanned. GUI-REV7 F-3: and names the server's
-        // own folder (--folder), the one this page knows; --allow-root folders are not known to the page.
-        function deniedFolderHint(message, folder) {
+        // own folder (--folder). DESK-3: /api/stats now lists every registered folder (roots) — when that list is
+        // known the refusal names those folders instead (the --allow-root ones and the ones chosen in the dialog too).
+        function deniedFolderHint(message, folder, roots, desktop) {
             if (!/허용되지 않은 경로/.test(message)) return '';
+            const pick = desktop ? ' 다른 폴더는 위의 "검사할 폴더 고르기"로 고르십시오.' : '';
+            if (Array.isArray(roots) && roots.length) return ` — 지금 검사할 수 있는 폴더(그 안의 폴더 포함): ${rootsSummary(roots)}.` + pick;
+            if (desktop) return ' — 아직 검사할 수 있는 폴더가 없습니다.' + pick;
             const own = folder ? ` 이 서버의 기본 폴더: ${folder}` : '';
             return ' — 서버를 시작할 때 --folder 또는 --allow-root로 등록한 폴더 안만 검사할 수 있습니다.' + own;
+        }
+        // DESK-3: at most five folders by name, the rest counted.
+        function rootsSummary(roots) {
+            const shown = roots.slice(0, ROOTS_SHOWN);
+            return shown.join(', ') + (roots.length > shown.length ? ` 외 ${roots.length - shown.length}개` : '');
         }
 
         $('scan-form').addEventListener('submit', async e => {
@@ -1472,6 +1483,10 @@
             if (defaultFolderB64 && folderPath === defaultFolder) {
                 params.delete('folder');
                 params.set('folder_b64', defaultFolderB64);
+            } else if (pickedFolder && pickedFolder.b64 && folderPath === pickedFolder.folder) {
+                // DESK-3: a folder chosen in the OS dialog is named by its bytes too (folder_b64 of /api/pick-folder).
+                params.delete('folder');
+                params.set('folder_b64', pickedFolder.b64);
             }
             if (!$('opt-model').checked) params.set('no_default_engine', 'true');
             // GUI-REV G-5: the options become the report's options only when this
@@ -1494,7 +1509,7 @@
                 await runScanJob(job.job_id, folderPath, scanOptions);
             } catch (error) {
                 // U-8: an out-of-root folder says which folders can be scanned.
-                const hint = deniedFolderHint(error.message, defaultFolder);
+                const hint = deniedFolderHint(error.message, defaultFolder, readRoots, desktopMode);
                 toast('검사를 시작하지 못했습니다: ' + error.message + hint, true, '', 'scan');
             } finally {
                 setBusyButton($('analyze-btn'), false);
@@ -3209,15 +3224,23 @@
         /* ── desktop mode (DESK-2..7: `deepfake-lens desktop`) ── */
         // The product name as the top bar shows it (one place for it).
         const PRODUCT = document.querySelector('.brand-name').textContent.trim();
+        const ROOTS_SHOWN = 5;
+        const PICK_WAIT = '폴더 선택 창이 떠 있습니다 — 보이지 않으면 작업 표시줄을 확인하십시오';
+        // DESK-3: the folder last chosen in the OS dialog, with its bytes (a non-UTF-8 name survives the scan request).
+        let pickedFolder = null;
         const SHUTDOWN_QUESTION = `${PRODUCT}를 종료할까요? 종료하면 이 화면은 더 쓸 수 없습니다 — 다시 쓰려면 바탕 화면의 ${PRODUCT}를 다시 실행하십시오.`;
         const FORM_CONTROLS = [HTMLButtonElement, HTMLInputElement, HTMLSelectElement, HTMLTextAreaElement];
 
-        // DESK-2: one call when /api/stats has answered. The plain web server says desktop false — the
-        // desktop-only controls stay hidden there.
+        // DESK-2..7: one call when /api/stats has answered. The plain web server says desktop false — what comes
+        // before the desktop check below is filled there too; the desktop-only controls stay hidden.
         function applyDesktopStats(d) {
             desktopMode = d.desktop === true;
+            readRoots = Array.isArray(d.roots) ? d.roots.filter(root => typeof root === 'string') : [];
+            renderRoots();
             if (!desktopMode) return;
             $('desk-bar').hidden = false;
+            $('pick-row').hidden = false;
+            $('folder-label').textContent = '또는 폴더 경로 직접 입력';
         }
 
         // DESK-2: 종료 asks, then stops the server; the page is replaced by one sentence (role=alert) and every
@@ -3257,6 +3280,94 @@
             $('shutdown-alert').replaceChildren(head, next);
             head.focus();
         }
+
+        // DESK-3: "지금 검사할 수 있는 폴더" under the folder box — at most five by name, the rest counted.
+        function rootsView(roots, desktop) {
+            if (!roots.length) {
+                return {
+                    head: desktop ? '아직 검사할 수 있는 폴더가 없습니다 — 위의 "검사할 폴더 고르기"로 고르면 그 폴더(그 안의 폴더 포함)를 검사할 수 있습니다.'
+                        : '서버를 시작할 때 등록한 폴더(--folder, --allow-root) 안만 검사할 수 있습니다.',
+                    items: [], more: '',
+                };
+            }
+            const shown = roots.slice(0, ROOTS_SHOWN);
+            return {
+                head: desktop ? '지금 검사할 수 있는 폴더(그 안의 폴더 포함 — 다른 폴더는 "검사할 폴더 고르기"로):'
+                    : '지금 검사할 수 있는 폴더(그 안의 폴더 포함 — 서버를 시작할 때 --folder, --allow-root로 등록):',
+                items: shown,
+                more: roots.length > shown.length ? `외 ${roots.length - shown.length}개` : '',
+            };
+        }
+        function renderRoots() {
+            const view = rootsView(readRoots, desktopMode);
+            $('roots-head').textContent = view.head;
+            const list = $('roots-list');
+            list.replaceChildren(...view.items.concat(view.more ? [view.more] : []).map(text => {
+                const li = document.createElement('li');
+                li.textContent = displayName(text);
+                return li;
+            }));
+            list.hidden = !list.children.length;
+        }
+        async function refreshRoots() {
+            try {
+                const data = await apiJson('/api/roots');
+                if (Array.isArray(data.roots)) {
+                    readRoots = data.roots.map(root => root && root.path).filter(path => typeof path === 'string');
+                    renderRoots();
+                }
+            } catch (e) { /* the list stays as it was; the next pick asks again */ }
+        }
+
+        // DESK-3: the answer of /api/pick-folder — chosen (registered as a read root), cancelled, or refused with the
+        // server's own text (409: a dialog is already open or the folder list is full; 501: no dialog here; 400: not a folder).
+        function pickOutcome(status, body) {
+            if (status === 200 && body && typeof body.folder === 'string' && body.folder) {
+                return { kind: 'picked', folder: body.folder, b64: typeof body.folder_b64 === 'string' ? body.folder_b64 : '' };
+            }
+            if (status === 200 && body && body.folder === null) return { kind: 'cancel' };
+            const text = body && typeof body.error === 'string' && body.error ? body.error : `폴더 선택 창을 열지 못했습니다 (HTTP ${status})`;
+            return { kind: 'error', text, status };
+        }
+        function setPickNote(text, isError) {
+            const note = $('pick-note');
+            if (note.textContent !== text) note.textContent = text;
+            note.classList.toggle('pick-err', Boolean(isError));
+        }
+        $('pick-folder-btn').addEventListener('click', async () => {
+            const btn = $('pick-folder-btn');
+            if (!desktopMode || appShutDown || scanBusy || isBusyButton(btn) || isBusyButton($('analyze-btn'))) return;
+            setBusyButton(btn, true);
+            setPickNote(PICK_WAIT, false);
+            let outcome;
+            try {
+                const res = await apiFetch('/api/pick-folder', { method: 'POST' });
+                let body = null;
+                try { body = await res.json(); } catch (e) { body = null; }
+                outcome = pickOutcome(res.status, body);
+            } catch (e) {
+                outcome = { kind: 'error', text: e.message, status: 0 };
+            } finally {
+                setBusyButton(btn, false);
+            }
+            if (appShutDown) return;
+            if (outcome.kind === 'cancel') { setPickNote('', false); return; }
+            if (outcome.kind === 'error') {
+                // Said in the folder box's own hint (aria-describedby of the box and of this button), not only in passing.
+                setPickNote(outcome.text, true);
+                if (outcome.status === 501) $('folder-path').focus();
+                return;
+            }
+            refreshRoots();
+            if (scanBusy) {
+                setPickNote(`검사가 진행 중이라 고른 폴더로 시작하지 않았습니다 — 끝난 뒤 다시 고르십시오. 고른 폴더: ${displayName(outcome.folder)}`, true);
+                return;
+            }
+            setPickNote('', false);
+            pickedFolder = { folder: outcome.folder, b64: outcome.b64 };
+            $('folder-path').value = outcome.folder;
+            $('scan-form').requestSubmit();
+        });
 
         /* ── initialization ───────────────────────── */
         updateCaseLine();

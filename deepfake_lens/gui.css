@@ -579,6 +579,15 @@ select.field { padding-right: 8px; }
     .desk-dot { forced-color-adjust: none; background: CanvasText; }
 }
 
+/* DESK-3: the folder dialog button above the folder box and the list of folders that can be scanned. */
+.pick-row { display: flex; flex-direction: column; align-items: flex-start; gap: 6px; }
+.btn-lg { min-height: 52px; padding: 0 24px; font-size: 17px; }
+.pick-note { margin: 0; }
+.pick-note.pick-err { color: var(--manip); font-weight: 600; }
+.roots p { margin: 0; }
+.roots-list { list-style: none; padding: 0; margin: 4px 0 0; display: flex; flex-direction: column; gap: 2px; }
+.roots-list li { overflow-wrap: anywhere; }
+
 /* GUI-REV7 F-8: Windows contrast themes (forced colors) drop backgrounds and box-shadows — the current row,
    a pressed verdict filter, a pressed review star, the progress fill, a changed row, the drop zone while a
    file is held over it and the active studio mode were told only by them. Here they get a border, an
