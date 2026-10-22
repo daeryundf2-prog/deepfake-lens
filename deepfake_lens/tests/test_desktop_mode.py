@@ -55,6 +55,7 @@ class SigningKeyFileTest(unittest.TestCase):
     def test_a_key_is_created_once_then_read_back(self) -> None:
         source, path = desktop.prepare_signing_key()
         self.assertEqual((source, path), ("created", self.folder / desktop.KEY_FILE_NAME))
+        assert path is not None
         key = os.environ[REPORT_KEY_ENV]
         self.assertEqual(len(key), 64)
         self.assertEqual(path.read_text(encoding="utf-8"), key + "\n")
@@ -318,3 +319,18 @@ class DialogCommandTest(unittest.TestCase):
         with mock.patch.object(desktop.os, "name", "posix"), mock.patch.object(desktop.sys, "platform", "linux"), \
                 mock.patch.object(desktop.shutil, "which", return_value=None):
             self.assertIsNone(desktop._dialog_command("x"))
+
+
+class NoProxyProbeTest(unittest.TestCase):
+    def test_the_running_instance_probe_ignores_proxy_variables(self) -> None:
+        """A corporate HTTP_PROXY must not be asked about 127.0.0.1 (urllib honours the variables by default)."""
+        with socket.socket() as busy:
+            busy.bind(("127.0.0.1", 0))
+            busy.listen(1)
+            port = busy.getsockname()[1]
+            with mock.patch.dict(os.environ, {"HTTP_PROXY": "http://10.0.0.1:1", "http_proxy": "http://10.0.0.1:1"}):
+                started = time.monotonic()
+                self.assertFalse(desktop.this_tool_listens(port))  # the socket never answers; no proxy is contacted
+                self.assertLess(time.monotonic() - started, 5)
+        source = Path(desktop.__file__).read_text(encoding="utf-8")
+        self.assertIn("urllib.request.ProxyHandler({})", source)

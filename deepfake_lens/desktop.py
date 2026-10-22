@@ -238,8 +238,10 @@ def this_tool_listens(port: int, host: str = "127.0.0.1") -> bool:
     from .webapp import CLIENT_HEADER, CLIENT_HEADER_VALUE
 
     request = urllib.request.Request(f"http://{host}:{port}/api/stats", headers={CLIENT_HEADER: CLIENT_HEADER_VALUE})
+    # No proxy: a corporate HTTP_PROXY / registry proxy must not be asked about 127.0.0.1 (it would answer for it).
+    opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
     try:
-        with urllib.request.urlopen(request, timeout=2) as answer:
+        with opener.open(request, timeout=2) as answer:
             payload = json.loads(answer.read().decode("utf-8", "replace"))
     except (OSError, ValueError, urllib.error.URLError):
         return False
