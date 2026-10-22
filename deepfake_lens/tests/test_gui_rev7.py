@@ -360,5 +360,30 @@ class F9ExportNoteIsNotRereadWhileTypingTest(unittest.TestCase):
         self.assertEqual(json.loads(_run_js(body)), [2, "b"])
 
 
+class F10FilesDroppedOutsideTheZoneAreNotOpenedTest(unittest.TestCase):
+    """F-10 (Med): only #drop-zone handled dragover/drop — a file dropped a little beside it was opened by the
+    browser, which left the page and lost the results on screen."""
+
+    def test_document_level_handlers_refuse_file_drags_outside_the_zone(self) -> None:
+        source = _source()
+        for event in ("dragover", "drop"):
+            with self.subTest(event=event):
+                start = source.index(f"document.addEventListener('{event}', e => {{")
+                handler = source[start:source.index("});", start)]
+                self.assertIn("if (!isFileDrag(e) || dropZone.contains(e.target)) return;", handler)
+                self.assertIn("e.preventDefault();", handler)
+        # the drop zone's own handlers are unchanged
+        self.assertIn("dropZone.addEventListener('dragover', e => { e.preventDefault(); dropZone.classList.add('over'); });", source)
+        self.assertIn("dropZone.addEventListener('drop', async e => {", source)
+
+    @unittest.skipUnless(_js_engine(), "no JavaScript engine (node or osascript)")
+    def test_only_a_file_drag_is_refused(self) -> None:
+        body = _function("isFileDrag") + (
+            "var out = JSON.stringify([isFileDrag({dataTransfer: {types: ['Files']}}), isFileDrag({dataTransfer: {types: ['text/plain', 'Files']}}),"
+            " isFileDrag({dataTransfer: {types: ['text/plain']}}), isFileDrag({dataTransfer: null}), isFileDrag({})]);"
+        )
+        self.assertEqual(json.loads(_run_js(body)), [True, True, False, False, False])
+
+
 if __name__ == "__main__":
     unittest.main()

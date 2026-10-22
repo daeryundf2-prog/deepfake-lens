@@ -1271,6 +1271,23 @@
                 addFiles(Array.from(e.dataTransfer.files));
             }
         });
+        // GUI-REV7 F-10: a file dropped outside the drop zone was opened by the browser (the page left for
+        // file:///…, and the results on screen were gone). File drags are refused everywhere but the drop zone;
+        // text dragged into a text box is not a file drag and is left to the browser.
+        function isFileDrag(e) {
+            const types = e && e.dataTransfer ? Array.from(e.dataTransfer.types || []) : [];
+            return types.includes('Files');
+        }
+        document.addEventListener('dragover', e => {
+            if (!isFileDrag(e) || dropZone.contains(e.target)) return;
+            e.preventDefault();
+            e.dataTransfer.dropEffect = 'none';
+        });
+        document.addEventListener('drop', e => {
+            if (!isFileDrag(e) || dropZone.contains(e.target)) return;
+            e.preventDefault();
+            toast('파일을 열지 않았습니다 — 검사 화면의 「폴더 대신 파일 올리기」 칸에 놓으십시오.');
+        });
         function openFilePicker() {
             if (scanBusy) return;
             const input = document.createElement('input');
