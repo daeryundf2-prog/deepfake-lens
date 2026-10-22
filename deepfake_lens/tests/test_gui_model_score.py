@@ -108,10 +108,18 @@ class ModelScoreBehaviourTest(unittest.TestCase):
             "function listItems(t, xs) { return '[' + t + ']' + (xs || []).join('|'); }\n"
             "var box = {innerHTML: ''}; function $(id) { return box; }\n" + line + "\n"
         )
+        # GUI-REV7 F-12: the large number is shown only for a comparison the server marks measured (measured: true);
+        # an unmeasured one leads with 「참고 신호 — 미측정」 and keeps the number in a sentence. The head is drawn by
+        # compareHeadHtml and notices pass through guiText — both extracted with renderCompare. The R30-4 payloads are
+        # kept; the measured one now says measured: true, and the same numbers unmeasured are checked too.
         body = (
-            stubs + _function("renderCompare")
+            stubs + _function("guiText") + _function("compareHeadHtml") + _function("renderCompare")
             + "var out = [];\n"
             "renderCompare({raw_score: null, reference_band: 'unavailable', reference_note: '파일 B에서 오디오 특징을 추출하지 못해',"
+            " diagnostic: {kind: 'speaker', method: 'mfcc', distance: null, limitations: []}}); out.push(box.innerHTML);\n"
+            "renderCompare({raw_score: 42, measured: true, reference_band: 'reference', diagnostic: {kind: 'speaker', method: 'mfcc', distance: 0.123,"
+            " limitations: []}}); out.push(box.innerHTML);\n"
+            "renderCompare({raw_score: null, reference_band: 'unavailable',"
             " diagnostic: {kind: 'speaker', method: 'mfcc', distance: null, limitations: []}}); out.push(box.innerHTML);\n"
             "renderCompare({raw_score: 42, reference_band: 'reference', diagnostic: {kind: 'speaker', method: 'mfcc', distance: 0.123,"
             " limitations: []}}); out.push(box.innerHTML);\n"
@@ -122,12 +130,22 @@ class ModelScoreBehaviourTest(unittest.TestCase):
             path.write_text(script, encoding="utf-8")
             done = subprocess.run([*engine, str(path)], capture_output=True, text=True, timeout=60)
         self.assertEqual(done.returncode, 0, done.stderr)
-        unmeasured, measured = done.stdout.strip().split("\n=====\n")
-        self.assertIn('<span class="big">없음</span>', unmeasured)
+        unmeasured, measured, unmeasured_no_note, unmeasured_42 = done.stdout.strip().split("\n=====\n")
+        self.assertIn("파일 B에서 오디오 특징을 추출하지 못해", unmeasured)
         self.assertIn("<b>거리</b><span>없음 — 측정하지 않음</span>", unmeasured)
         self.assertNotIn('<span class="big">0</span>', unmeasured)
+        self.assertNotIn("원점수 0", unmeasured)
+        self.assertIn("참고 원점수 없음 — 미측정", unmeasured)
+        self.assertIn("참고 원점수 없음 — 미측정", unmeasured_no_note)
+        self.assertIn("<b>거리</b><span>없음 — 측정하지 않음</span>", unmeasured_no_note)
+        self.assertNotIn("원점수 0", unmeasured_no_note)
         self.assertIn('<span class="big">42</span>', measured)
         self.assertIn("<b>거리</b><span>0.123</span>", measured)
+        self.assertIn("참고 원점수 42/100 — 미측정", unmeasured_42)
+        self.assertIn("<b>거리</b><span>0.123</span>", unmeasured_42)
+        for card in (unmeasured, unmeasured_no_note, unmeasured_42):
+            self.assertNotIn('class="big"', card)
+            self.assertIn("참고 신호 — 미측정", card)
 
 if __name__ == "__main__":
     unittest.main()

@@ -397,5 +397,89 @@ class F11FilterFocusRingIsNotClippedTest(unittest.TestCase):
         self.assertGreater(rule, css.index(":focus-visible { outline: 3px solid var(--focus); outline-offset: 2px; }"))
 
 
+def _text_compare_payload() -> dict:
+    """A real /api/compare answer for two short texts (the server's own _compare_payload)."""
+    from deepfake_lens.webapp_api import _compare_payload
+
+    texts = {"file_a": ("a.txt", "오늘 회의는 세 시에 시작합니다. 참석자는 모두 자료를 준비해 주십시오."),
+             "file_b": ("b.txt", "내일 회의는 네 시에 시작합니다. 모두 자료를 준비해 오십시오.")}
+    body = b""
+    for field, (name, text) in texts.items():
+        body += (b"--rev7\r\nContent-Disposition: form-data; name=\"" + field.encode() + b"\"; filename=\"" + name.encode()
+                 + b"\"\r\n\r\n" + text.encode("utf-8") + b"\r\n")
+    return _compare_payload("multipart/form-data; boundary=rev7", body + b"--rev7--\r\n")
+
+
+class F12UnmeasuredComparisonDoesNotLeadWithANumberTest(unittest.TestCase):
+    """F-12 (Med): the comparison card began with the raw score in large type (「99」 for two WAV files) above
+    "참고 원점수 99/100, 미측정 매핑" — read as "99% the same person" against the rule that a number is shown
+    only when calibrated — and its notice kept the CLI's Markdown ("결론은 `scan`을 사용하십시오")."""
+
+    # the fields of a real wav/wav answer (fixtures/perth/synthetic-perth.wav vs synthetic-clean.wav, this HEAD)
+    WAV = {
+        "kind": "layer_diagnostic", "title": "계층 진단(참고 신호 · 미측정)", "measured": False,
+        "notice": "이 출력은 측정되지 않은 참고 신호이며 결론이 아닙니다. 결론은 `scan`을 사용하십시오.",
+        "reference_band": "reference",
+        "reference_note": "MFCC·피치 특징 코사인 거리 0.0010 (참고 원점수 99/100, 미측정 매핑; 샘플 길이 4.0초/4.0초).",
+        "raw_score": 99,
+        "diagnostic": {"kind": "speaker", "distance": 0.0010218641095094405, "method": "mfcc", "limitations": ["MFCC 기반 거리 측정이며 포렌식 화자 인식이 아닙니다."]},
+        "coverage": {"weights_total": 0, "weights_available": 0}, "thresholds": {"source": "threshold_profile", "in_sample": True},
+    }
+
+    def test_the_server_notice_still_has_the_cli_text(self) -> None:
+        # what guiText rewrites; if the server's text changes, guiText must follow
+        from deepfake_lens.layer_diagnostic import LAYER_DIAGNOSTIC_NOTICE
+
+        self.assertIn("결론은 `scan`을 사용하십시오", LAYER_DIAGNOSTIC_NOTICE)
+        self.assertEqual(self.WAV["notice"], LAYER_DIAGNOSTIC_NOTICE)
+
+    def test_every_layer_notice_goes_through_gui_text(self) -> None:
+        source = _source()
+        for notice in ("data.notice", "a.notice", "fr.notice"):
+            with self.subTest(notice=notice):
+                self.assertIn(f"${{shown(guiText({notice}))}}", source)
+                self.assertNotIn(f"${{shown({notice})}}", source)
+        self.assertIn("parts.push(compareHeadHtml(data, body));", _function("renderCompare"))
+
+    @unittest.skipUnless(_js_engine(), "no JavaScript engine (node or osascript)")
+    def test_real_unmeasured_answers_lead_with_the_label(self) -> None:
+        text_payload = _text_compare_payload()
+        self.assertIs(text_payload.get("measured"), False, text_payload)
+        stubs = (
+            "function shown(x) { return String(x); }\nfunction escapeHtml(x) { return String(x); }\n"
+            "function provenanceNoteHtml() { return '[prov]'; }\nfunction layer(t, h) { return '[' + t + ']' + h; }\n"
+            "function listItems(t, xs) { return '[' + t + ']' + (xs || []).join('|'); }\n"
+            "function rawScoreText(v) { return v != null ? String(v) : '없음'; }\n"
+            "var box = {innerHTML: ''}; function $(id) { return box; }\n"
+        )
+        payloads = {"wav": self.WAV, "txt": text_payload}
+        body = stubs + _function("guiText") + _function("compareHeadHtml") + _function("renderCompare") + (
+            f"var payloads = {json.dumps(payloads, ensure_ascii=False)};\n"
+            "var cards = {}; Object.keys(payloads).forEach(function (k) { renderCompare(payloads[k]); cards[k] = box.innerHTML; });\n"
+            "var out = JSON.stringify(cards);"
+        )
+        cards = json.loads(_run_js(body))
+        for name, card in cards.items():
+            with self.subTest(payload=name):
+                self.assertNotIn('class="big"', card)
+                head = card.index("참고 신호 — 미측정")
+                self.assertLess(head, card.index("참고 원점수"))
+                self.assertEqual(card.count("참고 원점수"), 1)  # the number once, inside the sentence
+                self.assertNotIn("`", card)
+                self.assertIn("결론은 폴더 검사를 사용하십시오.", card)
+                self.assertIn("동일인 증명이 아닙니다", card)
+        self.assertIn("참고 원점수 99/100, 미측정 매핑", cards["wav"])
+
+    @unittest.skipUnless(_js_engine(), "no JavaScript engine (node or osascript)")
+    def test_gui_text(self) -> None:
+        body = _function("guiText") + (
+            "var out = JSON.stringify([guiText('결론은 `scan`을 사용하십시오.'), guiText('(`pip install deepfake-lens[archive]`)'),"
+            " guiText(null), guiText('a ` b')]);"
+        )
+        self.assertEqual(json.loads(_run_js(body)), [
+            "결론은 폴더 검사를 사용하십시오.", "(pip install deepfake-lens[archive])", "", "a ` b",
+        ])
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -3031,7 +3031,7 @@
                 const sig = (body.signals || []).map(s => `<li>${shown(s.title)} — ${shown(s.detail)}</li>`).join('');
                 const lim = (body.limitations || []).map(l => `<li>${shown(l)}</li>`).join('');
                 parts.push(layer(`스타일/지문 분석 · 계층 진단(참고 신호 · 미측정) — 원점수 ${rawScoreText(a.raw_score)}`,
-                    (a.notice ? `<div class="note">${shown(a.notice)}</div>` : '') +
+                    (a.notice ? `<div class="note">${shown(guiText(a.notice))}</div>` : '') +
                     (sig ? `<ul>${sig}</ul>` : '<div class="note">발동 신호 없음</div>') + (lim ? `<ul class="c-amber">${lim}</ul>` : '')));
             }
             if (data.forensic && data.mode === 'text') {
@@ -3043,7 +3043,7 @@
                 const sig = (body.signals || []).map(s => `<li>${shown(s.title)} — ${shown(s.detail)}</li>`).join('');
                 const prov = (body.provenance_records || []).map(p => `<li>${shown(p.kind || p.source || p.standard || 'record')}: ${shown(p.summary || p.detail || p.provider || '')}</li>`).join('');
                 parts.push(layer(`메타데이터 / C2PA · 계층 진단(참고 신호 · 미측정) — 원점수 ${rawScoreText(fr.raw_score)}`,
-                    (fr.notice ? `<div class="note">${shown(fr.notice)}</div>` : '') +
+                    (fr.notice ? `<div class="note">${shown(guiText(fr.notice))}</div>` : '') +
                     ((sig ? `<ul>${sig}</ul>` : '') + (prov ? `<ul>${prov}</ul>` : '') || '<div class="note">단서 없음</div>')));
             }
             if (data.watermark) {
@@ -3108,20 +3108,40 @@
             }
         });
 
+        // GUI-REV7 F-12: server notices are written for the CLI — "결론은 `scan`을 사용하십시오" names a command and
+        // keeps its Markdown backticks. In the GUI the conclusion comes from the folder scan, and backticks are dropped.
+        function guiText(text) {
+            return String(text == null ? '' : text)
+                .replace(/결론은 `scan`을 사용하십시오/g, '결론은 폴더 검사를 사용하십시오')
+                .replace(/`([^`\n]*)`/g, '$1');
+        }
+        // GUI-REV7 F-12: an unmeasured comparison does not lead with its raw score in large type (read as
+        // "99% 같은 사람"); the head says 「참고 신호 — 미측정」 and the number stays in the sentence
+        // (the server's reference_note, "참고 원점수 99/100, 미측정 매핑"). Only a comparison the server marks
+        // measured shows the large number.
+        function compareHeadHtml(data, body) {
+            const kind = body.kind === 'speaker' ? '화자 유사도 (음성)' : body.kind === 'stylometry' ? '필자 유사도 (텍스트)' : (body.kind || '비교');
+            const what = `<div class="note">${shown(kind)}${body.method ? ' · ' + shown(body.method) : ''}</div>`;
+            // R19-10: no score is "없음", never a measured-looking 0.
+            const score = data.raw_score != null ? String(Number(data.raw_score) || 0) : rawScoreText(null);
+            if (data.measured === true) {
+                return `<div class="qc-head">
+                <span class="big">${escapeHtml(score)}</span>
+                <div><span class="band-pill band-unknown">계층 진단</span>${what}</div></div>`;
+            }
+            // the server's reference_note names the raw score ("참고 원점수 99/100, 미측정 매핑") — said once
+            const named = /참고 원점수/.test(String(data.reference_note || ''));
+            const sentence = named ? '' : `<div class="note">참고 원점수 ${escapeHtml(score)}${data.raw_score != null ? '/100' : ''} — 미측정</div>`;
+            return `<div class="qc-head"><div><span class="band-pill band-unknown">참고 신호 — 미측정</span>${what}${sentence}</div></div>`;
+        }
         function renderCompare(data) {
             // D1: similarity is a layer diagnostic — raw number + notice,
             // no same/different band.
             const box = $('cmp-result');
             const body = data.diagnostic || data;
-            const kind = body.kind === 'speaker' ? '화자 유사도 (음성)' : body.kind === 'stylometry' ? '필자 유사도 (텍스트)' : (body.kind || '비교');
-            // R19-10: no score is "없음", never a measured-looking 0.
-            const score = data.raw_score != null ? String(Number(data.raw_score) || 0) : rawScoreText(null);
             const parts = [];
-            parts.push(`<div class="qc-head">
-                <span class="big">${escapeHtml(score)}</span>
-                <div><span class="band-pill band-unknown">계층 진단(참고 신호 · 미측정)</span>
-                <div class="note">${shown(kind)}${body.method ? ' · ' + shown(body.method) : ''}</div></div></div>`);
-            if (data.notice) parts.push(`<div class="note">${shown(data.notice)}</div>`);
+            parts.push(compareHeadHtml(data, body));
+            if (data.notice) parts.push(`<div class="note">${shown(guiText(data.notice))}</div>`);
             if (data.reference_note) parts.push(`<div class="verdict">${shown(data.reference_note)}</div>`);
             parts.push(provenanceNoteHtml(data));
             const kv = [];
