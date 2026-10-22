@@ -1333,6 +1333,14 @@
             }
         }
 
+        // U-8: an out-of-root folder says which folders can be scanned. GUI-REV7 F-3: and names the server's
+        // own folder (--folder), the one this page knows; --allow-root folders are not known to the page.
+        function deniedFolderHint(message, folder) {
+            if (!/허용되지 않은 경로/.test(message)) return '';
+            const own = folder ? ` 이 서버의 기본 폴더: ${folder}` : '';
+            return ' — 서버를 시작할 때 --folder 또는 --allow-root로 등록한 폴더 안만 검사할 수 있습니다.' + own;
+        }
+
         $('scan-form').addEventListener('submit', async e => {
             e.preventDefault();
             if (scanBusy) return;
@@ -1375,7 +1383,7 @@
                 await runScanJob(job.job_id, folderPath, scanOptions);
             } catch (error) {
                 // U-8: an out-of-root folder says which folders can be scanned.
-                const hint = /허용되지 않은 경로/.test(error.message) ? ' — 서버를 시작할 때 --folder 또는 --allow-root로 등록한 폴더 안만 검사할 수 있습니다.' : '';
+                const hint = deniedFolderHint(error.message, defaultFolder);
                 toast('검사를 시작하지 못했습니다: ' + error.message + hint, true, '', 'scan');
             } finally {
                 setBusyButton($('analyze-btn'), false);
@@ -3029,6 +3037,16 @@
             box.innerHTML = parts.join('');
         }
 
+        // U-8: the folder the server was started with is the scan default. GUI-REV7 F-3: the answer of
+        // /api/stats arrives after the page is shown — it fills the folder box only when the box is empty
+        // and not focused (it was written into a box the examiner had started typing in, mixing the two paths).
+        function applyDefaultFolder(folder, folderB64) {
+            defaultFolder = folder;
+            defaultFolderB64 = folderB64;
+            const field = $('folder-path');
+            if (!field.value && document.activeElement !== field) field.value = folder;
+        }
+
         /* ── initialization ───────────────────────── */
         updateCaseLine();
         showView(viewFromHash() || 'scan', null, true);
@@ -3038,9 +3056,7 @@
             if (d.version) $('ver-chip').textContent = 'v' + d.version;
             // U-8: the folder the server was started with is the scan default.
             if (typeof d.default_folder === 'string' && d.default_folder) {
-                defaultFolder = d.default_folder;
-                defaultFolderB64 = typeof d.default_folder_b64 === 'string' ? d.default_folder_b64 : '';
-                if (!$('folder-path').value) $('folder-path').value = d.default_folder;
+                applyDefaultFolder(d.default_folder, typeof d.default_folder_b64 === 'string' ? d.default_folder_b64 : '');
             }
             if (typeof d.pdf_available === 'boolean') pdfAvailable = d.pdf_available;
             if (currentView === 'report') renderReport();

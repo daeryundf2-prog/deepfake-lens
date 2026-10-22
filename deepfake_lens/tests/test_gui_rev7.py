@@ -109,5 +109,42 @@ class F2ArchiveQuickCheckAsksBeforeReplacingTest(unittest.TestCase):
         ])
 
 
+class F3DefaultFolderDoesNotOverwriteTypingTest(unittest.TestCase):
+    """F-3 (Med): the /api/stats answer wrote the server's folder into the folder box whenever it was empty —
+    also while the examiner had clicked into it and started typing; the mixed path was refused (403) with no
+    word on which folder is allowed."""
+
+    def test_the_stats_answer_goes_through_the_helper(self) -> None:
+        source = _source()
+        self.assertNotIn("if (!$('folder-path').value) $('folder-path').value = d.default_folder;", source)
+        self.assertIn("applyDefaultFolder(d.default_folder, typeof d.default_folder_b64 === 'string' ? d.default_folder_b64 : '');", source)
+        self.assertIn("const hint = deniedFolderHint(error.message, defaultFolder);", source)
+
+    @unittest.skipUnless(_js_engine(), "no JavaScript engine (node or osascript)")
+    def test_a_focused_or_filled_box_is_left_alone(self) -> None:
+        body = (
+            "var defaultFolder = '', defaultFolderB64 = '';\n"
+            "var field = {value: ''};\nvar document = {activeElement: null};\n"
+            "function $(id) { return field; }\n" + _function("applyDefaultFolder")
+            + "var got = [];\n"
+            "field.value = ''; document.activeElement = field; applyDefaultFolder('/srv/case', 'L3Nydi9jYXNl'); got.push(field.value);\n"
+            "document.activeElement = null; field.value = '/mine'; applyDefaultFolder('/srv/case', 'x'); got.push(field.value);\n"
+            "field.value = ''; applyDefaultFolder('/srv/case', 'x'); got.push(field.value);\n"
+            "got.push(defaultFolder + '|' + defaultFolderB64);\n"
+            "var out = JSON.stringify(got);"
+        )
+        # the remembered default is set in every case (the submit handler sends its bytes when the box holds it)
+        self.assertEqual(json.loads(_run_js(body)), ["", "/mine", "/srv/case", "/srv/case|x"])
+
+    @unittest.skipUnless(_js_engine(), "no JavaScript engine (node or osascript)")
+    def test_the_refusal_names_the_servers_folder(self) -> None:
+        body = _function("deniedFolderHint") + (
+            "var out = JSON.stringify([deniedFolderHint('허용되지 않은 경로', '/srv/case'), deniedFolderHint('허용되지 않은 경로', ''),"
+            " deniedFolderHint('폴더를 찾을 수 없습니다', '/srv/case')]);"
+        )
+        base = " — 서버를 시작할 때 --folder 또는 --allow-root로 등록한 폴더 안만 검사할 수 있습니다."
+        self.assertEqual(json.loads(_run_js(body)), [base + " 이 서버의 기본 폴더: /srv/case", base, ""])
+
+
 if __name__ == "__main__":
     unittest.main()
