@@ -21,8 +21,11 @@ class GateScopeHelpTest(unittest.TestCase):
         self.helps = {action.dest: action.help or "" for action in self.sub._choices_actions}
 
     def test_the_gate_commands_are_the_decided_ones(self) -> None:
+        # DESK (2026-10-23): `desktop` joined the set — it is the double-click entry of the same local web app (web plus
+        # the key file, port choice, browser, folder dialog and shutdown), so it is verified like `web`.
         self.assertEqual(GATE_COMMANDS, {
             "scan", "classify", "verify-report", "evidence-statement", "doctor", "web", "api-serve", "corpus", "vendor-weights",
+            "desktop",
         })
         self.assertTrue(GATE_COMMANDS <= set(self.sub.choices))
 

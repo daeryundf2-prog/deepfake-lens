@@ -40,9 +40,13 @@ from .webapp_api import (
     _scan_status_payload,
     _stats_payload,
     api_status,
+    register_user_folder,
+    roots_payload,
 )
+from . import desktop as _desktop
 from .checks import failure_reason
 from .json_text import json_dumps
+from .result_text import display_name as displayable
 
 logger = logging.getLogger(__name__)
 
@@ -127,6 +131,7 @@ def run_server(
     token: str | None = None,
     models_dir: Path | None = None,
     allow_roots: list[Path] | None = None,
+    desktop: "_desktop.DesktopState | None" = None,
 ) -> None:
     """Run the web server with GUI.
 
@@ -142,7 +147,7 @@ def run_server(
     """
     server = build_server(
         host, port, default_folder=default_folder, allow_lan=allow_lan,
-        token=token, models_dir=models_dir, allow_roots=allow_roots,
+        token=token, models_dir=models_dir, allow_roots=allow_roots, desktop=desktop,
     )
     print(f"Deepfake Lens GUI: http://{host}:{server.server_address[1]}", flush=True)
     print(f"Windows에서 접속: http://localhost:{server.server_address[1]}", flush=True)
@@ -158,11 +163,19 @@ def build_server(
     token: str | None = None,
     models_dir: Path | None = None,
     allow_roots: list[Path] | None = None,
+    desktop: "_desktop.DesktopState | None" = None,
 ) -> ThreadingHTTPServer:
     """Configure and bind the server without serving (``run_server`` serves it).
 
     Tests drive the returned server with ``serve_forever``/``shutdown``.
+
+    DESK: ``desktop`` (a :class:`desktop.DesktopState`) turns on the desktop-only routes — ``/api/roots``,
+    ``/api/pick-folder``, ``/api/shutdown``, ``/api/heartbeat`` — on a loopback bind without a token; with
+    ``allow_lan`` it is refused (a folder dialog and a shutdown belong to the person at this machine).
     """
+    if desktop is not None and (allow_lan or token):
+        raise ValueError("데스크톱 모드는 --allow-lan·--token과 함께 쓸 수 없습니다 — 이 PC의 사용자만 쓰는 모드입니다")
+    _desktop.STATE = desktop
     if models_dir is not None:
         from .webapp_api import set_models_dir
         set_models_dir(models_dir)
@@ -250,7 +263,18 @@ def build_server(
                 logger.exception("GET %s failed", parsed.path)
                 self.send_error(500)
 
+        def _desktop_state(self) -> "_desktop.DesktopState | None":
+            """The desktop state, or None (then the desktop routes are 404 like any unknown path)."""
+            state = _desktop.STATE
+            if state is not None:
+                state.touch()  # any API call is activity for the idle exit
+            return state
+
         def _route_get(self, parsed: Any) -> None:
+            state = self._desktop_state()
+            if parsed.path == "/api/roots" and state is not None:
+                self._send_json(roots_payload())
+                return
             # API endpoints
             if parsed.path == "/api/scan":
                 # Invalid options (analysis_api.InvalidOption) and a full job
@@ -329,6 +353,10 @@ def build_server(
                 self.send_error(500)
 
         def _route_post(self, parsed: Any) -> None:
+            state = self._desktop_state()
+            if state is not None and parsed.path in ("/api/pick-folder", "/api/shutdown", "/api/heartbeat"):
+                self._route_desktop(parsed.path, state)
+                return
             if parsed.path == "/api/analyze-upload":
                 self._handle_analyze_upload()
                 return
@@ -406,6 +434,54 @@ def build_server(
                     self._send_json({"error": str(exc)}, status=getattr(exc, "status", USER_DATA_REFUSED_STATUS))  # R23-7: 409/507
                     return
                 self._send_json({"status": "success", "artifact_id": art_id, "review": saved})
+                return
+            self.send_error(404, "찾을 수 없는 경로입니다")
+
+        def _route_desktop(self, path: str, state: "_desktop.DesktopState") -> None:
+            """DESK routes (desktop mode only; the client header and Host guard already passed)."""
+            from .scan_jobs import STORE
+
+            if path == "/api/heartbeat":
+                self._send_json({"status": "ok"})
+                return
+            if path == "/api/pick-folder":
+                try:
+                    chosen = state.pick_folder_once()
+                except _desktop.DialogBusy as exc:
+                    self._send_json({"error": str(exc)}, status=409)
+                    return
+                except _desktop.DialogUnavailable as exc:
+                    self._send_json({"error": str(exc)}, status=501)
+                    return
+                if chosen is None:
+                    self._send_json({"folder": None, "folder_b64": None})
+                    return
+                if not chosen.is_dir():
+                    self._send_json({"error": f"고른 경로가 폴더가 아닙니다: {displayable(chosen)}"}, status=400)
+                    return
+                try:
+                    resolved = register_user_folder(chosen)
+                except ValueError as exc:
+                    self._send_json({"error": str(exc)}, status=409)
+                    return
+                from .json_text import fs_b64encode
+                from .webapp_api import scan_root_text
+
+                text = scan_root_text(resolved)
+                self._send_json({"folder": text, "folder_b64": fs_b64encode(text)})
+                return
+            if path == "/api/shutdown":
+                running = STORE.running_async_jobs()
+                if running:
+                    self._send_json({"error": _desktop.SHUTDOWN_WHILE_SCANNING, "job_id": running[0]}, status=409)
+                    return
+                state.shutting_down = True
+                self._send_json({"status": "shutting_down"})
+                if state.shutdown is not None:
+                    # shutdown() blocks until serve_forever returns — never from a handler thread.
+                    import threading
+
+                    threading.Thread(target=state.shutdown, name="deepfake-lens-shutdown", daemon=True).start()
                 return
             self.send_error(404, "찾을 수 없는 경로입니다")
 

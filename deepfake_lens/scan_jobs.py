@@ -339,6 +339,11 @@ class JobStore:
                 raise JobIntegrityError(JOB_INTEGRITY_FAILED)
         return record
 
+    def running_async_jobs(self) -> list[str]:
+        """Ids of the async jobs still running (desktop mode: no idle exit and no shutdown while one runs)."""
+        with self._lock:
+            return [key for key, entry in self._jobs.items() if entry.get("status") == "running" and entry.get("source") == SOURCE_ASYNC]
+
     def forget(self) -> None:
         """Drop every in-memory job (tests: a server restart)."""
         with self._lock:

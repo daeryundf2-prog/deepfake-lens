@@ -103,7 +103,7 @@ from .vendor_weights import (
 from .json_text import json_dumps
 
 
-COMMANDS = {"doctor", "scan", "verify-report", "corpus", "collect", "dataset", "eval", "benchmark", "fusion", "calibrate", "feedback", "train", "train-neural-plan", "models", "video", "video-analysis", "audio", "face", "faceswap-seam", "evidence-statement", "vendor-weights", "inpaint", "text-advanced", "compare", "watermark", "forensic", "classify", "multimodal", "realtime", "rppg", "prnu", "evidence", "api-serve", "batch", "explain", "agent", "3d", "avatar", "pixel-analysis", "ml-classify", "legal-report", "perf", "security", "release", "web", "-h", "--help"}
+COMMANDS = {"doctor", "scan", "verify-report", "corpus", "collect", "dataset", "eval", "benchmark", "fusion", "calibrate", "feedback", "train", "train-neural-plan", "models", "video", "video-analysis", "audio", "face", "faceswap-seam", "evidence-statement", "vendor-weights", "inpaint", "text-advanced", "compare", "watermark", "forensic", "classify", "multimodal", "realtime", "rppg", "prnu", "evidence", "api-serve", "batch", "explain", "agent", "3d", "avatar", "pixel-analysis", "ml-classify", "legal-report", "perf", "security", "release", "web", "desktop", "-h", "--help"}
 
 def _pkg_profile(name: str) -> str:
     # Absolute path into the resolved models dir — works from the source
@@ -656,7 +656,16 @@ def _main(argv: list[str] | None = None) -> int:
         except ReportKeyError as exc:
             print(f"오류: {escape_echo(exc)}", file=sys.stderr)
             return 4 if args.command == "verify-report" else 2
-    if args.command in ("web", "api-serve"):
+    if args.command == "desktop":
+        from .desktop import prepare_signing_key
+
+        try:
+            desktop_key = prepare_signing_key()  # DESK: the key file of the user data folder, made once
+        except ReportKeyError as exc:
+            print(f"오류: {escape_echo(exc)}", file=sys.stderr)
+            return 2
+        args.desktop_key = desktop_key  # read back in _run_command
+    if args.command in ("web", "api-serve", "desktop"):
         try:
             check_signing_key(resolve_report_key())  # P0R-15: a server that signs reports starts only with a usable key
         except ReportKeyError as exc:
@@ -675,6 +684,7 @@ def _main(argv: list[str] | None = None) -> int:
     # N8: tracebacks of routine per-file failures go to the log file; stderr
     # gets one Korean summary line (--verbose shows them).
     logs = configure_cli_logging(bool(getattr(args, "verbose", False)))
+    args.log_path = logs.log_path  # DESK: the desktop console names the log file
     interrupted = False
     console = sys.stdout
     sys.stdout = StdoutGuard(console)  # R18-15: a failed write of the result is reported, not "예기치 않은 오류"
@@ -1262,6 +1272,16 @@ def _run_command(args: argparse.Namespace, parser: argparse.ArgumentParser, cmd_
             cmd_parsers["web"].error("--allow-lan에는 --token이 필요합니다 — API는 요청에 따라 로컬 파일을 읽고 분석합니다")
         run_server(args.host, args.port, default_folder=args.folder, allow_lan=args.allow_lan, token=args.token, models_dir=getattr(args, "models_dir", None), allow_roots=args.allow_root)
         return 0
+    if args.command == "desktop":
+        from .desktop import run_desktop
+
+        if args.idle_exit_minutes < 0:
+            cmd_parsers["desktop"].error("--idle-exit-minutes는 0 이상이어야 합니다")
+        return run_desktop(
+            folder=args.folder, port=args.port, no_browser=args.no_browser, idle_exit_minutes=args.idle_exit_minutes,
+            models_dir=getattr(args, "models_dir", None), key_source=args.desktop_key[0], key_file=args.desktop_key[1],
+            log_path=getattr(args, "log_path", None),
+        )
     if args.command == "doctor":
         from .doctor import format_report, run_diagnostics
 

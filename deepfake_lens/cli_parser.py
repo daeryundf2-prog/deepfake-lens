@@ -29,10 +29,11 @@ LAYER_DIAGNOSTIC = "계층 진단 — 측정되지 않은 참고 수치이며 �
 OUTPUT_FORMAT_HELP = "출력 형식"
 
 # P0R-4 (user decision 2026-10-17, scope freeze): the commands gate 0 verifies (HANDOFF.md §6). Every other command
-# is marked 「실험·비게이트」 in its help line and its --help description; its tests stay, but it is outside the
+# is marked '실험·비게이트' in its help line and its --help description; its tests stay, but it is outside the
 # gate-0 verification scope. vendor-weights is a gate command for its `pin` / `pin-asset` actions only.
 GATE_COMMANDS = frozenset({
     "scan", "classify", "verify-report", "evidence-statement", "doctor", "web", "api-serve", "corpus", "vendor-weights",
+    "desktop",  # DESK (2026-10-23): the double-click entry of the GUI — `web` plus key file, port, browser, dialog, shutdown
 })
 NON_GATE_MARK = "[실험·비게이트]"
 NON_GATE_NOTE = (
@@ -608,6 +609,21 @@ def build_parser() -> tuple[argparse.ArgumentParser, dict[str, argparse.Argument
     web_parser.add_argument("--models-dir", type=Path, help="vendor-weights --install로 준비한 모델 폴더")
     web_parser.add_argument("--allow-root", type=Path, action="append", default=[], help="추가로 읽기를 허용할 폴더(반복 지정 가능); --folder/--allow-root 밖의 경로 요청은 403")
 
+    desktop_parser = subparsers.add_parser(
+        "desktop",
+        help="데스크톱 모드 — 로컬 웹 앱을 시작하고 브라우저를 엽니다(서명 키 자동, 폴더 선택 창, 화면에서 종료)",
+        description=(
+            "데스크톱 모드: web과 같은 로컬 서버를 이 PC에서만 접속되게 시작하고 브라우저를 엽니다. 보고서 서명 키는 "
+            "DEEPFAKE_LENS_REPORT_KEY가 없으면 사용자 데이터 폴더의 report-key 파일을 쓰고(없으면 새로 만듦), 검사할 폴더는 "
+            "화면의 '검사할 폴더 고르기'(OS 폴더 선택 창)로 고릅니다. 화면의 '종료'나 Ctrl-C로 끝냅니다."
+        ),
+    )
+    desktop_parser.add_argument("--folder", type=Path, help="처음 열 증거 폴더(읽기 허용 폴더로 등록됨; 생략 가능)")
+    desktop_parser.add_argument("--port", type=port_number, default=None, metavar="<포트>", help=f"수신 포트({PORT_MIN}–{PORT_MAX}; 기본은 8765부터 빈 포트)")
+    desktop_parser.add_argument("--no-browser", action="store_true", help="브라우저를 자동으로 열지 않음")
+    desktop_parser.add_argument("--idle-exit-minutes", type=int, default=20, metavar="<분>", help="화면 신호와 검사가 모두 없을 때 스스로 꺼지기까지의 시간(기본 20; 0이면 끄지 않음)")
+    desktop_parser.add_argument("--models-dir", type=Path, help="vendor-weights --install로 준비한 모델 폴더")
+
     doctor_parser = subparsers.add_parser("doctor", help="모델 가중치·가속기·의존성 진단")
     doctor_parser.add_argument("--format", choices=["table", "json"], default="table", help="표준 출력 형식")
     doctor_parser.add_argument("--json-out", type=Path, help="진단 결과를 JSON으로 저장")
@@ -686,7 +702,7 @@ def build_parser() -> tuple[argparse.ArgumentParser, dict[str, argparse.Argument
         "batch": batch_parser, "explain": explain_parser, "agent": agent_parser,
         "3d": threed_parser, "avatar": avatar_parser, "pixel-analysis": pixel_parser,
         "ml-classify": ml_parser, "legal-report": legal_parser, "verify-report": verify_parser, "perf": perf_parser,
-        "release": release_parser, "security": security_parser, "web": web_parser,
+        "release": release_parser, "security": security_parser, "web": web_parser, "desktop": desktop_parser,
         "doctor": doctor_parser, "faceswap-seam": faceswap_parser,
         "evidence-statement": evidence_stmt_parser, "vendor-weights": vendor_parser,
     }

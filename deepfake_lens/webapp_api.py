@@ -542,7 +542,53 @@ def _stats_payload(default_folder: Path | None = None) -> dict[str, object]:
         "default_folder": folder,
         "default_folder_b64": fs_b64encode(folder) if folder is not None else None,
         "pdf_available": bool(pymupdf_available()),
+        **desktop_stats_fields(),
     }
+
+
+def desktop_stats_fields() -> dict[str, object]:
+    """DESK: ``desktop``, ``roots``, ``signing`` and ``idle_exit_minutes`` of /api/stats (the plain server says desktop false)."""
+    from . import desktop as _desktop
+    from .signing import key_id_for, resolve_report_key
+
+    key = resolve_report_key()
+    state = _desktop.STATE
+    signing: dict[str, object] = {
+        "available": key is not None,
+        "source": (state.key_source if state is not None and key is not None else ("env" if key is not None else None)),
+        "key_id": key_id_for(key) if key is not None else None,
+    }
+    return {
+        "desktop": state is not None,
+        "roots": [scan_root_text(root) for root in _effective_roots(None)] if _READ_ROOTS else [],
+        "signing": signing,
+        "idle_exit_minutes": state.idle_exit_minutes if state is not None else None,
+    }
+
+
+def roots_payload() -> dict[str, object]:
+    """DESK ``GET /api/roots``: the registered read roots in registration order."""
+    with _READ_ROOTS_LOCK:
+        roots = list(_READ_ROOTS)
+    return {"roots": [{"path": scan_root_text(root), "path_b64": fs_b64encode(scan_root_text(root))} for root in roots]}
+
+
+def register_user_folder(folder: Path) -> Path:
+    """DESK: register a folder the person chose in the OS dialog as a read root (desktop mode only — the caller checks).
+
+    Unlike the start-up registration this never evicts an earlier root (a running scan's previews would 403);
+    past :data:`_READ_ROOTS_MAX` it raises ValueError(:data:`desktop.ROOTS_FULL`).
+    """
+    from .desktop import ROOTS_FULL
+
+    resolved = expand_user(folder).resolve()
+    with _READ_ROOTS_LOCK:
+        if resolved in _READ_ROOTS:
+            return resolved
+        if len(_READ_ROOTS) >= _READ_ROOTS_MAX:
+            raise ValueError(ROOTS_FULL)
+        _READ_ROOTS[resolved] = None
+    return resolved
 
 
 def _extract_metadata(path: Path) -> dict[str, str]:
