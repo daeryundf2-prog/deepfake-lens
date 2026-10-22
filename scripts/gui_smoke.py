@@ -255,6 +255,18 @@ def main() -> int:
             # 5. Report screen: case fields have no defaults and block the evidence statement.
             page.click("a[data-view-link='report']")
             page.wait_for_function("() => document.activeElement && document.activeElement.id === 'rep-h'")
+            # GUI-REV7 F-1: the skip link moves the focus to <main> and keeps the screen and the hash; a hash
+            #     that names no screen (#main from an old link, an empty hash) does not change the screen.
+            page.focus("a.skip-link")
+            page.keyboard.press("Enter")
+            page.wait_for_function("() => document.activeElement && document.activeElement.id === 'main'", timeout=5_000)
+            assert page.evaluate("location.hash") == "#/report", page.evaluate("location.hash")
+            for stray in ("#main", ""):
+                page.evaluate(f"location.hash = {stray!r}")
+                page.wait_for_timeout(200)
+                assert page.locator("#view-report").is_visible() and page.evaluate("currentView") == "report", f"hash {stray!r} changed the screen"
+            page.evaluate("location.hash = '#/report'")
+            page.wait_for_function("() => document.activeElement && document.activeElement.id === 'rep-h'")
             assert page.input_value("#case-no") == "" and page.input_value("#case-name") == "", "case fields must start empty"
             assert "필수" in page.locator("#report-checks").inner_text()
             assert page.get_attribute("#exp-evidence", "aria-disabled") == "true", "evidence statement must wait for 사건번호·사건명"

@@ -894,9 +894,21 @@
                 if (target) target.focus();
             }
         }
+        // GUI-REV7 F-1: a hash that names no screen (the skip link's #main, an empty hash after
+        // 뒤로) leaves the screen as it is — it showed the ledger (or 검사) and hid the screen the
+        // examiner was on, e.g. 감정서 만들기.
         window.addEventListener('hashchange', () => {
-            showView(viewFromHash() || (results.length ? 'ledger' : 'scan'), pendingFocus);
+            const view = viewFromHash();
+            const focusTarget = pendingFocus;
             pendingFocus = null;
+            if (!view) return;
+            showView(view, focusTarget);
+        });
+        // GUI-REV7 F-1: 「본문으로 건너뛰기」 moves the focus to <main> without changing the hash
+        // (href="#main" stays for a page without scripts).
+        document.querySelector('.skip-link').addEventListener('click', event => {
+            event.preventDefault();
+            $('main').focus();
         });
 
         /* ── case information (one set of fields; kept for this tab) ── */
