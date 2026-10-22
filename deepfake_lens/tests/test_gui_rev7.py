@@ -474,10 +474,11 @@ class F12UnmeasuredComparisonDoesNotLeadWithANumberTest(unittest.TestCase):
     def test_gui_text(self) -> None:
         body = _function("guiText") + (
             "var out = JSON.stringify([guiText('결론은 `scan`을 사용하십시오.'), guiText('(`pip install deepfake-lens[archive]`)'),"
-            " guiText(null), guiText('a ` b')]);"
+            " guiText(null), guiText('a ` b'), guiText('구성 파일 거부: `a`.png — 사유')]);"
         )
+        # F-15 narrowed guiText to the install commands: other backticks (e.g. in a file name) are shown as they are
         self.assertEqual(json.loads(_run_js(body)), [
-            "결론은 폴더 검사를 사용하십시오.", "(pip install deepfake-lens[archive])", "", "a ` b",
+            "결론은 폴더 검사를 사용하십시오.", "(pip install deepfake-lens[archive])", "", "a ` b", "구성 파일 거부: `a`.png — 사유",
         ])
 
 
@@ -499,6 +500,63 @@ class F13ExhibitOrderTextMatchesTheSortTest(unittest.TestCase):
         self.assertIn("const UNDET_SPLIT = ['cue', 'c2pa', 'failed', 'none', 'reference'];", source)
         self.assertIn("const byVerdict = (a, b) => (rank(a) - rank(b)) || byName(a, b);", source)
         self.assertIn("extra.exhibit_paths = selectedEntries().map(e => e.item.path);", source)
+
+
+class F14F15RowReasonAndDetailPanelTextTest(unittest.TestCase):
+    """F-14 (Low, display): a row's reason said one thing three times ("결정 검사 미실행 — C2PA 출처 검증: C2PA SDK가
+    지원하지 않는 형식: C2PA SDK 오류(NotSupported): 지원하지 않는 형식" on bmp, webm, hwp … rows) — the server's text
+    is phase-0 material and unchanged; the GUI folds the repeat on the row only. F-15 (Low, false/duplicate text):
+    the detail panel showed "(`pip install deepfake-lens[archive]`)" with its backticks, and a 7z the tool could not
+    open said "컨테이너 행은 구성 파일 결과의 요약입니다 …" although it has no member rows."""
+
+    # recorded from `scan` of scripts/make_qa_manual_fixtures.py's formats folder at this HEAD (no py7zr installed)
+    C2PA_UNSUPPORTED = "C2PA SDK가 지원하지 않는 형식: C2PA SDK 오류(NotSupported): 지원하지 않는 형식"
+    SEVEN_Z = {
+        "path": "sample.7z", "kind": "archive", "status": "unknown",
+        "result": {"coverage": [{"check": "archive", "status": "skipped", "reason": "의존성 부재: py7zr"}],
+                   "limitations": ["7z 해제에는 py7zr이 필요합니다 (`pip install deepfake-lens[archive]`)",
+                                   "컨테이너 행은 구성 파일 결과의 요약입니다. '아카이브::경로' 형태의 개별 결과를 확인하세요."]},
+    }
+
+    def test_the_server_texts_are_still_the_recorded_ones(self) -> None:
+        source = (GUI_DIR / "core.py").read_text(encoding="utf-8")
+        self.assertIn('raise CheckSkipped(f"C2PA SDK가 지원하지 않는 형식: {validation.get(\'error\', \'\')}")', source)
+        self.assertIn("limitations.append(\"컨테이너 행은 구성 파일 결과의 요약입니다. '아카이브::경로' 형태의 개별 결과를 확인하세요.\")", source)
+        self.assertIn("7z 해제에는 py7zr이 필요합니다 (`pip install deepfake-lens[archive]`)", (GUI_DIR / "archives.py").read_text(encoding="utf-8"))
+
+    def test_only_the_row_folds_and_the_detail_panel_goes_through_gui_text(self) -> None:
+        source = _source()
+        self.assertIn("(c.reason ? foldReason(c.reason) : '사유 기록 없음')", _function("rowReasonOf"))
+        self.assertNotIn("foldReason", _function("skippedHtml"))
+        detail = _function("renderDetail")
+        self.assertIn("const lims = detailLimitations(item).filter(l => !failedTexts.has(l));", detail)
+        self.assertIn("${shown(guiText(l))}", detail)
+        self.assertIn("${shown(guiText(coverageText(c)))}", detail)
+        self.assertIn("분석 실패: ${shown(guiText(item.error))}", detail)
+        self.assertIn("function guiText(text)", source)
+
+    @unittest.skipUnless(_js_engine(), "no JavaScript engine (node or osascript)")
+    def test_fold_reason(self) -> None:
+        cases = [self.C2PA_UNSUPPORTED, "C2PA SDK 오류(Other): 서명 없음", "의존성 부재: c2pa", "같은 말: 같은 말", "한 겹", "a: b: a: c"]
+        body = _function("foldReason") + f"var out = JSON.stringify({json.dumps(cases, ensure_ascii=False)}.map(foldReason));"
+        self.assertEqual(json.loads(_run_js(body)), [
+            "C2PA SDK가 지원하지 않는 형식", "C2PA SDK 오류(Other): 서명 없음", "의존성 부재: c2pa", "같은 말", "한 겹", "a: b: c",
+        ])
+
+    @unittest.skipUnless(_js_engine(), "no JavaScript engine (node or osascript)")
+    def test_an_unopened_archive_has_no_container_summary_note(self) -> None:
+        opened = {"path": "sample.zip", "kind": "archive", "status": "expanded",
+                  "result": {"coverage": [{"check": "archive", "status": "ran"}], "limitations": self.SEVEN_Z["result"]["limitations"][1:]}}
+        body = _function("guiText") + "var CONTAINER_SUMMARY_NOTE = '컨테이너 행은 구성 파일 결과의 요약입니다.';\n" + _function("detailLimitations") + (
+            f"var rows = {json.dumps([self.SEVEN_Z, opened], ensure_ascii=False)};\n"
+            "var out = JSON.stringify(rows.map(function (r) { return detailLimitations(r).map(guiText); }));"
+        )
+        self.assertEqual(json.loads(_run_js(body)), [
+            ["7z 해제에는 py7zr이 필요합니다 (pip install deepfake-lens[archive])"],
+            ["컨테이너 행은 구성 파일 결과의 요약입니다. '아카이브::경로' 형태의 개별 결과를 확인하세요."],
+        ])
+        self.assertIn("const CONTAINER_SUMMARY_NOTE = '컨테이너 행은 구성 파일 결과의 요약입니다.';", _source())
+
 
 
 if __name__ == "__main__":

@@ -688,6 +688,24 @@
         }
         // A decisive check (metadata, C2PA, image type) that did not run for a
         // reason other than the file's scope — e.g. a missing dependency.
+        // GUI-REV7 F-14 (display only): a check's reason can say one thing three times — "C2PA SDK가 지원하지 않는
+        // 형식: C2PA SDK 오류(NotSupported): 지원하지 않는 형식" (core's text, the SDK error class, the SDK's message). On
+        // the ledger row a ": " part already contained in an earlier part is left out, and so is an error-class
+        // part ("… 오류(Kind)") whose message was left out; the full reason stays in the detail panel.
+        function foldReason(text) {
+            const parts = String(text).split(': ');
+            if (parts.length < 2) return String(text);
+            const drop = parts.map(() => false);
+            parts.forEach((part, i) => {
+                const said = part.trim();
+                drop[i] = Boolean(said) && parts.slice(0, i).some((earlier, j) => !drop[j] && earlier.includes(said));
+            });
+            // an error class whose message (every part after it) was left out says nothing of its own
+            parts.forEach((part, i) => {
+                if (/오류\([A-Za-z_]+\)$/.test(part.trim()) && i + 1 < parts.length && drop.slice(i + 1).every(Boolean)) drop[i] = true;
+            });
+            return parts.filter((part, i) => !drop[i]).join(': ');
+        }
         function decisiveNotRun(r) {
             return ((r && r.coverage) || []).filter(c => c.status === 'skipped' && DECISIVE_CHECKS.includes(c.check) && !SCOPE_REASON.test(String(c.reason || '')));
         }
@@ -768,7 +786,8 @@
             if (failed.length) parts.push('검사 실패 — ' + failed.map(c => checkLabel(c.check)).join(', '));
             // G-3: a decisive check that did not run leads, ahead of the file's scope.
             const notRun = decisiveNotRun(r);
-            if (notRun.length) parts.push('결정 검사 미실행 — ' + notRun.map(c => checkLabel(c.check) + ': ' + (c.reason || '사유 기록 없음')).join('; '));
+            // GUI-REV7 F-14: the row folds a reason's repeated phrases (foldReason); the detail panel keeps it whole.
+            if (notRun.length) parts.push('결정 검사 미실행 — ' + notRun.map(c => checkLabel(c.check) + ': ' + (c.reason ? foldReason(c.reason) : '사유 기록 없음')).join('; '));
             const cues = cueEvidence(r);
             if (cues.length) parts.push(`결론에 못 미친 근거 ${cues.length}건 — ` + cues[0].title);
             const unverified = unverifiedRecords(r);
@@ -1930,6 +1949,16 @@
             return lines.join('\n');
         }
 
+        // GUI-REV7 F-15: an archive that was not opened (its archive check did not run, status not 'expanded') has
+        // no member rows — the server's "컨테이너 행은 구성 파일 결과의 요약입니다 …" is left out of its limitations.
+        const CONTAINER_SUMMARY_NOTE = '컨테이너 행은 구성 파일 결과의 요약입니다.';
+        function detailLimitations(item) {
+            const r = (item && item.result) || {};
+            const lims = [...new Set(r.limitations || [])];
+            const archiveCheck = (r.coverage || []).find(c => c && c.check === 'archive');
+            const unopened = item && item.kind === 'archive' && item.status !== 'expanded' && (!archiveCheck || archiveCheck.status !== 'ran');
+            return unopened ? lims.filter(l => !String(l).startsWith(CONTAINER_SUMMARY_NOTE)) : lims;
+        }
         function renderDetail(entry) {
             const box = $('detail');
             if (!entry) { box.innerHTML = ''; return; }
@@ -1952,18 +1981,18 @@
             const neutral = ((r && r.evidence) || []).filter(e => e.kind === 'deterministic' && e.direction === 'neutral');
             let ev = decisive.length ? `<ol class="ev-list">${decisive.map(evItemHtml).join('')}</ol>` : `<p>${shown(noEvidenceText(item))}</p>`;
             if (neutral.length) ev += `<p class="hint">확인한 기록 (결론과 무관한 중립 기록)</p><ol class="ev-list">${neutral.map(evItemHtml).join('')}</ol>`;
-            if (item.error && v !== 'other') ev += `<p class="c-red">분석 실패: ${shown(item.error)}</p>`;
+            if (item.error && v !== 'other') ev += `<p class="c-red">분석 실패: ${shown(guiText(item.error))}</p>`;
             body.push(`<section class="d-sec"><h3>근거</h3>${ev}</section>`);
             // Merge of phase0 P0R-12: why this conclusion could be wrong — never behind a disclosure.
             const caveats = (r && r.conclusion_caveats) || [];
             if (caveats.length) body.push(`<section class="d-sec d-caveat"><h3>이 결론이 틀릴 수 있는 이유</h3><ul>${caveats.map(c => `<li>${shown(c)}</li>`).join('')}</ul></section>`);
             // A failed check is never behind a disclosure.
             const failed = failedChecks(item);
-            if (failed.length) body.push(`<section class="d-sec d-fail"><h3>실패한 검사 ${failed.length}</h3><ul>${failed.map(c => `<li>${shown(coverageText(c))}</li>`).join('')}</ul></section>`);
+            if (failed.length) body.push(`<section class="d-sec d-fail"><h3>실패한 검사 ${failed.length}</h3><ul>${failed.map(c => `<li>${shown(guiText(coverageText(c)))}</li>`).join('')}</ul></section>`);
             // Limitations that repeat a failed check word for word are shown once, in 실패한 검사.
             const failedTexts = new Set(failed.map(c => '검사 실패 — ' + coverageText(c)));
-            const lims = [...new Set((r && r.limitations) || [])].filter(l => !failedTexts.has(l));
-            body.push(`<section class="d-sec d-limit"><h3>이 결론의 한계</h3><p>${escapeHtml(limitAdvice(item))}</p>${lims.length ? `<ul>${lims.map(l => `<li>${shown(l)}</li>`).join('')}</ul>` : ''}</section>`);
+            const lims = detailLimitations(item).filter(l => !failedTexts.has(l));
+            body.push(`<section class="d-sec d-limit"><h3>이 결론의 한계</h3><p>${escapeHtml(limitAdvice(item))}</p>${lims.length ? `<ul>${lims.map(l => `<li>${shown(guiText(l))}</li>`).join('')}</ul>` : ''}</section>`);
             const discs = [];
             if (r) {
                 const skipped = (r.coverage || []).filter(c => c.status === 'skipped').length;
@@ -3113,9 +3142,11 @@
         // GUI-REV7 F-12: server notices are written for the CLI — "결론은 `scan`을 사용하십시오" names a command and
         // keeps its Markdown backticks. In the GUI the conclusion comes from the folder scan, and backticks are dropped.
         function guiText(text) {
+            // GUI-REV7 F-15: only the install commands lose their backticks — the detail panel's texts also carry
+            // file names, which are shown as they are.
             return String(text == null ? '' : text)
                 .replace(/결론은 `scan`을 사용하십시오/g, '결론은 폴더 검사를 사용하십시오')
-                .replace(/`([^`\n]*)`/g, '$1');
+                .replace(/`(pip install [^`\n]*)`/g, '$1');
         }
         // GUI-REV7 F-12: an unmeasured comparison does not lead with its raw score in large type (read as
         // "99% 같은 사람"); the head says 「참고 신호 — 미측정」 and the number stays in the sentence
