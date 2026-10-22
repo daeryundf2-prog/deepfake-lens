@@ -426,5 +426,45 @@ class BuiltBundleTest(unittest.TestCase):
         self.assertEqual(bundle.verify_windows_bundle(HANDOVER), [])
 
 
+class BundleInfoTest(unittest.TestCase):
+    """RISK B10: the bundle has no pip — pip advice there pointed at a command the user cannot run."""
+
+    def test_running_from_bundle_looks_for_a_pth_file(self) -> None:
+        from deepfake_lens.bundle_info import running_from_bundle
+
+        with tempfile.TemporaryDirectory() as tmp:
+            self.assertFalse(running_from_bundle(tmp))
+            (Path(tmp) / "python312._pth").write_text("python312.zip\r\n.\r\n", encoding="utf-8")
+            self.assertTrue(running_from_bundle(tmp))
+        self.assertFalse(running_from_bundle())  # the test interpreter is not the embeddable one
+
+    def test_install_hint(self) -> None:
+        from deepfake_lens.bundle_info import install_hint
+
+        self.assertEqual(install_hint("pymupdf", bundle=False), "`pip install pymupdf`")
+        self.assertEqual(install_hint("pymupdf", bundle=True), "이 기능은 꾸러미에 포함되어 있지 않습니다 — 담당자에게 요청하십시오(pymupdf)")
+
+    def test_bundle_advice_rewrites_only_in_the_bundle(self) -> None:
+        from deepfake_lens.bundle_info import bundle_advice
+        from deepfake_lens.evidence_statement import PDF_DEPENDENCY_MESSAGE, PDF_REPORT_DEPENDENCY_MESSAGE
+
+        for text in (PDF_DEPENDENCY_MESSAGE, PDF_REPORT_DEPENDENCY_MESSAGE):
+            self.assertIn("(설치: `pip install pymupdf`)", text)  # this interpreter is not the bundle
+            self.assertEqual(bundle_advice(text, bundle=False), text)
+            inside = bundle_advice(text, bundle=True)
+            self.assertNotIn("pip", inside)
+            self.assertIn("(이 기능은 꾸러미에 포함되어 있지 않습니다 — 담당자에게 요청하십시오(pymupdf)).", inside)
+        archive = "7z 해제에는 py7zr이 필요합니다 (`pip install deepfake-lens[archive]`)"
+        self.assertEqual(
+            bundle_advice(archive, bundle=True),
+            "7z 해제에는 py7zr이 필요합니다 (이 기능은 꾸러미에 포함되어 있지 않습니다 — 담당자에게 요청하십시오(deepfake-lens[archive]))",
+        )
+
+    def test_bundle_info_writes_nothing(self) -> None:
+        source = (REPO_ROOT / "deepfake_lens" / "bundle_info.py").read_text(encoding="utf-8")
+        for needle in ("open(", "write_", "mkdir", "unlink", "replace("):
+            self.assertNotIn(needle, source.replace("_PIP_ADVICE.sub", ""))
+
+
 if __name__ == "__main__":
     unittest.main()

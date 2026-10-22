@@ -45,6 +45,7 @@ from dataclasses import dataclass, field
 from pathlib import Path, PurePosixPath
 from typing import IO, Any
 
+from .bundle_info import bundle_advice
 from .error_text import exception_text, failure_reason
 from .result_text import ARCHIVE_MEMBER_SEPARATOR, escape_member_segment
 
@@ -559,7 +560,7 @@ def _extract_7z(path: Path, dest: Path, out: ArchiveExtraction, budget: Extracti
     try:
         import py7zr
     except ImportError:
-        out.warnings.append("7z 해제에는 py7zr이 필요합니다 (`pip install deepfake-lens[archive]`)")
+        out.warnings.append(bundle_advice("7z 해제에는 py7zr이 필요합니다 (`pip install deepfake-lens[archive]`)"))
         out.missing_dependency = "py7zr"
         return
     total = 0
@@ -672,7 +673,7 @@ def _extract_rar(path: Path, dest: Path, out: ArchiveExtraction, budget: Extract
     try:
         import rarfile
     except ImportError:
-        out.warnings.append("rar 해제에는 rarfile이 필요합니다 (`pip install deepfake-lens[archive]`)")
+        out.warnings.append(bundle_advice("rar 해제에는 rarfile이 필요합니다 (`pip install deepfake-lens[archive]`)"))
         out.missing_dependency = "rarfile"
         return
     total = 0
