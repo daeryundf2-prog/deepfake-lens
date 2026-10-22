@@ -7,7 +7,9 @@ box is prefilled and Enter starts the scan, focus lands on the conclusion
 headline, the verdict strip and ledger rows agree, the evidence panel keeps
 verdict -> evidence -> coverage, the ledger keys stay inside the list, the
 evidence statement waits for the case number and name, the page reflows at
-375px and nothing is requested outside the local server.
+375px and nothing is requested outside the local server. Then the desktop mode
+(`deepfake-lens desktop` on --port + 1, the folder dialog stubbed): the dialog,
+the roots list, the lost-connection box and the shutdown page.
 
 Requires: pip install playwright, and either Google Chrome (channel="chrome" —
 no browser download needed) or Playwright's Chromium (`playwright install
@@ -42,6 +44,132 @@ def start_server(port: int, folder: str, extra_roots: tuple[str, ...] = ()) -> s
                 raise SystemExit(f"server failed to start: {proc.stdout.read().decode() if proc.stdout else ''}")
             time.sleep(0.2)
     raise SystemExit("server did not start in time")
+
+
+def desktop_smoke(browser: object, port: int, folder: str) -> None:
+    """DESK-2..7: the GUI against `deepfake-lens desktop` — the folder dialog (DEEPFAKE_LENS_PICK_FOLDER_STUB stands in for
+    it), the scan it starts, the roots list and the refusal that names it, the lost-connection box, and 종료."""
+    import json as _json
+    import os as _os
+    import shutil as _shutil
+    import tempfile as _tempfile
+    import urllib.request
+
+    scratch = Path(_tempfile.mkdtemp(prefix="gui-smoke-desktop-"))
+    picked = scratch / "골라 온 폴더"
+    picked.mkdir()
+    (picked / "note.txt").write_text("데스크톱 모드 시험용 글입니다.", encoding="utf-8")
+    home = scratch / "home"  # the signing key file is made here, never in the real user folder
+    home.mkdir()
+    env = dict(_os.environ, HOME=str(home), DEEPFAKE_LENS_PICK_FOLDER_STUB=str(picked))
+    env.pop("DEEPFAKE_LENS_REPORT_KEY", None)
+    proc = subprocess.Popen(
+        [sys.executable, "-m", "deepfake_lens", "desktop", "--no-browser", "--port", str(port), "--folder", folder],
+        stdout=subprocess.PIPE, stderr=subprocess.STDOUT, env=env,
+    )
+    try:
+        for _ in range(50):
+            try:
+                urllib.request.urlopen(f"http://127.0.0.1:{port}/gui", timeout=0.5)
+                break
+            except OSError:
+                if proc.poll() is not None:
+                    raise SystemExit(f"desktop server failed to start: {proc.stdout.read().decode() if proc.stdout else ''}")
+                time.sleep(0.2)
+        else:
+            raise SystemExit("desktop server did not start in time")
+        errors: list[str] = []
+        page = browser.new_page()  # type: ignore[attr-defined]
+        page.on("console", lambda m: errors.append(m.text) if m.type == "error" else None)
+        page.on("pageerror", lambda e: errors.append(str(e)))
+        page.goto(f"http://127.0.0.1:{port}/gui", wait_until="networkidle")
+
+        # DESK-2/3/4/6/7: the desktop-only controls are shown, uploads folded, chips and first-use steps there
+        page.wait_for_selector("#desk-bar:not([hidden])", timeout=10_000)
+        assert page.locator("#pick-folder-btn").is_visible(), "the folder dialog button is hidden in the desktop mode"
+        assert page.evaluate("document.getElementById('upload-block').open") is False, "the upload block is not folded"
+        assert page.locator("#sign-chip").inner_text() == "서명 자동", page.locator("#sign-chip").inner_text()
+        assert page.locator("#pdf-chip").inner_text() in ("PDF 가능", "PDF 불가")
+        assert page.locator("#scan-guide").is_visible(), "the first-use steps are missing without results"
+        assert page.evaluate("heartbeatTimer !== null"), "the heartbeat is not running"
+
+        # DESK-3: 501 (no dialog here) is said in the folder box's hint and the box gets the focus; a cancel changes nothing
+        before = page.input_value("#folder-path")
+        unavailable = "이 환경에서는 폴더 선택 창을 열 수 없습니다 — 경로를 직접 입력하십시오"
+        page.route("**/api/pick-folder", lambda route: route.fulfill(status=501, content_type="application/json", body=_json.dumps({"error": unavailable})))
+        page.click("#pick-folder-btn")
+        page.wait_for_function("() => document.getElementById('pick-note').classList.contains('pick-err')", timeout=10_000)
+        assert page.locator("#pick-note").inner_text() == unavailable
+        assert page.evaluate("document.activeElement.id") == "folder-path"
+        assert "pick-note" in (page.get_attribute("#folder-path", "aria-describedby") or "").split()
+        page.unroute("**/api/pick-folder")
+        page.route("**/api/pick-folder", lambda route: route.fulfill(status=200, content_type="application/json", body=_json.dumps({"folder": None, "folder_b64": None})))
+        page.click("#pick-folder-btn")
+        page.wait_for_function("() => document.getElementById('pick-note').textContent === ''", timeout=10_000)
+        assert page.input_value("#folder-path") == before and page.evaluate("scanBusy") is False, "a cancelled dialog changed the page"
+        page.unroute("**/api/pick-folder")
+
+        # DESK-3: the (stubbed) dialog fills the box and starts the scan; the folder joins the list
+        page.click("#pick-folder-btn")
+        page.wait_for_selector("#results-section:not([hidden])", timeout=180_000)
+        assert Path(page.input_value("#folder-path")).resolve() == picked.resolve(), page.input_value("#folder-path")
+        page.evaluate("location.hash = '#/scan'")
+        page.wait_for_function("() => document.getElementById('roots-list').children.length === 2", timeout=10_000)
+        roots_text = page.locator("#roots-list").inner_text()
+        assert "골라 온 폴더" in roots_text, roots_text
+        assert page.locator("#scan-guide").is_hidden(), "the first-use steps outlived the results"
+        page.fill("#folder-path", "/")
+        page.keyboard.press("Enter")
+        page.wait_for_selector("#error-region .err-item[data-scan]", timeout=10_000)
+        refusal = page.locator("#error-region .err-item[data-scan]").last.inner_text()
+        assert "지금 검사할 수 있는 폴더" in refusal and "골라 온 폴더" in refusal, refusal
+
+        # DESK-6: the checklist names the key file of this PC
+        page.evaluate("location.hash = '#/report'")
+        page.wait_for_function("() => currentView === 'report'")
+        assert "서명 키: 이 PC의 사용자 폴더(report-key)" in page.locator("#report-checks").inner_text()
+
+        # DESK-5: two failed heartbeats put the lasting box up (not a scan's box); the next success takes it down
+        page.route("**/api/heartbeat", lambda route: route.fulfill(status=503, content_type="application/json", body="{}"))
+        page.evaluate("async () => { await sendHeartbeat(); }")
+        assert page.locator("#conn-lost").count() == 0, "one failed heartbeat already said the connection is lost"
+        page.evaluate("async () => { await sendHeartbeat(); }")
+        box = page.locator("#error-region #conn-lost")
+        assert box.count() == 1 and box.get_attribute("data-scan") is None
+        assert "서버와 연결이 끊겼습니다" in box.inner_text()
+        page.unroute("**/api/heartbeat")
+        page.evaluate("async () => { await sendHeartbeat(); }")
+        assert page.locator("#conn-lost").count() == 0, "the box stayed after the server answered again"
+
+        # DESK-2: a dismissed confirm does nothing; a refusal (409) is said in the error region; then 종료
+        page.once("dialog", lambda d: d.dismiss())
+        page.click("#shutdown-btn")
+        assert proc.poll() is None and page.locator("#shutdown-page").is_hidden()
+        busy = "검사가 진행 중입니다 — 중단한 뒤 종료하십시오"
+        page.route("**/api/shutdown", lambda route: route.fulfill(status=409, content_type="application/json", body=_json.dumps({"error": busy, "job_id": "x"})))
+        page.once("dialog", lambda d: d.accept())
+        page.click("#shutdown-btn")
+        page.wait_for_selector("#error-region .err-item:has-text('종료하지 못했습니다')", timeout=10_000)
+        assert busy in page.locator("#error-region").inner_text()
+        page.unroute("**/api/shutdown")
+        page.once("dialog", lambda d: d.accept())
+        page.click("#shutdown-btn")
+        page.wait_for_selector("#shutdown-page:not([hidden])", timeout=10_000)
+        assert page.locator("#shutdown-alert").get_attribute("role") == "alert"
+        assert "종료되었습니다. 이 탭을 닫으십시오." in page.locator("#shutdown-alert").inner_text()
+        assert page.evaluate("Array.from(document.querySelectorAll('button, input, select, textarea')).filter(el => !el.disabled).length") == 0
+        assert page.evaluate("heartbeatTimer === null"), "the heartbeat kept running after the shutdown"
+        proc.wait(timeout=15)
+        expected = ("status of 403", "status of 409", "status of 501", "status of 503")
+        unexpected = [e for e in errors if not any(code in e for code in expected) and "favicon" not in e
+                      and not (e.startswith("Failed to load resource") and "404" in e)]
+        assert not unexpected, f"desktop console errors: {unexpected[:5]}"
+        page.close()
+        print("gui_smoke: desktop mode — folder dialog (501, cancel, chosen) -> scan -> roots list, refusal, lost-connection box, 종료 checked")
+    finally:
+        if proc.poll() is None:
+            proc.terminate()
+        _shutil.rmtree(scratch, ignore_errors=True)
 
 
 def main() -> int:
@@ -821,6 +949,9 @@ def main() -> int:
             assert not outside, f"requests outside the local server: {outside[:5]}"
 
             page.screenshot(path=str(args.shot), full_page=True)
+
+            # 8. DESK-2..7: the desktop mode on the next port.
+            desktop_smoke(browser, args.port + 1, args.scan_dir)
             browser.close()
         print(f"GUI smoke PASS — screenshot: {args.shot}")
         return 0
