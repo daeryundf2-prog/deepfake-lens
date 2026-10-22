@@ -346,6 +346,9 @@ class F9ExportNoteIsNotRereadWhileTypingTest(unittest.TestCase):
         self.assertIn("a4Timer = setTimeout(() => loadA4(seq), delay || 250);", _function("renderA4"))
         self.assertIn("if (currentView === 'report') renderReport(Boolean(event && event.type === 'input'));", source)
         self.assertIn("$(id).addEventListener('change', onCaseChange);", source)
+        # leaving a text field writes only the note — a full render would rebuild the checklist under a click
+        # (the blur fires change first; gate.sh gui's 「이 폴더의 사건이 맞음」 click was lost that way)
+        self.assertIn("if (event && event.type === 'change' && event.target && event.target.type !== 'radio') { setExportNote(exportNoteText()); return; }", source)
         # no handler passes an event object as `typing`
         self.assertNotRegex(source, r"addEventListener\('[a-z]+', renderReport\)")
 

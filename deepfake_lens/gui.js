@@ -1048,7 +1048,11 @@
             saveCase();
             updateCaseLine();
             // GUI-REV7 F-9: a keystroke re-renders without the live export note and with the longer preview delay;
-            // leaving the field (change) and the side choice render everything.
+            // the side choice renders everything. Leaving a text field (change) writes only the note: a full render
+            // rebuilds the checklist, and the blur that fires change on a click of a checklist button would replace
+            // that button under the pointer (gate.sh gui, 「이 폴더의 사건이 맞음」).
+            if (currentView !== 'report') return;
+            if (event && event.type === 'change' && event.target && event.target.type !== 'radio') { setExportNote(exportNoteText()); return; }
             if (currentView === 'report') renderReport(Boolean(event && event.type === 'input'));
         };
         Object.keys(CASE_FIELDS).forEach(id => {
@@ -2552,6 +2556,9 @@
         // GUI-REV7 F-9: #export-note is aria-live — it is written only when its text changes (a rewrite with the
         // same text was read out again), and not while the examiner types a case field (renderReport(true) from
         // its input event): the note follows when the field is left (change) or on the next full render.
+        function exportNoteText() {
+            return [exportNote(selectedEntries()), exportStickyNote].filter(Boolean).join(' ');
+        }
         function setExportNote(text) {
             const note = $('export-note');
             if (note.textContent !== text) note.textContent = text;
