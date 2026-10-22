@@ -133,6 +133,7 @@ BUILDERS: dict[str, Builder] = {
     "evidence-statement": lambda fx, bad: ["evidence-statement", bad.get("target", str(fx.folder))],
     "models": lambda fx, bad: ["models", "--checkpoint", bad.get("checkpoint", str(fx.ckpt)), "--profile-out", _o(fx, "prof.json")],
     "web": lambda fx, bad: ["web", "--folder", bad.get("folder", str(fx.folder)), "--allow-root", bad.get("allow_root", str(fx.folder))],
+    "desktop": lambda fx, bad: ["desktop", "--no-browser", "--folder", bad.get("folder", str(fx.folder))],  # DESK
     "api-serve": lambda fx, bad: ["api-serve", "--allow-root", bad.get("allow_root", str(fx.folder))],
     # R15-3: pin-asset --asset-file is an input too (the asset whose sha256 is recorded).
     "vendor-weights": lambda fx, bad: (

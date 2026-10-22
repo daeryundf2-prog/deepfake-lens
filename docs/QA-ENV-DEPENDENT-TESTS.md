@@ -89,6 +89,7 @@ R11-2 (round 11). 선택 패키지·도구·OS 기능·픽스처가 없으면 �
 | `mediapipe not installed` | `face_mediapipe` 또는 `face_tasks` extra(mediapipe) | test_face.py |
 | `no JavaScript engine (node or osascript)` | Node.js 또는 macOS `osascript`(JavaScriptCore) — gui.js의 검토 표시 키 함수(R18-8)·모델 점수 표시 함수(R18-17)를 실제로 실행(기준 환경에서는 소스 검사만) | test_gui_model_score.py, test_gui_review_keys.py |
 | `node + playwright + Chromium not installed (headless GUI check)` | Node.js + `playwright` npm 패키지 + Chromium(`npx playwright install chromium`) — 헤드리스 GUI 확인 | test_path_b64.py |
+| `node needed to parse the whole file` | Node.js(`node --check`) — gui.js 전체가 구문상 올바른지(GUI-REV7: 149e4d0의 따옴표 오류가 전체 GUI를 멈췄던 회귀) | test_gui_rev7.py |
 | `node is not installed` | Node.js(`node`) — GUI 스크립트 검사 | test_archives.py, test_gui_ledger.py, test_path_b64.py |
 | `node required to run gui.js helpers` | Node.js(`node`) — GUI 스크립트 검사 | test_display_names.py |
 | `not a git work tree` | git 작업 트리(압축본·내보낸 사본 아님). R16-12: 얕은 복제(shallow clone)는 건너뛰지 않는다 — 인용된 커밋이 잘린 이력에 없으면 test_qa_sys.py·test_shutdown.py가 같은 규칙·같은 메시지(`HEAD 이력에 제목이 …인 커밋이 없습니다 — 얕은 복제(shallow clone)라 이력이 잘려 있습니다 …`)로 **실패**한다(아래 "얕은 복제" 참조) | test_output_generation.py, test_qa_sys.py, test_shutdown.py |

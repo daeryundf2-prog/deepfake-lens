@@ -48,7 +48,9 @@ NETWORK_MARKERS = [
 # vendor_weights.py fetches checkpoints only on an explicit
 # `vendor-weights --fetch` invocation and refuses outright under --offline;
 # the network surface is deliberate, user-gated, and sha256-verified.
-ALLOWED_NETWORK_FILES = {"security.py", "webapp.py", "vendor_weights.py"}
+# DESK (2026-10-23): desktop.py probes a loopback port (socket.bind on 127.0.0.1) and asks this tool's own
+# /api/stats on 127.0.0.1 before deciding to start — it never reaches another host.
+ALLOWED_NETWORK_FILES = {"security.py", "webapp.py", "vendor_weights.py", "desktop.py"}
 
 # QA suites run by the security check. Tests ship only in the source tree
 # (pyproject excludes deepfake_lens.tests from the wheel); without them the

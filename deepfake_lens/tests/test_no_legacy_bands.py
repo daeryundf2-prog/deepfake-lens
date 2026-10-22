@@ -74,6 +74,7 @@ EXCLUDED_COMMANDS = {
     "release": "release checklist, no analysis",
     "api-serve": "server — endpoints covered by test_standalone_contract / test_servers",
     "web": "server — endpoints covered by test_standalone_contract / test_servers",
+    "desktop": "server (DESK) — the web server plus launcher; routes covered by test_desktop_mode / test_servers",
 }
 
 

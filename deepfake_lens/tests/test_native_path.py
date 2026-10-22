@@ -1289,6 +1289,8 @@ NATIVE_CALL_EXEMPT = {
     ("shutdown.py", "subprocess.Popen"),
     # R19-1 (round 19): `ffmpeg -version` for the scan-cache key — no file argument.
     ("scan_cache.py", "shutdown.run_child"),
+    # DESK (2026-10-23): the OS folder-dialog helper (powershell / osascript / zenity) — no file argument.
+    ("desktop.py", "shutdown.run_child"),
 }
 
 

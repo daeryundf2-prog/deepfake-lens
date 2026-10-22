@@ -324,6 +324,7 @@ INPUT_SPECS: dict[str, tuple[InputSpec, ...]] = {
     "evidence-statement": (InputSpec("target", "either", SCAN_SUFFIXES | JSON_SUFFIXES, "allow"),),
     "models": (InputSpec("checkpoint", "file", None),),
     "web": (_folder("folder"), _folder("allow_root")),
+    "desktop": (_folder("folder"),),  # DESK: the first folder of the desktop mode (web's --folder)
     "api-serve": (_folder("allow_root"),),
     # R15-3: pin-asset --asset-file — the model asset whose sha256 is recorded (any format).
     "vendor-weights": (_folder("install"), InputSpec("asset_file", "file", None)),
@@ -613,7 +614,7 @@ def require_writable_output(path: Path | str) -> None:
 
 
 # R21-4 (round 21): the servers whose read root is the working folder when no root is named.
-SERVER_COMMANDS = ("web", "api-serve")
+SERVER_COMMANDS = ("web", "api-serve", "desktop")
 SERVER_DEFAULT_ROOT_HINT = (
     "(읽기 폴더를 지정하지 않아 작업 폴더 {folder}가 읽기 루트입니다 — --folder 또는 --allow-root로 증거 폴더를 지정하거나 "
     "다른 폴더에서 실행하십시오)"
