@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import json
 import re
+import shutil
 import subprocess
 import tempfile
 import unittest
@@ -560,6 +561,16 @@ class F14F15RowReasonAndDetailPanelTextTest(unittest.TestCase):
         ])
         self.assertIn("const CONTAINER_SUMMARY_NOTE = '컨테이너 행은 구성 파일 결과의 요약입니다.';", _source())
 
+
+
+class GuiScriptParsesTest(unittest.TestCase):
+    """149e4d0 (the SourceQuotesTest fix) turned the outside-drop toast's corner brackets into ASCII apostrophes inside
+    a single-quoted string — gui.js no longer parsed and the whole GUI was dead; no test ran the file as a whole."""
+
+    @unittest.skipUnless(shutil.which("node"), "node needed to parse the whole file")
+    def test_gui_js_parses(self) -> None:
+        done = subprocess.run(["node", "--check", str(GUI_JS)], capture_output=True, text=True, timeout=60)
+        self.assertEqual(done.returncode, 0, done.stderr)
 
 
 if __name__ == "__main__":

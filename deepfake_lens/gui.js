@@ -1309,7 +1309,7 @@
         document.addEventListener('drop', e => {
             if (!isFileDrag(e) || dropZone.contains(e.target)) return;
             e.preventDefault();
-            toast('파일을 열지 않았습니다 — 검사 화면의 '폴더 대신 파일 올리기' 칸에 놓으십시오.');
+            toast('파일을 열지 않았습니다 — 검사 화면의 "폴더 대신 파일 올리기" 칸에 놓으십시오.');
         });
         function openFilePicker() {
             if (scanBusy) return;
