@@ -46,15 +46,20 @@ class Desk2TopBarAndShutdownTest(unittest.TestCase):
         self.assertLess(html.index('<header class="topbar">'), start)
         self.assertLess(start, html.index("</header>"))
         self.assertIn("이 PC에서 실행 중", html[start:html.index("</header>")])
-        self.assertIn('<button class="btn btn-sm" id="shutdown-btn" type="button">종료</button>', html)
+        # RISK B17: 「프로그램 종료」 (「종료」 alone did not say what ends)
+        self.assertIn('<button class="btn btn-sm" id="shutdown-btn" type="button" aria-label="프로그램 종료">프로그램 종료</button>', html)
         helper = _function("applyDesktopStats")
         self.assertIn("desktopMode = d.desktop === true;", helper)
         self.assertLess(helper.index("if (!desktopMode) return;"), helper.index("$('desk-bar').hidden = false;"))
         self.assertIn("applyDesktopStats(d);", _source())
 
     def test_shutdown_asks_then_posts_and_says_a_refusal(self) -> None:
-        handler = _handler(_source(), "$('shutdown-btn').addEventListener('click', async () => {")
-        self.assertLess(handler.index("if (!window.confirm(SHUTDOWN_QUESTION)) return;"), handler.index("apiFetch('/api/shutdown', { method: 'POST' })"))
+        handler = _handler(_source(), "$('shutdown-btn').addEventListener('click', async e => {")
+        self.assertLess(handler.index("const answer = window.confirm(SHUTDOWN_QUESTION);"), handler.index("apiFetch('/api/shutdown', { method: 'POST' })"))
+        self.assertLess(handler.index("if (!answer) {"), handler.index("apiFetch('/api/shutdown', { method: 'POST' })"))
+        no = handler[handler.index("if (!answer) {"):handler.index("setBusyButton(btn, true);")]
+        self.assertIn("return;", no)
+        self.assertNotIn("apiFetch", no)
         self.assertIn("if (res.ok) { showShutdownPage(); return; }", handler)
         # 409 {error: 검사가 진행 중입니다 …}: the server's own text, in the error region (showError), not a toast
         self.assertIn("showError(await apiError(res), '종료하지 못했습니다');", handler)
@@ -71,7 +76,7 @@ class Desk2TopBarAndShutdownTest(unittest.TestCase):
         self.assertIn("const FORM_CONTROLS = [HTMLButtonElement, HTMLInputElement, HTMLSelectElement, HTMLTextAreaElement];", _source())
         self.assertIn("el.inert = true;", page)
         self.assertIn("head.textContent = '종료되었습니다. 이 탭을 닫으십시오.';", page)
-        self.assertIn("next.textContent = `다시 쓰려면 바탕 화면의 ${PRODUCT}를 다시 실행하십시오.`;", page)
+        self.assertIn("next.textContent = `다시 쓰려면 ${LAUNCHER}를 다시 실행하십시오.`;", page)  # RISK B13
         # the product name is the top bar's (gui.js literals hold no two-word English name — test_korean_output)
         self.assertIn("const PRODUCT = document.querySelector('.brand-name').textContent.trim();", _source())
         self.assertIn('<span class="brand-name">Deepfake Lens</span>', _html())
@@ -99,12 +104,15 @@ class Desk3FolderPickerTest(unittest.TestCase):
 
     def test_the_click_waits_fills_and_submits(self) -> None:
         handler = _handler(_source(), "$('pick-folder-btn').addEventListener('click', async () => {")
-        self.assertIn("const PICK_WAIT = '폴더 선택 창이 떠 있습니다 — 보이지 않으면 작업 표시줄을 확인하십시오';", _source())
+        # RISK B5: the owner window is not on the taskbar — Alt+Tab finds the dialog
+        self.assertIn("const PICK_WAIT = \"폴더 선택 창을 여는 중입니다(처음에는 몇 초 걸릴 수 있습니다). 창이 안 보이면 Alt+Tab으로 '폴더 찾아보기' 창을 찾으십시오.\";", _source())
+        self.assertNotIn("작업 표시줄", _source())
         order = ["setBusyButton(btn, true);", "setPickNote(PICK_WAIT, false);", "apiFetch('/api/pick-folder', { method: 'POST' })",
                  "setBusyButton(btn, false);", "refreshRoots();", "$('folder-path').value = outcome.folder;", "$('scan-form').requestSubmit();"]
         self.assertEqual([handler.index(step) for step in order], sorted(handler.index(step) for step in order))
-        # cancel: nothing changes but the waiting note
-        self.assertIn("if (outcome.kind === 'cancel') { setPickNote('', false); return; }", handler)
+        # cancel: nothing changes but the waiting note, which says the cancel (RISK B17: role=status reads it)
+        self.assertIn("if (outcome.kind === 'cancel') { setPickNote(PICK_CANCELLED, false); return; }", handler)
+        self.assertIn("const PICK_CANCELLED = '폴더 선택을 취소했습니다';", _source())
         # 501/409/400: the server's text in the box's hint, the box focused for 501 (type the path instead)
         self.assertIn("setPickNote(outcome.text, true);", handler)
         self.assertIn("if (outcome.status === 501) $('folder-path').focus();", handler)
@@ -126,7 +134,7 @@ class Desk3FolderPickerTest(unittest.TestCase):
             "pickOutcome(404, null)]);"
         )
         self.assertEqual(json.loads(_run_js(body)), [
-            {"kind": "picked", "folder": "/srv/사건", "b64": "L3Nydi8"},
+            {"kind": "picked", "folder": "/srv/사건", "b64": "L3Nydi8", "note": ""},
             {"kind": "cancel"},
             {"kind": "error", "text": "폴더 선택 창이 이미 열려 있습니다", "status": 409},
             {"kind": "error", "text": "이 환경에서는 폴더 선택 창을 열 수 없습니다 — 경로를 직접 입력하십시오", "status": 501},
@@ -226,7 +234,7 @@ class Desk5HeartbeatTest(unittest.TestCase):
     def test_the_box_is_lasting_and_not_a_scans(self) -> None:
         source = _source()
         self.assertIn("const HEARTBEAT_MS = 30000;", source)
-        self.assertIn("const CONNECTION_LOST = `서버와 연결이 끊겼습니다 — 바탕 화면의 ${PRODUCT}를 다시 실행하십시오`;", source)
+        self.assertIn("const CONNECTION_LOST = `서버와 연결이 끊겼습니다 — ${LAUNCHER}를 다시 실행하십시오`;", source)  # RISK B13
         box = _function("showConnectionLost")
         self.assertIn("box.id = 'conn-lost';", box)
         self.assertNotIn("dataset.scan", box)  # retireErrors / dropRetiredErrors never touch it
@@ -274,6 +282,95 @@ class RiskA4B3HeartbeatOnReturnTest(unittest.TestCase):
             "var out = JSON.stringify(seen);"
         )
         self.assertEqual(json.loads(_run_js(body)), [0, 1, 1, 1])
+
+
+class RiskB4B5B13B17Test(unittest.TestCase):
+    """RISK B4 (a 403 for a scan already made says to pick the same folder again), B5 (the dialog's waiting text, the
+    OneDrive note and the too-wide refusal kept under the path box), B13 (the launcher's real place), B17 (프로그램 종료,
+    the cancel said, a blocked confirm explained)."""
+
+    @unittest.skipUnless(_js_engine(), "no JavaScript engine (node or osascript)")
+    def test_a_refusal_for_an_earlier_scan_says_pick_it_again(self) -> None:
+        body = "var ROOTS_SHOWN = 5;\n" + _function("rootsSummary") + _function("deniedFolderHint") + (
+            "var out = JSON.stringify(["
+            "deniedFolderHint('허용되지 않은 경로', '', ['/a'], true, true),"
+            "deniedFolderHint('허용되지 않은 경로', '/srv/case', ['/srv/case'], false, true),"
+            "deniedFolderHint('허용되지 않은 호스트입니다', '', [], true, true),"
+            "deniedFolderHint('허용되지 않은 경로', '', ['/a'], true, false)]);"
+        )
+        desktop, web, host, new_scan = json.loads(_run_js(body))
+        self.assertIn("같은 폴더를 '검사할 폴더 고르기'로 다시 고르십시오", desktop)
+        self.assertIn("--folder 또는 --allow-root", web)
+        self.assertEqual(host, "")
+        self.assertTrue(new_scan.startswith(" — 지금 검사할 수 있는 폴더"))  # a new scan's refusal is unchanged
+
+    def test_every_request_about_a_scan_already_made_uses_it(self) -> None:
+        source = _source()
+        helper = _async_function("deniedResponseHint")
+        self.assertIn("if (res.status !== 403) return '';", helper)
+        self.assertIn("await res.clone().text()", helper)
+        self.assertIn("deniedFolderHint(text, defaultFolder, readRoots, desktopMode, true)", helper)
+        for name in ("loadPreview", "loadHeatmap", "loadForensicStudio"):
+            with self.subTest(name=name):
+                self.assertIn("await deniedResponseHint(", _async_function(name))
+        self.assertIn("deniedFolderHint(String(body.error || ''), defaultFolder, readRoots, desktopMode, true)", _async_function("loadA4"))
+        self.assertIn("if (res.status === 403) message += deniedFolderHint(message, defaultFolder, readRoots, desktopMode, true);", source)
+        self.assertIn("toast('검사 중 오류: ' + error.message + deniedFolderHint(error.message, defaultFolder, readRoots, desktopMode, true)", source)
+        # a new scan's refusal keeps naming the folders that can be scanned
+        self.assertIn("const hint = deniedFolderHint(error.message, defaultFolder, readRoots, desktopMode);", source)
+
+    @unittest.skipUnless(_js_engine(), "no JavaScript engine (node or osascript)")
+    def test_the_onedrive_note_is_read(self) -> None:
+        note = "OneDrive 폴더입니다 — 온라인 전용 파일은 내려받으면서 검사됩니다"
+        body = _function("pickOutcome") + (
+            f"var out = JSON.stringify([pickOutcome(200, {{folder: '/u/OneDrive/증거', folder_b64: 'x', note: {json.dumps(note)}}}),"
+            " pickOutcome(200, {folder: '/u/a', folder_b64: 'y', note: null}),"
+            " pickOutcome(400, {error: '너무 넓은 폴더입니다(사용자 폴더 전체) — 증거 파일이 든 폴더를 고르십시오'})]);"
+        )
+        onedrive, plain, wide = json.loads(_run_js(body))
+        self.assertEqual(onedrive["note"], note)
+        self.assertEqual(plain["note"], "")
+        self.assertEqual(wide, {"kind": "error", "text": "너무 넓은 폴더입니다(사용자 폴더 전체) — 증거 파일이 든 폴더를 고르십시오", "status": 400})
+
+    def test_the_note_and_the_refusal_stay_under_the_path_box(self) -> None:
+        html = _html()
+        self.assertIn('<p class="hint pick-note" id="folder-note" hidden></p>', html)
+        self.assertLess(html.index('id="folder-path"'), html.index('id="folder-note"'))
+        self.assertLess(html.index('id="folder-note"'), html.index('id="folder-hint"'))
+        handler = _handler(_source(), "$('pick-folder-btn').addEventListener('click', async () => {")
+        self.assertLess(handler.index("setPickNote(PICK_WAIT, false);"), handler.index("setFolderNote('', false, null);"))
+        self.assertIn("setFolderNote(outcome.text, true, null);", handler)
+        self.assertIn("if (outcome.status === 400) btn.focus();", handler)
+        self.assertIn("setPickNote(outcome.note, false);", handler)
+        self.assertLess(handler.index("$('folder-path').value = outcome.folder;"), handler.index("setFolderNote(outcome.note, false, outcome.folder);"))
+        note = _function("setFolderNote")
+        self.assertIn("note.textContent = text;", note)  # never innerHTML
+        self.assertIn("note.hidden = !text;", note)
+        # it goes when the box names another folder
+        self.assertIn("if (!$('folder-note').hidden && $('folder-path').value.trim() !== folderNoteFor) setFolderNote('', false, null);", _source())
+
+    def test_no_desktop_shortcut_is_named(self) -> None:
+        source = _source()
+        self.assertNotIn("바탕 화면", source)
+        self.assertIn("const LAUNCHER = `압축을 푼 폴더의 '${PRODUCT}.cmd'(macOS: '${PRODUCT}.command')`;", source)
+        self.assertIn("다시 쓰려면 ${LAUNCHER}를 다시 실행하십시오.`;", source.split("const SHUTDOWN_QUESTION = ", 1)[1].split("\n", 1)[0])
+
+    @unittest.skipUnless(_js_engine(), "no JavaScript engine (node or osascript)")
+    def test_a_confirm_answered_at_once_after_a_click_is_blocked(self) -> None:
+        body = "var CONFIRM_BLOCKED_MS = 50;\n" + _function("confirmLooksBlocked") + (
+            "var out = JSON.stringify([confirmLooksBlocked(false, 3, true), confirmLooksBlocked(false, 900, true),"
+            " confirmLooksBlocked(true, 3, true), confirmLooksBlocked(false, 3, false)]);"
+        )
+        self.assertEqual(json.loads(_run_js(body)), [True, False, False, False])
+        source = _source()
+        self.assertIn("const CONFIRM_BLOCKED_MS = 50;", source)
+        self.assertIn("const CONFIRM_BLOCKED = '확인 창이 차단되어 있습니다 — 브라우저 설정에서 이 사이트의 대화상자 차단을 해제하거나 콘솔 창을 닫아 종료하십시오';", source)
+        handler = _handler(source, "$('shutdown-btn').addEventListener('click', async e => {")
+        self.assertLess(handler.index("const asked = performance.now();"), handler.index("window.confirm(SHUTDOWN_QUESTION)"))
+        self.assertIn("if (confirmLooksBlocked(answer, performance.now() - asked, e.isTrusted) && !$('confirm-blocked')) {", handler)
+        # lasting: the error region (until closed), said once
+        self.assertIn("showError(CONFIRM_BLOCKED, '종료하지 못했습니다').id = 'confirm-blocked';", handler)
+        self.assertIn("return box;", _function("showError"))
 
 
 class Desk6StatusChipsTest(unittest.TestCase):

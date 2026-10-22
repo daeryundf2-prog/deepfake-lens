@@ -30,7 +30,7 @@
         </nav>
         <div class="desk-bar" id="desk-bar" hidden>
             <span class="desk-run small"><span class="desk-dot" aria-hidden="true"></span>이 PC에서 실행 중</span>
-            <button class="btn btn-sm" id="shutdown-btn" type="button">종료</button>
+            <button class="btn btn-sm" id="shutdown-btn" type="button" aria-label="프로그램 종료">프로그램 종료</button>
         </div>
     </header>
 
@@ -92,6 +92,7 @@
                                 <input class="field mono" id="folder-path" type="text" autocomplete="off" spellcheck="false" aria-describedby="pick-note folder-hint folder-roots">
                                 <button class="btn btn-primary" id="analyze-btn" type="submit">검사 시작</button>
                             </div>
+                            <p class="hint pick-note" id="folder-note" hidden></p>
                             <p class="hint" id="folder-hint">원본 폴더에는 아무것도 쓰지 않습니다. 압축 파일은 안까지 검사합니다. Enter로 시작합니다.</p>
                             <div class="hint roots" id="folder-roots"><p id="roots-head">서버를 시작할 때 등록한 폴더(--folder, --allow-root) 안만 검사할 수 있습니다.</p><ul class="roots-list mono" id="roots-list" hidden></ul></div>
                             <details class="disclosure" id="scan-options">

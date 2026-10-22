@@ -61,23 +61,31 @@ def desktop_smoke(browser: object, port: int, folder: str) -> None:
     (picked / "note.txt").write_text("데스크톱 모드 시험용 글입니다.", encoding="utf-8")
     home = scratch / "home"  # the signing key file is made here, never in the real user folder
     home.mkdir()
-    env = dict(_os.environ, HOME=str(home), DEEPFAKE_LENS_PICK_FOLDER_STUB=str(picked))
-    env.pop("DEEPFAKE_LENS_REPORT_KEY", None)
-    proc = subprocess.Popen(
-        [sys.executable, "-m", "deepfake_lens", "desktop", "--no-browser", "--port", str(port), "--folder", folder],
-        stdout=subprocess.PIPE, stderr=subprocess.STDOUT, env=env,
-    )
-    try:
+    onedrive = scratch / "OneDrive" / "증거"  # RISK B5: a folder the server notes as OneDrive
+    onedrive.mkdir(parents=True)
+    (onedrive / "note.txt").write_text("원드라이브 폴더 시험용 글입니다.", encoding="utf-8")
+
+    def start_desktop(at: int, stub: Path) -> subprocess.Popen:
+        env = dict(_os.environ, HOME=str(home), DEEPFAKE_LENS_PICK_FOLDER_STUB=str(stub))
+        env.pop("DEEPFAKE_LENS_REPORT_KEY", None)
+        started = subprocess.Popen(
+            [sys.executable, "-m", "deepfake_lens", "desktop", "--no-browser", "--port", str(at), "--folder", folder],
+            stdout=subprocess.PIPE, stderr=subprocess.STDOUT, env=env,
+        )
         for _ in range(50):
             try:
-                urllib.request.urlopen(f"http://127.0.0.1:{port}/gui", timeout=0.5)
-                break
+                urllib.request.urlopen(f"http://127.0.0.1:{at}/gui", timeout=0.5)
+                return started
             except OSError:
-                if proc.poll() is not None:
-                    raise SystemExit(f"desktop server failed to start: {proc.stdout.read().decode() if proc.stdout else ''}")
+                if started.poll() is not None:
+                    raise SystemExit(f"desktop server failed to start: {started.stdout.read().decode() if started.stdout else ''}")
                 time.sleep(0.2)
-        else:
-            raise SystemExit("desktop server did not start in time")
+        started.terminate()
+        raise SystemExit("desktop server did not start in time")
+
+    proc = start_desktop(port, picked)
+    others: list[subprocess.Popen] = []
+    try:
         errors: list[str] = []
         page = browser.new_page()  # type: ignore[attr-defined]
         page.on("console", lambda m: errors.append(m.text) if m.type == "error" else None)
@@ -93,11 +101,23 @@ def desktop_smoke(browser: object, port: int, folder: str) -> None:
         assert page.locator("#scan-guide").is_visible(), "the first-use steps are missing without results"
         assert page.evaluate("heartbeatTimer !== null"), "the heartbeat is not running"
 
+        # RISK B17: the top-bar button says what ends
+        assert page.locator("#shutdown-btn").inner_text() == "프로그램 종료" and page.get_attribute("#shutdown-btn", "aria-label") == "프로그램 종료"
+
         # DESK-3: 501 (no dialog here) is said in the folder box's hint and the box gets the focus; a cancel changes nothing
         before = page.input_value("#folder-path")
         unavailable = "이 환경에서는 폴더 선택 창을 열 수 없습니다 — 경로를 직접 입력하십시오"
-        page.route("**/api/pick-folder", lambda route: route.fulfill(status=501, content_type="application/json", body=_json.dumps({"error": unavailable})))
+        held: list[object] = []
+        page.route("**/api/pick-folder", lambda route: held.append(route))
         page.click("#pick-folder-btn")
+        # RISK B5: while the dialog is open the note says it may take seconds and how to find it (Alt+Tab)
+        wait_text = "폴더 선택 창을 여는 중입니다(처음에는 몇 초 걸릴 수 있습니다). 창이 안 보이면 Alt+Tab으로 '폴더 찾아보기' 창을 찾으십시오."
+        page.wait_for_function("(text) => document.getElementById('pick-note').textContent === text", arg=wait_text, timeout=10_000)
+        for _ in range(50):
+            if held:
+                break
+            page.wait_for_timeout(100)
+        held[0].fulfill(status=501, content_type="application/json", body=_json.dumps({"error": unavailable}))  # type: ignore[attr-defined]
         page.wait_for_function("() => document.getElementById('pick-note').classList.contains('pick-err')", timeout=10_000)
         assert page.locator("#pick-note").inner_text() == unavailable
         assert page.evaluate("document.activeElement.id") == "folder-path"
@@ -105,7 +125,8 @@ def desktop_smoke(browser: object, port: int, folder: str) -> None:
         page.unroute("**/api/pick-folder")
         page.route("**/api/pick-folder", lambda route: route.fulfill(status=200, content_type="application/json", body=_json.dumps({"folder": None, "folder_b64": None})))
         page.click("#pick-folder-btn")
-        page.wait_for_function("() => document.getElementById('pick-note').textContent === ''", timeout=10_000)
+        # RISK B17: the cancel is said in the status line
+        page.wait_for_function("() => document.getElementById('pick-note').textContent === '폴더 선택을 취소했습니다'", timeout=10_000)
         assert page.input_value("#folder-path") == before and page.evaluate("scanBusy") is False, "a cancelled dialog changed the page"
         page.unroute("**/api/pick-folder")
 
@@ -158,17 +179,30 @@ def desktop_smoke(browser: object, port: int, folder: str) -> None:
         page.once("dialog", lambda d: d.dismiss())
         page.click("#shutdown-btn")
         assert proc.poll() is None and page.locator("#shutdown-page").is_hidden()
+        # RISK B17: a confirm the browser blocks (false at once after a real click) leaves a lasting hint, once.
+        # (The automated dismiss above can be that fast too — its hint, if any, is removed first.)
+        page.evaluate("() => { const old = document.getElementById('confirm-blocked'); if (old) old.remove(); }")
+        page.evaluate("() => { window.__realConfirm = window.confirm; window.confirm = () => false; }")
+        page.click("#shutdown-btn")
+        page.click("#shutdown-btn")
+        page.wait_for_selector("#error-region #confirm-blocked", timeout=10_000)
+        assert page.locator("#error-region #confirm-blocked").count() == 1
+        assert "확인 창이 차단되어 있습니다" in page.locator("#confirm-blocked").inner_text()
+        assert proc.poll() is None and page.locator("#shutdown-page").is_hidden()
+        page.evaluate("() => { window.confirm = window.__realConfirm; document.getElementById('confirm-blocked').remove(); }")
         busy = "검사가 진행 중입니다 — 중단한 뒤 종료하십시오"
         page.route("**/api/shutdown", lambda route: route.fulfill(status=409, content_type="application/json", body=_json.dumps({"error": busy, "job_id": "x"})))
         page.once("dialog", lambda d: d.accept())
         page.click("#shutdown-btn")
-        page.wait_for_selector("#error-region .err-item:has-text('종료하지 못했습니다')", timeout=10_000)
+        page.wait_for_selector("#error-region .err-item:not(#confirm-blocked):has-text('종료하지 못했습니다')", timeout=10_000)
         assert busy in page.locator("#error-region").inner_text()
         page.unroute("**/api/shutdown")
         page.once("dialog", lambda d: d.accept())
         page.click("#shutdown-btn")
         page.wait_for_selector("#shutdown-page:not([hidden])", timeout=10_000)
         assert page.locator("#shutdown-alert").get_attribute("role") == "alert"
+        # RISK B13: the page names the launcher in the extracted folder (there is no desktop shortcut)
+        assert "압축을 푼 폴더의 'Deepfake Lens.cmd'" in page.locator("#shutdown-alert").inner_text()
         assert "종료되었습니다. 이 탭을 닫으십시오." in page.locator("#shutdown-alert").inner_text()
         assert page.evaluate("Array.from(document.querySelectorAll('button, input, select, textarea')).filter(el => !el.disabled).length") == 0
         assert page.evaluate("heartbeatTimer === null"), "the heartbeat kept running after the shutdown"
@@ -178,10 +212,38 @@ def desktop_smoke(browser: object, port: int, folder: str) -> None:
                       and not (e.startswith("Failed to load resource") and "404" in e)]
         assert not unexpected, f"desktop console errors: {unexpected[:5]}"
         page.close()
-        print("gui_smoke: desktop mode — folder dialog (501, cancel, chosen) -> scan -> roots list, refusal, lost-connection box, 종료 checked")
+
+        # RISK B5: a dialog answer of the home folder is refused (400 너무 넓은 폴더) — said in the status line and kept
+        # under the path box, the pick button focused; a OneDrive folder's note is kept under the box too.
+        others.append(start_desktop(port + 2, home))
+        page = browser.new_page()  # type: ignore[attr-defined]
+        page.goto(f"http://127.0.0.1:{port + 2}/gui", wait_until="networkidle")
+        page.wait_for_selector("#desk-bar:not([hidden])", timeout=10_000)
+        page.click("#pick-folder-btn")
+        page.wait_for_function("() => document.getElementById('pick-note').classList.contains('pick-err')", timeout=10_000)
+        wide = page.locator("#pick-note").inner_text()
+        assert wide.startswith("너무 넓은 폴더입니다(사용자 폴더 전체)"), wide
+        assert page.locator("#folder-note").is_visible() and page.locator("#folder-note").inner_text() == wide
+        assert page.evaluate("document.activeElement.id") == "pick-folder-btn"
+        assert page.evaluate("scanBusy") is False
+        page.close()
+        others.append(start_desktop(port + 3, onedrive))
+        page = browser.new_page()  # type: ignore[attr-defined]
+        page.goto(f"http://127.0.0.1:{port + 3}/gui", wait_until="networkidle")
+        page.wait_for_selector("#desk-bar:not([hidden])", timeout=10_000)
+        page.click("#pick-folder-btn")
+        page.wait_for_selector("#results-section:not([hidden])", timeout=180_000)
+        page.evaluate("location.hash = '#/scan'")
+        note = page.locator("#folder-note")
+        assert note.is_visible() and note.inner_text().startswith("OneDrive 폴더입니다"), note.inner_text()
+        assert page.locator("#pick-note").inner_text() == note.inner_text()
+        page.close()
+        print("gui_smoke: desktop mode — folder dialog (waiting text, 501, cancel said, chosen, too wide, OneDrive note) -> scan -> roots list, "
+              "refusal, lost-connection box, 프로그램 종료 checked")
     finally:
-        if proc.poll() is None:
-            proc.terminate()
+        for started in [proc, *others]:
+            if started.poll() is None:
+                started.terminate()
         _shutil.rmtree(scratch, ignore_errors=True)
 
 

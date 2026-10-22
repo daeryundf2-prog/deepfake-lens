@@ -160,6 +160,7 @@
             // DESK-5: the lost-connection box stays while the server is gone — only the other boxes are trimmed.
             const trimmable = () => region.querySelectorAll('.err-item:not(#conn-lost)');
             while (trimmable().length > 4) trimmable()[0].remove();
+            return box;
         }
 
         // GUI-REV G-4: an error belongs to the scan it was raised in. When a new
@@ -1433,7 +1434,7 @@
                     showResultsWhenDone();
                 }
             } catch (error) {
-                toast('검사 중 오류: ' + error.message, true, '', 'scan');
+                toast('검사 중 오류: ' + error.message + deniedFolderHint(error.message, defaultFolder, readRoots, desktopMode, true), true, '', 'scan');
                 progressFinish('error');
             } finally {
                 currentJobId = null;
@@ -1445,13 +1446,24 @@
         // U-8: an out-of-root folder says which folders can be scanned. GUI-REV7 F-3: and names the server's
         // own folder (--folder). DESK-3: /api/stats now lists every registered folder (roots) — when that list is
         // known the refusal names those folders instead (the --allow-root ones and the ones chosen in the dialog too).
-        function deniedFolderHint(message, folder, roots, desktop) {
+        // RISK B4: a refusal for a scan already made (its job, previews, report — `earlier`) means its folder is no
+        // longer registered: a folder chosen in the dialog is registered only until the program stops.
+        function deniedFolderHint(message, folder, roots, desktop, earlier) {
             if (!/허용되지 않은 경로/.test(message)) return '';
+            if (earlier && desktop) return " — 프로그램을 다시 시작하면 고른 폴더의 등록이 사라집니다. 같은 폴더를 '검사할 폴더 고르기'로 다시 고르십시오.";
+            if (earlier) return ' — 이 검사의 폴더가 지금 서버에 등록되어 있지 않습니다(서버를 다시 시작한 경우). 그 폴더를 --folder 또는 --allow-root로 등록해 서버를 다시 시작하십시오.';
             const pick = desktop ? ' 다른 폴더는 위의 "검사할 폴더 고르기"로 고르십시오.' : '';
             if (Array.isArray(roots) && roots.length) return ` — 지금 검사할 수 있는 폴더(그 안의 폴더 포함): ${rootsSummary(roots)}.` + pick;
             if (desktop) return ' — 아직 검사할 수 있는 폴더가 없습니다.' + pick;
             const own = folder ? ` 이 서버의 기본 폴더: ${folder}` : '';
             return ' — 서버를 시작할 때 --folder 또는 --allow-root로 등록한 폴더 안만 검사할 수 있습니다.' + own;
+        }
+        // RISK B4: the hint for a 403 answer about a scan already made (the body is read from a copy).
+        async function deniedResponseHint(res) {
+            if (res.status !== 403) return '';
+            let text = '';
+            try { text = await res.clone().text(); } catch (e) { text = ''; }
+            return deniedFolderHint(text, defaultFolder, readRoots, desktopMode, true);
         }
         // DESK-3: at most five folders by name, the rest counted.
         function rootsSummary(roots) {
@@ -2182,7 +2194,7 @@
             const pathB64 = slot.dataset.pv, kind = slot.dataset.kind;
             try {
                 const res = await apiFetch(previewUrl(pathB64));
-                if (!res.ok) { slot.innerHTML = `<span class="note">미리보기 불가 (${res.status})</span>`; return; }
+                if (!res.ok) { slot.innerHTML = `<span class="note">미리보기 불가 (${res.status})${shown(await deniedResponseHint(res))}</span>`; return; }
                 const blob = await res.blob();
                 const url = URL.createObjectURL(blob);
                 const tag = kind === 'image' ? 'img' : kind === 'video' ? 'video' : 'audio';
@@ -2202,7 +2214,7 @@
             const hmPath = slot.dataset.hm;
             try {
                 const res = await apiFetch(heatmapUrl(hmPath));
-                if (!res.ok) { slot.innerHTML = `<span class="note">히트맵을 불러올 수 없습니다 (${res.status})</span>`; return; }
+                if (!res.ok) { slot.innerHTML = `<span class="note">히트맵을 불러올 수 없습니다 (${res.status})${shown(await deniedResponseHint(res))}</span>`; return; }
                 const blob = await res.blob();
                 const img = document.createElement('img');
                 img.className = 'heatmap-img';
@@ -2227,7 +2239,8 @@
                 ]);
 
                 if (!resPv.ok || !resHm.ok) {
-                    slot.innerHTML = `<span class="note">포렌식 비교 이미지 로드 실패 (원본: ${resPv.status}, 히트맵: ${resHm.status})</span>`;
+                    const denied = (await deniedResponseHint(resPv)) || (await deniedResponseHint(resHm));
+                    slot.innerHTML = `<span class="note">포렌식 비교 이미지 로드 실패 (원본: ${resPv.status}, 히트맵: ${resHm.status})${shown(denied)}</span>`;
                     return;
                 }
 
@@ -2661,7 +2674,8 @@
                 });
                 const body = await res.json();
                 if (seq !== a4Seq) return;
-                box.innerHTML = res.ok ? a4Html(body) : `<p class="miss">미리보기를 만들지 못했습니다: ${shown(body.error || res.status)}</p>`;
+                const denied = res.status === 403 ? deniedFolderHint(String(body.error || ''), defaultFolder, readRoots, desktopMode, true) : '';
+                box.innerHTML = res.ok ? a4Html(body) : `<p class="miss">미리보기를 만들지 못했습니다: ${shown(body.error || res.status)}${shown(denied)}</p>`;
                 // Merge of R22-1: the server's listing of the folder (the 기록되지 않은 파일 box) feeds the checklist.
                 a4Listing = res.ok && body.unrecorded_listing && typeof body.unrecorded_listing === 'object' ? body.unrecorded_listing : null;
                 if (currentView === 'report') renderChecks(selectedEntries());
@@ -2892,6 +2906,8 @@
                         markChangedRows(changedRows);
                         $('export-note').textContent = spec[3] + ' — 만들지 못했습니다.';
                     } else {
+                        // RISK B4: a job whose folder is no longer registered (403) says how to register it again.
+                        if (res.status === 403) message += deniedFolderHint(message, defaultFolder, readRoots, desktopMode, true);
                         failed(message, rescan);
                     }
                     return;
@@ -3235,13 +3251,20 @@
         // The product name as the top bar shows it (one place for it).
         const PRODUCT = document.querySelector('.brand-name').textContent.trim();
         const ROOTS_SHOWN = 5;
-        const PICK_WAIT = '폴더 선택 창이 떠 있습니다 — 보이지 않으면 작업 표시줄을 확인하십시오';
+        // RISK B5: the dialog may take seconds to appear (a cold PowerShell) and its owner window is not on the taskbar.
+        const PICK_WAIT = "폴더 선택 창을 여는 중입니다(처음에는 몇 초 걸릴 수 있습니다). 창이 안 보이면 Alt+Tab으로 '폴더 찾아보기' 창을 찾으십시오.";
+        const PICK_CANCELLED = '폴더 선택을 취소했습니다';
         // DESK-3: the folder last chosen in the OS dialog, with its bytes (a non-UTF-8 name survives the scan request).
         let pickedFolder = null;
-        const CONNECTION_LOST = `서버와 연결이 끊겼습니다 — 바탕 화면의 ${PRODUCT}를 다시 실행하십시오`;
+        // RISK B13: there is no desktop shortcut — the program is started from the folder the zip was extracted to.
+        const LAUNCHER = `압축을 푼 폴더의 '${PRODUCT}.cmd'(macOS: '${PRODUCT}.command')`;
+        const CONNECTION_LOST = `서버와 연결이 끊겼습니다 — ${LAUNCHER}를 다시 실행하십시오`;
         const HEARTBEAT_MS = 30000;
         const HEARTBEAT_TIMEOUT_MS = 10000;
-        const SHUTDOWN_QUESTION = `${PRODUCT}를 종료할까요? 종료하면 이 화면은 더 쓸 수 없습니다 — 다시 쓰려면 바탕 화면의 ${PRODUCT}를 다시 실행하십시오.`;
+        const SHUTDOWN_QUESTION = `${PRODUCT}를 종료할까요? 종료하면 이 화면은 더 쓸 수 없습니다 — 다시 쓰려면 ${LAUNCHER}를 다시 실행하십시오.`;
+        // RISK B17: a browser told to block this page's dialogs makes window.confirm return false at once, showing nothing.
+        const CONFIRM_BLOCKED = '확인 창이 차단되어 있습니다 — 브라우저 설정에서 이 사이트의 대화상자 차단을 해제하거나 콘솔 창을 닫아 종료하십시오';
+        const CONFIRM_BLOCKED_MS = 50;
         const FORM_CONTROLS = [HTMLButtonElement, HTMLInputElement, HTMLSelectElement, HTMLTextAreaElement];
 
         // DESK-2..7: one call when /api/stats has answered. The plain web server says desktop false — what comes
@@ -3333,10 +3356,25 @@
         // DESK-2: 종료 asks, then stops the server; the page is replaced by one sentence (role=alert) and every
         // control is disabled — nothing on it can reach the server any more. A refusal (409: a scan is running)
         // is said in the error region with the server's text.
-        $('shutdown-btn').addEventListener('click', async () => {
+        // RISK B17 heuristic: a person needs far more than CONFIRM_BLOCKED_MS to read the question and answer it, so a
+        // "no" that comes back sooner after a real click (isTrusted — not a script's click()) is a dialog the browser
+        // did not show ("이 페이지가 추가 대화상자를 만들지 못하도록 차단"). A missed case only leaves the old silence;
+        // a false alarm only adds a hint — the confirm itself is unchanged (a <dialog> instead of it is backlog).
+        function confirmLooksBlocked(answer, elapsedMs, trusted) {
+            return answer === false && trusted === true && elapsedMs < CONFIRM_BLOCKED_MS;
+        }
+        $('shutdown-btn').addEventListener('click', async e => {
             const btn = $('shutdown-btn');
             if (appShutDown || isBusyButton(btn)) return;
-            if (!window.confirm(SHUTDOWN_QUESTION)) return;
+            const asked = performance.now();
+            const answer = window.confirm(SHUTDOWN_QUESTION);
+            if (!answer) {
+                // Said once, and it stays (the error region, until closed).
+                if (confirmLooksBlocked(answer, performance.now() - asked, e.isTrusted) && !$('confirm-blocked')) {
+                    showError(CONFIRM_BLOCKED, '종료하지 못했습니다').id = 'confirm-blocked';
+                }
+                return;
+            }
             setBusyButton(btn, true);
             try {
                 const res = await apiFetch('/api/shutdown', { method: 'POST' });
@@ -3363,7 +3401,7 @@
             head.tabIndex = -1;
             head.textContent = '종료되었습니다. 이 탭을 닫으십시오.';
             const next = document.createElement('p');
-            next.textContent = `다시 쓰려면 바탕 화면의 ${PRODUCT}를 다시 실행하십시오.`;
+            next.textContent = `다시 쓰려면 ${LAUNCHER}를 다시 실행하십시오.`;
             $('shutdown-page').hidden = false;
             $('shutdown-alert').replaceChildren(head, next);
             head.focus();
@@ -3438,7 +3476,9 @@
         // server's own text (409: a dialog is already open or the folder list is full; 501: no dialog here; 400: not a folder).
         function pickOutcome(status, body) {
             if (status === 200 && body && typeof body.folder === 'string' && body.folder) {
-                return { kind: 'picked', folder: body.folder, b64: typeof body.folder_b64 === 'string' ? body.folder_b64 : '' };
+                // RISK B5: a caution the server attaches to the folder (OneDrive), or null.
+                return { kind: 'picked', folder: body.folder, b64: typeof body.folder_b64 === 'string' ? body.folder_b64 : '',
+                    note: typeof body.note === 'string' ? body.note : '' };
             }
             if (status === 200 && body && body.folder === null) return { kind: 'cancel' };
             const text = body && typeof body.error === 'string' && body.error ? body.error : `폴더 선택 창을 열지 못했습니다 (HTTP ${status})`;
@@ -3449,11 +3489,26 @@
             if (note.textContent !== text) note.textContent = text;
             note.classList.toggle('pick-err', Boolean(isError));
         }
+        // RISK B5: the same text kept under the path box (a lasting hint, not only the passing status line) — the
+        // OneDrive caution for the folder chosen, or the reason a pick was refused. It goes when the box is changed to
+        // another folder or at the next pick.
+        let folderNoteFor = null;
+        function setFolderNote(text, isError, folder) {
+            const note = $('folder-note');
+            note.textContent = text;
+            note.hidden = !text;
+            note.classList.toggle('pick-err', Boolean(isError));
+            folderNoteFor = text && folder ? folder : null;
+        }
+        $('folder-path').addEventListener('input', () => {
+            if (!$('folder-note').hidden && $('folder-path').value.trim() !== folderNoteFor) setFolderNote('', false, null);
+        });
         $('pick-folder-btn').addEventListener('click', async () => {
             const btn = $('pick-folder-btn');
             if (!desktopMode || appShutDown || scanBusy || isBusyButton(btn) || isBusyButton($('analyze-btn'))) return;
             setBusyButton(btn, true);
             setPickNote(PICK_WAIT, false);
+            setFolderNote('', false, null);
             let outcome;
             try {
                 const res = await apiFetch('/api/pick-folder', { method: 'POST' });
@@ -3466,11 +3521,15 @@
                 setBusyButton(btn, false);
             }
             if (appShutDown) return;
-            if (outcome.kind === 'cancel') { setPickNote('', false); return; }
+            // RISK B17: a cancel is said in the status line (role=status) — before, the line only went blank.
+            if (outcome.kind === 'cancel') { setPickNote(PICK_CANCELLED, false); return; }
             if (outcome.kind === 'error') {
                 // Said in the folder box's own hint (aria-describedby of the box and of this button), not only in passing.
                 setPickNote(outcome.text, true);
+                setFolderNote(outcome.text, true, null);
                 if (outcome.status === 501) $('folder-path').focus();
+                // RISK B5: 400 — too wide (home, drive root, …) or not a folder: pick another one.
+                if (outcome.status === 400) btn.focus();
                 return;
             }
             refreshRoots();
@@ -3478,9 +3537,10 @@
                 setPickNote(`검사가 진행 중이라 고른 폴더로 시작하지 않았습니다 — 끝난 뒤 다시 고르십시오. 고른 폴더: ${displayName(outcome.folder)}`, true);
                 return;
             }
-            setPickNote('', false);
+            setPickNote(outcome.note, false);
             pickedFolder = { folder: outcome.folder, b64: outcome.b64 };
             $('folder-path').value = outcome.folder;
+            setFolderNote(outcome.note, false, outcome.folder);
             $('scan-form').requestSubmit();
         });
 
