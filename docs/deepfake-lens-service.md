@@ -339,7 +339,7 @@ deepfake-lens desktop [--folder P] [--port N] [--no-browser] [--idle-exit-minute
 | 경로 | 메서드 | 응답 |
 | --- | --- | --- |
 | `/api/roots` | GET | 200 `{"roots": [{"path": 문자열, "path_b64": 바이트 경로의 base64}, …]}` — 등록 순서 |
-| `/api/pick-folder` | POST | OS 폴더 선택 창을 열고(Windows PowerShell, macOS `osascript`, Linux `zenity`·`kdialog`) 고른 폴더를 읽기 허용 폴더로 등록합니다. 200 `{"folder": 경로, "folder_b64": base64}`. 취소하면 200 `{"folder": null, "folder_b64": null}`. 창이 이미 열려 있으면 **409** `{"error": "폴더 선택 창이 이미 열려 있습니다 — …"}`. 창을 띄울 수단이 없거나 띄우지 못하면 **501**. 고른 경로가 폴더가 아니면 400. 등록 수 상한(64)을 넘으면 409 |
+| `/api/pick-folder` | POST | OS 폴더 선택 창을 열고(Windows PowerShell, macOS `osascript`, Linux `zenity`·`kdialog`) 고른 폴더를 읽기 허용 폴더로 등록합니다. 200 `{"folder": 경로, "folder_b64": base64}`, OneDrive 폴더처럼 주의가 필요하면 선택 항목 `note`(문자열 — 온라인 전용 파일을 내려받으며 검사하거나 건너뛸 수 있다는 안내)가 붙습니다. 취소하면 200 `{"folder": null, "folder_b64": null}`. 창이 이미 열려 있으면 **409** `{"error": "폴더 선택 창이 이미 열려 있습니다 — …"}`. 고른 경로가 폴더가 아니면 400, **너무 넓은 폴더**(홈·드라이브 루트·사용자 데이터 폴더·도구 캐시·임시 폴더·`sys.prefix`를 품는 폴더)면 **400** `{"error": "너무 넓은 폴더입니다(…) — 증거 파일이 든 폴더를 고르십시오"}`. 등록 수 상한(64)을 넘으면 409. **501**: 창을 띄울 수단이 없거나 띄우지 못할 때, 보안 정책이 PowerShell을 제한할 때(`…보안 정책이 PowerShell을 제한합니다…` — 그 밖의 PowerShell 비정상 종료도 501이고 stderr는 로그에만 남음), 10분(`run_child(timeout=600)`) 안에 답이 없을 때(시간 초과 문구) — 501 안내는 폴더를 직접 입력하라고 알립니다 |
 | `/api/shutdown` | POST | 비동기 검사가 진행 중이면 **409** `{"error": "검사가 진행 중입니다 — …", "job_id": 작업 id}`. 아니면 200 `{"status": "shutting_down"}`을 보낸 뒤 서버를 끄고 프로세스가 종료 코드 0으로 끝납니다 |
 | `/api/heartbeat` | POST | 200 `{"status": "ok"}` — 화면이 열려 있다는 신호(유휴 종료를 미룸) |
 
@@ -347,13 +347,21 @@ deepfake-lens desktop [--folder P] [--port N] [--no-browser] [--idle-exit-minute
 
 시험용 환경 변수 `DEEPFAKE_LENS_PICK_FOLDER_STUB`(테스트와 GUI 스모크용)는 실제 창 대신 쓰입니다. 폴더 경로면 그 폴더를 고른 것으로, 빈 문자열(`""`)이면 취소로, `"501"`이면 창을 띄울 수 없는 환경(501)으로 취급합니다.
 
+#### Windows 폴더 선택 helper 규칙
+
+PowerShell 스크립트는 표준출력에 결과를 명시합니다. 고르면 `OK:<경로>`, 취소하면 `CANCEL`(둘 다 BOM 없는 UTF-8). 스크립트는 먼저 언어 모드를 검사해 ConstrainedLanguage(AppLocker·WDAC)면 **종료 코드 3**으로 끝나고 서버는 이를 정책 차단 501로 답합니다. 종료 코드 0이 아니거나 `OK:`·`CANCEL`이 아닌 출력은 취소로 보지 않고 501로 처리합니다(예전에는 모든 실패가 「취소」로 보였습니다). 소유 창은 작업 표시줄에 나오지 않을 수 있어 안내는 「Alt+Tab으로 '폴더 찾아보기' 창을 찾으십시오」입니다.
+
+### 포트 독점 바인드
+
+Windows에서는 `SO_REUSEADDR`가 이미 LISTEN 중인 포트의 bind도 허용하므로, 빈 포트 탐침과 서버 소켓 모두 `SO_EXCLUSIVEADDRUSE`를 씁니다(서버의 `allow_reuse_address`는 끕니다). 같은 포트에 두 번째 인스턴스를 띄우면 bind가 거부되고, 그 포트에서 이 도구가 이미 답하면(위 `--port`) 런처는 서버를 새로 띄우지 않고 첫 인스턴스의 화면을 브라우저로 엽니다. 다른 프로그램이 쓰는 포트이거나 bind가 실패(`OSError`)하면 다음 포트로 넘어갑니다. 탐침은 환경의 프록시 설정을 무시합니다(`ProxyHandler({})`).
+
 ### 서명 키 파일
 
-`DEEPFAKE_LENS_REPORT_KEY`가 이미 있으면 그것을 씁니다(`source: "env"`). 없으면 사용자 데이터 폴더(Windows `%APPDATA%\deepfake-lens\`)의 `report-key` 파일을 읽습니다(`"file"`). 파일이 없으면 64자리 16진 키를 새로 만들어 쓰고(`"created"`, 권한 0600) 이 프로세스의 환경 변수로 올립니다. 파일이 읽히지 않거나 비었거나 최소 길이(32바이트)에 못 미치면 `오류: 서명 키 파일이 손상되었습니다: <경로> …`와 종료 코드 2로 끝나며 **파일을 덮어쓰지 않습니다**(이전 감정서는 그 키로만 검증됩니다). 사용자 데이터 폴더를 정할 수 없거나 키 파일을 쓸 수 없으면 서명 없이 시작하고 콘솔에 한 줄을 남깁니다. 이 키로 서명한 감정서는 이 PC의 이 계정에서만 검증됩니다: `deepfake-lens verify-report --key-file <report-key 파일>`.
+`DEEPFAKE_LENS_REPORT_KEY`가 이미 있으면 그것을 씁니다(`source: "env"`). 없으면 사용자 데이터 폴더(Windows `%APPDATA%\deepfake-lens\`)의 `report-key` 파일을 읽습니다(`"file"`). 파일이 없으면 64자리 16진 키를 새로 만들어 쓰고(`"created"` — 쓰기를 끝낸 뒤 `os.replace`로 원자적으로 놓으므로 동시에 시작한 두 인스턴스가 빈 파일을 「손상」으로 읽지 않으며, Windows에서는 생성 직후 소유자 전용 DACL을 적용하고 POSIX에서는 권한 0600) 이 프로세스의 환경 변수로 올립니다. 파일이 읽히지 않거나 비었거나 최소 길이(32바이트)에 못 미치면 `오류: 서명 키 파일이 손상되었습니다: <경로> …`와 종료 코드 2로 끝나며 **파일을 덮어쓰지 않습니다**(이전 감정서는 그 키로만 검증됩니다). 사용자 데이터 폴더를 정할 수 없거나 키 파일을 쓸 수 없으면 서명 없이 시작하고 콘솔에 한 줄을 남깁니다. 이 키로 서명한 감정서는 **이 키 파일을 가진 계정에서만 검증**됩니다(「이 PC에서만」이 아님 — `%APPDATA%`는 Roaming 폴더라 AD 로밍 프로필·폴더 리디렉션이면 다른 PC로 동기화될 수 있습니다. 위치 변경은 BL-72): `deepfake-lens verify-report --key-file <report-key 파일>`.
 
 ### 유휴 종료와 종료 방법
 
-`--idle-exit-minutes M`(M > 0)분 동안 API 호출(화면의 heartbeat 포함)이 없고 진행 중인 비동기 검사도 없으면 `M분 동안 사용이 없어 종료합니다.`를 찍고 스스로 꺼집니다. 검사가 진행되는 동안에는 꺼지지 않습니다. 그 밖의 종료 방법은 화면의 「종료」(`/api/shutdown`), 콘솔 창 닫기, Ctrl-C입니다.
+`--idle-exit-minutes M`(M > 0)분 동안 API 호출(화면의 heartbeat 포함)이 없고 진행 중인 비동기 검사도 없으면 `M분 동안 사용이 없어 종료합니다.`를 찍고 스스로 꺼집니다. 검사가 진행되는 동안에는 꺼지지 않습니다. 절전 규칙: 유휴 시계의 루프 틱 간격이 60초를 넘게 뛰면(Windows의 `time.monotonic()`은 절전 시간을 포함합니다) 절전 복귀로 보고 유휴 시계를 다시 시작하므로 깨어난 직후 곧바로 꺼지지 않습니다. 화면은 보이는 순간(`visibilitychange`·`focus`·`pageshow`) 즉시 heartbeat를 보냅니다. 그 밖의 종료 방법은 화면의 「종료」(`/api/shutdown`), 콘솔 창 닫기, Ctrl-C입니다.
 
 ## Error status codes — every `/api/*` endpoint (X4)
 
