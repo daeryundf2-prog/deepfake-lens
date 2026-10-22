@@ -36,6 +36,8 @@
         let appShutDown = false;
         // DESK-3: the registered read roots as /api/stats and /api/roots list them (display text).
         let readRoots = [];
+        // DESK-6: the report signing key as /api/stats describes it ({available, source, key_id}), null when not said.
+        let signingInfo = null;
 
         /* Review marks stored locally and synchronized with backend API */
         const REVIEW_KEY = 'dflens-review-v1';
@@ -2534,6 +2536,9 @@
                 if (cueRows || failedRows) out.push({ tag: 'warn', text: `번호 없이 남는 판단 불가 행 중 단서 ${cueRows}개 · 검사 실패 ${failedRows}개 — 서증 번호를 붙이려면 판단 불가 칸을 고르십시오.`, act: ['판단 불가 넣기', () => { $('inc-undet').checked = true; groupsTouched = true; renderReport(); $('inc-undet').focus(); }] });
             }
             if (pdfAvailable === false) out.push({ tag: 'warn', text: 'PDF 엔진(pymupdf)이 설치되어 있지 않아 PDF는 만들 수 없습니다 — HTML 보고서와 서명된 JSON은 만들 수 있습니다.' });
+            // DESK-6: where the signing key comes from (and so where a report can be verified).
+            const signed = signingCheck(signingInfo);
+            if (signed) out.push(signed);
             return out;
         }
         // Merge of phase0 R22-1: the 기록되지 않은 파일 counts are the server's own listing of the
@@ -3243,6 +3248,8 @@
         function applyDesktopStats(d) {
             desktopMode = d.desktop === true;
             readRoots = Array.isArray(d.roots) ? d.roots.filter(root => typeof root === 'string') : [];
+            signingInfo = d.signing && typeof d.signing === 'object' ? d.signing : null;
+            renderStatusChips();
             renderRoots();
             if (!desktopMode) return;
             $('desk-bar').hidden = false;
@@ -3349,6 +3356,33 @@
             $('shutdown-page').hidden = false;
             $('shutdown-alert').replaceChildren(head, next);
             head.focus();
+        }
+
+        // DESK-6: the two chips next to the version — PDF and signing, as /api/stats says them (not said: no chip).
+        function statusChipTexts(pdf, signing) {
+            const pdfText = pdf === true ? 'PDF 가능' : pdf === false ? 'PDF 불가' : '';
+            const signText = signing && typeof signing.available === 'boolean' ? (signing.available ? '서명 자동' : '서명 없음') : '';
+            return [pdfText, signText];
+        }
+        function renderStatusChips() {
+            const [pdfText, signText] = statusChipTexts(pdfAvailable, signingInfo);
+            [['pdf-chip', pdfText, pdfAvailable === false], ['sign-chip', signText, Boolean(signingInfo) && signingInfo.available === false]].forEach(([id, text, off]) => {
+                const chip = $(id);
+                chip.textContent = text;
+                chip.hidden = !text;
+                chip.classList.toggle('chip-off', off);
+            });
+        }
+        // DESK-6: the checklist line on the signing key. A key file of this PC verifies only where that file is.
+        function signingCheck(signing) {
+            if (!signing || typeof signing.available !== 'boolean') return null;
+            if (!signing.available) {
+                return { tag: 'warn', text: '서명 키가 없어 내보내는 문서에 서명이 붙지 않습니다(서명 없음) — 받는 쪽이 문서가 바뀌지 않았는지 검증할 수 없습니다.' };
+            }
+            const id = typeof signing.key_id === 'string' && signing.key_id ? ` (키 id ${signing.key_id})` : '';
+            if (signing.source === 'file' || signing.source === 'created') return { tag: 'info', text: '서명 키: 이 PC의 사용자 폴더(report-key) — 다른 PC에서는 검증되지 않음' + id };
+            if (signing.source === 'env') return { tag: 'info', text: '서명 키: 환경 변수(DEEPFAKE_LENS_REPORT_KEY)' + id };
+            return { tag: 'info', text: '서명 키: 있음' + id };
         }
 
         // DESK-3: "지금 검사할 수 있는 폴더" under the folder box — at most five by name, the rest counted.

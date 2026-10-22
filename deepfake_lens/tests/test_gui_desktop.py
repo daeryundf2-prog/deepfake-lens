@@ -245,5 +245,50 @@ class Desk5HeartbeatTest(unittest.TestCase):
         self.assertIn("stopHeartbeat();", _function("showShutdownPage"))  # nothing is sent after the shutdown
 
 
+class Desk6StatusChipsTest(unittest.TestCase):
+    """DESK-6: PDF and signing chips next to the version; the report checklist says where the signing key comes from."""
+
+    def test_chips_sit_next_to_the_version(self) -> None:
+        html = _html()
+        version = html.index('id="ver-chip"')
+        self.assertLess(version, html.index('id="pdf-chip"'))
+        self.assertLess(html.index('id="pdf-chip"'), html.index('id="sign-chip"'))
+        self.assertLess(html.index('id="sign-chip"'), html.index('<div class="case-line">'))
+        for chip in ("pdf-chip", "sign-chip"):
+            self.assertIn("hidden", _element(html, chip))
+        self.assertIn("const signed = signingCheck(signingInfo);", _function("reportChecks"))
+
+    @unittest.skipUnless(_js_engine(), "no JavaScript engine (node or osascript)")
+    def test_chip_texts(self) -> None:
+        body = _function("statusChipTexts") + (
+            "var out = JSON.stringify([statusChipTexts(true, {available: true}), statusChipTexts(false, {available: false}),"
+            " statusChipTexts(null, null), statusChipTexts(true, {})]);"
+        )
+        self.assertEqual(json.loads(_run_js(body)), [["PDF 가능", "서명 자동"], ["PDF 불가", "서명 없음"], ["", ""], ["PDF 가능", ""]])
+
+    @unittest.skipUnless(_js_engine(), "no JavaScript engine (node or osascript)")
+    def test_the_checklist_line_names_the_key_source(self) -> None:
+        body = _function("signingCheck") + (
+            "var out = JSON.stringify(["
+            "signingCheck({available: true, source: 'file', key_id: 'ab12'}), signingCheck({available: true, source: 'created', key_id: null}),"
+            "signingCheck({available: true, source: 'env', key_id: 'cd34'}), signingCheck({available: false, source: 'none', key_id: null}),"
+            "signingCheck({available: true, source: null, key_id: 'ef'}), signingCheck(null), signingCheck({})]);"
+        )
+        file_, created, env, none, other, absent, empty = json.loads(_run_js(body))
+        self.assertEqual(file_, {"tag": "info", "text": "서명 키: 이 PC의 사용자 폴더(report-key) — 다른 PC에서는 검증되지 않음 (키 id ab12)"})
+        self.assertEqual(created, {"tag": "info", "text": "서명 키: 이 PC의 사용자 폴더(report-key) — 다른 PC에서는 검증되지 않음"})
+        self.assertEqual(env, {"tag": "info", "text": "서명 키: 환경 변수(DEEPFAKE_LENS_REPORT_KEY) (키 id cd34)"})
+        self.assertEqual(none["tag"], "warn")
+        self.assertIn("서명 없음", none["text"])
+        self.assertEqual(other, {"tag": "info", "text": "서명 키: 있음 (키 id ef)"})
+        self.assertIsNone(absent)
+        self.assertIsNone(empty)
+
+    def test_the_variable_name_matches_the_server(self) -> None:
+        from deepfake_lens.signing import REPORT_KEY_ENV
+
+        self.assertIn(f"서명 키: 환경 변수({REPORT_KEY_ENV})", _function("signingCheck"))
+
+
 if __name__ == "__main__":
     unittest.main()

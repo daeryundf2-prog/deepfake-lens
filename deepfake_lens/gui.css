@@ -596,6 +596,10 @@ select.field { padding-right: 8px; }
 .upload-block > summary::after { content: "+"; font-family: var(--mono); color: var(--muted); position: absolute; right: 4px; top: 2px; }
 .upload-block[open] > summary::after { content: "−"; }
 
+/* DESK-6: the PDF and signing chips next to the version. */
+.status-chip { border: 1px solid var(--line); border-radius: 999px; padding: 0 8px; color: var(--ink-2); }
+.status-chip.chip-off { border-color: var(--warn); color: var(--warn); }
+
 /* GUI-REV7 F-8: Windows contrast themes (forced colors) drop backgrounds and box-shadows — the current row,
    a pressed verdict filter, a pressed review star, the progress fill, a changed row, the drop zone while a
    file is held over it and the active studio mode were told only by them. Here they get a border, an
