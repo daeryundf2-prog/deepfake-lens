@@ -216,5 +216,23 @@ class F5ViewResultsButtonIsNamedBackTest(unittest.TestCase):
         self.assertEqual(json.loads(_run_js(body)), ["부분 결과 보기", "결과 보기"])
 
 
+class F6ScanSubmitIsNotDoubledTest(unittest.TestCase):
+    """F-6 (Med): 「검사 시작」 checked only scanBusy, which is set after /api/scan answers — a second Enter or a
+    double click while the request was out started a second job."""
+
+    def test_the_submit_handler_returns_while_the_button_is_busy(self) -> None:
+        source = _source()
+        start = source.index("$('scan-form').addEventListener('submit', async e => {")
+        handler = source[start:source.index("\n        });\n", start)]
+        guard = handler.index("if (scanBusy || isBusyButton($('analyze-btn'))) return;")
+        busy = handler.index("setBusyButton($('analyze-btn'), true);")
+        request = handler.index("await apiJson('/api/scan?'")
+        self.assertLess(guard, busy)
+        self.assertLess(busy, request)
+        # nothing between the guard and the busy mark waits (the second event cannot slip in between)
+        self.assertNotIn("await", handler[guard:busy])
+        self.assertIn("setBusyButton($('analyze-btn'), false);", handler[request:])
+
+
 if __name__ == "__main__":
     unittest.main()

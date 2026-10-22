@@ -1361,7 +1361,10 @@
 
         $('scan-form').addEventListener('submit', async e => {
             e.preventDefault();
-            if (scanBusy) return;
+            // GUI-REV7 F-6: scanBusy is set only when /api/scan has answered; the button is marked busy
+            // (synchronously, below) from the first submit — an Enter or a double click in between started
+            // a second job whose poll overwrote the progress panel.
+            if (scanBusy || isBusyButton($('analyze-btn'))) return;
             const folderPath = $('folder-path').value.trim();
             if (!folderPath) { toast('폴더 경로를 입력하세요', true, '', 'scan'); $('folder-path').focus(); return; }
             const params = new URLSearchParams({
