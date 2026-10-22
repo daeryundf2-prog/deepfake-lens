@@ -186,5 +186,35 @@ class F4RetiredErrorsAreRemovedTest(unittest.TestCase):
         self.assertEqual(json.loads(_run_js(body)), [[True, False, True], "main"])
 
 
+class F5ViewResultsButtonIsNamedBackTest(unittest.TestCase):
+    """F-5 (Med, false text): after one cancelled scan, the button of every later complete scan said
+    「부분 결과 보기」 — progressFinish renamed it and nothing named it back."""
+
+    def test_progress_start_names_the_button_back(self) -> None:
+        self.assertIn('<button class="btn btn-primary" id="view-results-btn" type="button" hidden>결과 보기</button>', _html())
+        self.assertIn("$('view-results-btn').textContent = '결과 보기';", _function("progressStart"))
+        self.assertIn("$('view-results-btn').textContent = '부분 결과 보기';", _function("progressFinish"))
+
+    @unittest.skipUnless(_js_engine(), "no JavaScript engine (node or osascript)")
+    def test_cancelled_then_done_says_results(self) -> None:
+        stubs = (
+            "var els = {};\nfunction $(id) { if (!els[id]) els[id] = {id: id, hidden: false, textContent: '', style: {},"
+            " classList: {add: function () {}, remove: function () {}}, setAttribute: function () {}, removeAttribute: function () {},"
+            " getAttribute: function () { return null; }}; return els[id]; }\n"
+            "var document = {activeElement: null};\n"
+            "var prog = {serverElapsed: 0, at: 0, done: 0, total: null, timer: null, quarter: 0, running: false};\n"
+            "function setStatusText() {} function paintCounts() {} function paintTime() {} function announce() {}\n"
+            "function setBusyButton() {} function elapsedNow() { return 0; } function focusSafely() {} function dropRetiredErrors() {}\n"
+            "function partialResultNote() { return '부분'; }\nfunction setInterval() { return 1; } function clearInterval() {}\n"
+        )
+        body = stubs + _function("progressStart") + _function("progressFinish") + (
+            "var got = [];\n"
+            "progressStart('검사 중', true); progressFinish('cancelled', {items: [], summary: {}}); got.push($('view-results-btn').textContent);\n"
+            "progressStart('검사 중', true); progressFinish('done', {items: [1]}); got.push($('view-results-btn').textContent);\n"
+            "var out = JSON.stringify(got);"
+        )
+        self.assertEqual(json.loads(_run_js(body)), ["부분 결과 보기", "결과 보기"])
+
+
 if __name__ == "__main__":
     unittest.main()

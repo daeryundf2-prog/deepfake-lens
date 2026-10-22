@@ -1046,6 +1046,8 @@
             $('progress-fill').style.width = '';
             $('cancel-banner').hidden = true;
             $('view-results-btn').hidden = true;
+            // GUI-REV7 F-5: a cancelled scan renames it 「부분 결과 보기」 (progressFinish); every new scan names it back.
+            $('view-results-btn').textContent = '결과 보기';
             $('scan-cancel').hidden = !canCancel;
             $('cancel-note').hidden = !canCancel;
             setBusyButton($('scan-cancel'), false);
