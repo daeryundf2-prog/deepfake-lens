@@ -4,6 +4,16 @@
 
 Local AI-generated image/text screening tools split from the mobile-forensics repository.
 
+## 일반 사용자(설치 없이)
+
+터미널을 쓰지 않는 분은 Windows용 꾸러미 `DeepfakeLens-win64.zip`을 받아 아래 세 단계로 씁니다. 설치도, 관리자 권한도, PATH 변경도 필요 없습니다(x64 Windows 전용).
+
+1. 압축을 `C:\DeepfakeLens` 같은 로컬 폴더에 풉니다(OneDrive 폴더는 피하십시오).
+2. 「Deepfake Lens.cmd」를 더블클릭합니다. 처음에 SmartScreen이 막으면 「추가 정보」 → 「실행」을 누르십시오.
+3. 브라우저에 화면이 열리면 「검사할 폴더 고르기」를 눌러 검사할 폴더를 고릅니다.
+
+자세한 안내는 꾸러미 안의 「읽어보세요.txt」에 있습니다. 보고서 서명 키는 처음 실행할 때 `%APPDATA%\deepfake-lens\report-key`에 만들어지며, 그 키로 서명한 감정서는 그 PC의 그 계정에서만 검증됩니다.
+
 ## Python CLI
 
 ```bash

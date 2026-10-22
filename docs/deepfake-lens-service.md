@@ -307,6 +307,54 @@ scanner checks between files — the job then ends `cancelled` with the partial
 result (`summary.cancelled`, R18-3; R26-5 (round 26) corrected this line, which
 said the partial results come back as `done`).
 
+## 데스크톱 모드 (`desktop`)
+
+터미널을 쓰지 않는 사용자를 위한 진입점입니다. `web`과 같은 로컬 서버를 시작하고 브라우저를 엽니다(계획: `docs/gui/plan_desktop_mode.md`).
+
+```
+deepfake-lens desktop [--folder P] [--port N] [--no-browser] [--idle-exit-minutes M] [--models-dir D]
+```
+
+- `--folder P`: 처음 열 증거 폴더(읽기 허용 폴더로 등록됨, 생략 가능).
+- `--port N`: 지정하면 그 포트 하나만 시도합니다. 생략하면 8765부터 21개 포트 중 첫 빈 포트를 씁니다(모두 사용 중이면 `오류: …`와 종료 코드 2). 그 포트에서 이 도구가 이미 답하면(`/api/stats`가 `status: "ok"`와 `version`을 돌려줌) 서버를 새로 띄우지 않고 브라우저만 열고 종료 코드 0으로 끝납니다.
+- `--no-browser`: 브라우저를 열지 않습니다. 브라우저를 열지 못하면 주소를 한 줄 출력합니다.
+- `--idle-exit-minutes M`: 기본 20, 0이면 유휴 종료를 끕니다(음수는 사용법 오류). `--models-dir D`는 `web`과 같습니다.
+- 바인드는 항상 `127.0.0.1`이고 `--allow-lan`·`--token`은 없습니다. 서버를 `desktop=True`로 만들 때 이 둘이 함께 오면 `ValueError`로 거부합니다(폴더 선택 창과 종료는 이 PC 앞의 사람에게만 속합니다).
+- 시작하면 콘솔에 화면 주소(`/gui`), 종료 방법, 서명 키 줄, 로그 파일 줄, 유휴 종료 줄(`M > 0`일 때)과, x64가 아닌 PC나 OneDrive 폴더 안 실행 같은 `주의:` 줄을 찍습니다.
+
+### `/api/stats`의 `desktop`
+
+`/api/stats`는 `desktop` 항목을 항상 돌려줍니다. 서버가 `desktop=True`로 만들어졌을 때(곧 `desktop` 명령일 때)만 `true`이고, `web`·`api-serve`에서는 `false`입니다. 같은 응답의 추가 항목:
+
+| 항목 | 값 |
+| --- | --- |
+| `roots` | 등록된 읽기 허용 폴더의 목록(문자열). 등록된 것이 없으면 `[]` |
+| `signing` | `{"available": 키 사용 가능 여부, "source": "env"·"file"·"created"·null, "key_id": 키 식별자 또는 null}` — 데스크톱 모드가 아니면 `source`는 환경 변수 키가 있을 때 `"env"`, 없으면 `null` |
+| `idle_exit_minutes` | 유휴 종료 분. 데스크톱 모드가 아니면 `null` |
+
+### 데스크톱 전용 경로
+
+네 경로는 서버가 `desktop=True`일 때만 있습니다. 그렇지 않으면 다른 모르는 경로처럼 모두 **404**(`{"error": "찾을 수 없는 경로입니다"}`)입니다. 다른 `/api/*`와 같은 보호가 먼저 적용됩니다. `Host`가 `127.0.0.1`·`localhost`·`::1`이 아니면 **403**(DNS 리바인딩 방어), `X-Deepfake-Lens-Client: gui` 헤더(비어 있지 않은 값)가 없으면 **401**입니다(교차 출처 요청은 이 헤더를 붙일 수 없습니다). 이 보호를 통과한 `/api/*` 요청은 어느 경로든 유휴 시계를 다시 시작합니다.
+
+| 경로 | 메서드 | 응답 |
+| --- | --- | --- |
+| `/api/roots` | GET | 200 `{"roots": [{"path": 문자열, "path_b64": 바이트 경로의 base64}, …]}` — 등록 순서 |
+| `/api/pick-folder` | POST | OS 폴더 선택 창을 열고(Windows PowerShell, macOS `osascript`, Linux `zenity`·`kdialog`) 고른 폴더를 읽기 허용 폴더로 등록합니다. 200 `{"folder": 경로, "folder_b64": base64}`. 취소하면 200 `{"folder": null, "folder_b64": null}`. 창이 이미 열려 있으면 **409** `{"error": "폴더 선택 창이 이미 열려 있습니다 — …"}`. 창을 띄울 수단이 없거나 띄우지 못하면 **501**. 고른 경로가 폴더가 아니면 400. 등록 수 상한(64)을 넘으면 409 |
+| `/api/shutdown` | POST | 비동기 검사가 진행 중이면 **409** `{"error": "검사가 진행 중입니다 — …", "job_id": 작업 id}`. 아니면 200 `{"status": "shutting_down"}`을 보낸 뒤 서버를 끄고 프로세스가 종료 코드 0으로 끝납니다 |
+| `/api/heartbeat` | POST | 200 `{"status": "ok"}` — 화면이 열려 있다는 신호(유휴 종료를 미룸) |
+
+`/api/pick-folder`의 등록은 이전 폴더를 밀어내지 않습니다(진행 중 검사의 미리보기가 403이 되지 않게). 이 경로가 시작 뒤 읽기 허용 폴더를 늘리는 유일한 길입니다.
+
+시험용 환경 변수 `DEEPFAKE_LENS_PICK_FOLDER_STUB`(테스트와 GUI 스모크용)는 실제 창 대신 쓰입니다. 폴더 경로면 그 폴더를 고른 것으로, 빈 문자열(`""`)이면 취소로, `"501"`이면 창을 띄울 수 없는 환경(501)으로 취급합니다.
+
+### 서명 키 파일
+
+`DEEPFAKE_LENS_REPORT_KEY`가 이미 있으면 그것을 씁니다(`source: "env"`). 없으면 사용자 데이터 폴더(Windows `%APPDATA%\deepfake-lens\`)의 `report-key` 파일을 읽습니다(`"file"`). 파일이 없으면 64자리 16진 키를 새로 만들어 쓰고(`"created"`, 권한 0600) 이 프로세스의 환경 변수로 올립니다. 파일이 읽히지 않거나 비었거나 최소 길이(32바이트)에 못 미치면 `오류: 서명 키 파일이 손상되었습니다: <경로> …`와 종료 코드 2로 끝나며 **파일을 덮어쓰지 않습니다**(이전 감정서는 그 키로만 검증됩니다). 사용자 데이터 폴더를 정할 수 없거나 키 파일을 쓸 수 없으면 서명 없이 시작하고 콘솔에 한 줄을 남깁니다. 이 키로 서명한 감정서는 이 PC의 이 계정에서만 검증됩니다: `deepfake-lens verify-report --key-file <report-key 파일>`.
+
+### 유휴 종료와 종료 방법
+
+`--idle-exit-minutes M`(M > 0)분 동안 API 호출(화면의 heartbeat 포함)이 없고 진행 중인 비동기 검사도 없으면 `M분 동안 사용이 없어 종료합니다.`를 찍고 스스로 꺼집니다. 검사가 진행되는 동안에는 꺼지지 않습니다. 그 밖의 종료 방법은 화면의 「종료」(`/api/shutdown`), 콘솔 창 닫기, Ctrl-C입니다.
+
 ## Error status codes — every `/api/*` endpoint (X4)
 
 No `/api/*` endpoint answers an error with 200: every refusal carries an HTTP

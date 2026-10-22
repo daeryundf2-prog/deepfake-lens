@@ -24,6 +24,8 @@
 
 **0단계 재구성(P0R, 2026-10-17).** 26차까지의 진단(전체 리뷰 3.2): 지적의 대부분이 0단계 가치와 무관한 표면(경로 표기·도움말·구성원 이름)에서 나왔고, `/api/report` 계열 지적 12건이 게시 행을 서버 재분석과 맞추는 약 900줄에서 나왔으며, "불일치 0건"은 측정할 수 없는 종료 조건이었다. 재구성은 그 구조를 없앴다: 보고서는 서버가 보관한 검사 작업만 서명하고(P0R-6 — 게시 행 조정 장치 삭제, 작업은 토큰에 묶이고 증거 밖에 보관·HMAC, 실행 중인 작업은 퇴거하지 않음), 종료는 세 축의 불변식(P0R-1~3: hypothesis 속성 테스트, 경로 축 곱 표)과 독립 검증 두 번으로 정하며, 게이트 범위를 9개 명령으로 동결했다(P0R-4, P0R-5). 정직성 수정: 브랜드 단어는 생성 도구 필드에서만 보통 근거(P0R-11), 자기 선언 메타데이터 근거와 「이 결론이 틀릴 수 있는 이유」(P0R-12), 「재현 가능한 기록 근거」 개명과 판단 불가 행의 등급 라벨 제거(P0R-13), 규칙 2 근거 충돌(P0R-10), 하지 않은 영상 메타데이터 검사를 주장하던 문구 제거와 컨테이너·비트스트림 메타데이터 계층(P0R-22/23), C2PA 해시 제외범위 공격(SDK가 Trusted로 보고하는 두 구간 형태)을 c2pa 검사 실패로(P0R-20), 동결된 ITL 분리와 폐기 미확인 명시(P0R-21), 서명 본문의 생성 시각·실행 모델·`temp_folder` 제거(P0R-14), 32바이트 미만 서명 키 거부(P0R-15). 출력 형식 세대는 24다(병합 18, P0R-22/23 19, P0R-20/21 20, P0R-10 21, P0R-11 22, P0R-12 23, P0R-13 24).
 
+**데스크톱 모드(DESK, 2026-10-23).** 터미널을 쓰지 않는 사용자를 위한 `deepfake-lens desktop` 명령과 인계 꾸러미가 생겼다. 계획서는 `docs/gui/plan_desktop_mode.md`, 구현은 `deepfake_lens/desktop.py`(서명 키 파일·빈 포트·브라우저·OS 폴더 선택 창·종료·유휴 종료)와 `webapp.py`의 데스크톱 전용 경로 네 개(`/api/roots`, `/api/pick-folder`, `/api/shutdown`, `/api/heartbeat` — 규칙은 `docs/deepfake-lens-service.md`의 「데스크톱 모드」), 꾸러미 빌더는 `scripts/build_desktop_bundle.py`(`--platform windows` → `DeepfakeLens-win64.zip`, `--platform macos` → `DeepfakeLens-mac/`)다. `desktop`은 `cli_parser.GATE_COMMANDS`에 더했다 — 게이트 범위(9개 명령으로 동결, P0R-4)를 넓히는 일이므로 **사용자 확인 대기**이며, 확인을 받기 전에는 이 추가를 0단계 게이트 선언 범위로 세지 않는다. 꾸러미의 첫 실제 Windows 시험은 `docs/QA-MANUAL.md` QA-SYS-4의 「꾸러미 경로」다.
+
 ## 3. 레포를 받는 방법
 
 브랜치 `phase0`은 GitHub(`https://github.com/daeryundf2-prog/deepfake-lens`, `origin`)에 올라가 있고 `origin/main`은 기준 커밋 dad9730이다. 수정 세션은 push하지 않으므로 GitHub의 `phase0`이 로컬보다 뒤일 수 있다 — 받는 쪽에서 `git log origin/phase0..phase0`(로컬에서) 또는 전달받은 번들과 비교해 확인한다.
@@ -205,3 +207,8 @@ python scripts/build_traceability_commits.py --check
 | `ux_audit_ec0d057.md` | 18차와 함께 한 UI/UX/AX 감사(ec0d057 기준) |
 | `BACKLOG.md` | 게이트를 막지 않는 항목(Low·Cosmetic·비게이트 명령의 지적, 1단계로 연기한 결정 — BL-1 Ed25519 등). 형식은 문서 머리말 |
 | `HANDOFF.md` | 이 문서 |
+| `scripts/build_desktop_bundle.py` | 인계 꾸러미 빌더(DESK): `--platform windows` → `DeepfakeLens-win64.zip`, `--platform macos` → `DeepfakeLens-mac/` |
+| `deepfake_lens/desktop.py` | `deepfake-lens desktop`의 본체(서명 키 파일, 빈 포트, 브라우저, OS 폴더 선택 창, 종료·유휴 종료) |
+| `docs/gui/plan_desktop_mode.md` | 데스크톱 모드 계획서(DESK) |
+| `deepfake_lens/tests/test_desktop_bundle.py` | 꾸러미 빌더 시험 |
+| `desktop/` (인계 꾸러미 폴더) | `DeepfakeLens-win64.zip`, `DeepfakeLens-mac/` — 빌더가 만든 결과물 |
