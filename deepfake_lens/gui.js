@@ -2809,6 +2809,12 @@
             return '압축 파일에서 분석한 구성 파일이 없습니다 — 원장에서 사유를 보십시오';
         }
 
+        // GUI-REV7 F-2: the question asked before an archive's rows replace a folder scan's ('' — nothing to ask).
+        function archiveReplaceQuestion(shownRows, scanJob) {
+            if (!shownRows || !scanJob) return '';
+            return `지금 보이는 검사 결과 ${shownRows}개를 이 압축 파일의 결과로 바꿉니다. 바꾼 뒤에는 폴더를 다시 검사하기 전까지 증거설명서를 만들 수 없습니다. 바꿀까요?`;
+        }
+
         async function runQuickCheck(options) {
             const box = $('qc-out');
             const stop = startElapsed($('qc-status'), '전체 검사 실행 중… 뉴럴 모델 로딩 시 수십 초');
@@ -2821,14 +2827,25 @@
                     return;
                 }
                 if (data.mode === 'files') {
-                    // Archive upload: members are analyzed as their own rows.
+                    // Archive upload: members are analyzed as their own rows — they replace the rows on screen.
+                    // GUI-REV7 F-2: a folder scan's rows (the only ones an evidence statement is made from) are
+                    // replaced only after the examiner says so; 취소 leaves them and the server job as they are.
+                    const question = archiveReplaceQuestion(results.length, lastScanJob);
+                    if (question && !window.confirm(question)) {
+                        const kept = document.createElement('p');
+                        kept.className = 'hint';
+                        kept.textContent = '압축 파일의 결과를 싣지 않았습니다 — 지금 보이는 폴더 검사 결과를 그대로 둡니다.';
+                        box.replaceChildren(kept);
+                        $('qc-live').textContent = kept.textContent;
+                        return;
+                    }
                     box.innerHTML = '';
                     lastScanRoot = '';
                     lastScanRootB64 = '';
                     lastUploadScope = 'check:' + Date.now().toString(36);
                     lastScanOptions = {};
                     lastScanJob = '';
-                lastScanJobNote = '';
+                    lastScanJobNote = '';
                     retireErrors();
                     processResults(data);
                     toast(archiveCheckToast(data.items || []));  // R31-5: what was analyzed, not the row count

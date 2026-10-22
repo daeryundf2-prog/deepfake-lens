@@ -8,6 +8,7 @@ forced-colors capture) are in ``scripts/gui_smoke.py`` and the commit bodies.
 
 from __future__ import annotations
 
+import json
 import subprocess
 import tempfile
 import unittest
@@ -74,6 +75,38 @@ class F1SkipLinkKeepsTheScreenTest(unittest.TestCase):
         body = "var location = {hash: ''};\nvar VIEWS = ['scan', 'ledger', 'report', 'tools'];\n" + _function("viewFromHash")
         body += "var out = ['#main', '', '#/', '#/report', '#/nope'].map(function (h) { location.hash = h; return String(viewFromHash()); }).join(',');"
         self.assertEqual(_run_js(body), "null,null,null,report,null")
+
+
+class F2ArchiveQuickCheckAsksBeforeReplacingTest(unittest.TestCase):
+    """F-2 (High): a quick check of an archive replaced a folder scan's rows (and unlinked its server job, so no
+    evidence statement could be made) without asking, under a hint that read like the rows were added."""
+
+    def test_the_hint_says_the_rows_are_replaced(self) -> None:
+        html = _html()
+        self.assertNotIn("안의 파일이 사건 대장에 행으로 실립니다.", html)
+        self.assertIn("압축 파일을 고르면 지금 보이는 검사 결과 대신 안의 파일을 사건 대장에 행으로 바꿔 싣습니다(폴더 검사 결과는 지워짐 — 그 전에 묻습니다).", html)
+
+    def test_the_archive_branch_asks_before_it_touches_the_rows(self) -> None:
+        source = _source()
+        start = source.index("if (data.mode === 'files') {")
+        branch = source[start:source.index("renderQuickCheck(data);", start)]
+        ask = branch.index("const question = archiveReplaceQuestion(results.length, lastScanJob);")
+        self.assertIn("if (question && !window.confirm(question)) {", branch)
+        # nothing on screen or in the job link changes before the answer
+        for change in ("lastScanRoot = '';", "lastScanJob = '';", "retireErrors();", "processResults(data);"):
+            self.assertLess(ask, branch.index(change), change)
+        refused = branch[ask:branch.index("return;", ask)]
+        self.assertIn("압축 파일의 결과를 싣지 않았습니다 — 지금 보이는 폴더 검사 결과를 그대로 둡니다.", refused)
+        self.assertNotIn("processResults", refused)
+
+    @unittest.skipUnless(_js_engine(), "no JavaScript engine (node or osascript)")
+    def test_only_a_folder_scan_on_screen_is_asked_about(self) -> None:
+        body = _function("archiveReplaceQuestion")
+        body += "var out = JSON.stringify([archiveReplaceQuestion(0, ''), archiveReplaceQuestion(3, ''), archiveReplaceQuestion(0, 'job'), archiveReplaceQuestion(51, 'job')]);"
+        self.assertEqual(json.loads(_run_js(body)), [
+            "", "", "",
+            "지금 보이는 검사 결과 51개를 이 압축 파일의 결과로 바꿉니다. 바꾼 뒤에는 폴더를 다시 검사하기 전까지 증거설명서를 만들 수 없습니다. 바꿀까요?",
+        ])
 
 
 if __name__ == "__main__":
