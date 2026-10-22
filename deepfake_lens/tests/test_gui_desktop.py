@@ -245,6 +245,37 @@ class Desk5HeartbeatTest(unittest.TestCase):
         self.assertIn("stopHeartbeat();", _function("showShutdownPage"))  # nothing is sent after the shutdown
 
 
+class RiskA4B3HeartbeatOnReturnTest(unittest.TestCase):
+    """RISK A4/B3 (docs/gui/risk_review_desktop_2026-10-23.md): a sleeping tab or a PC waking from sleep missed the 30 s
+    timer and the idle server exited — the page sends a heartbeat the moment it is visible again (visibilitychange,
+    focus, pageshow), besides the timer, one request at a time."""
+
+    def test_the_three_events_call_it(self) -> None:
+        source = _source()
+        for line in ("document.addEventListener('visibilitychange', heartbeatOnReturn);",
+                     "window.addEventListener('focus', heartbeatOnReturn);",
+                     "window.addEventListener('pageshow', heartbeatOnReturn);"):
+            self.assertIn(line, source)
+        self.assertIn("const HEARTBEAT_MS = 30000;", source)  # the timer stays
+        self.assertIn("heartbeatTimer = setInterval(sendHeartbeat, HEARTBEAT_MS);", _function("startHeartbeat"))
+        # one in flight: the immediate beat goes through the same guard as the timer's
+        self.assertIn("if (heartbeatInFlight || appShutDown) return;", _async_function("sendHeartbeat"))
+
+    @unittest.skipUnless(_js_engine(), "no JavaScript engine (node or osascript)")
+    def test_only_while_the_timer_runs_and_the_page_is_seen(self) -> None:
+        body = _function("heartbeatOnReturn") + (
+            "var sent = 0; function sendHeartbeat() { sent += 1; }\n"
+            "var document = {visibilityState: 'visible'};\n"
+            "var seen = [];\n"
+            "var heartbeatTimer = null, appShutDown = false; heartbeatOnReturn(); seen.push(sent);\n"  # plain web server
+            "heartbeatTimer = 7; heartbeatOnReturn(); seen.push(sent);\n"
+            "document.visibilityState = 'hidden'; heartbeatOnReturn(); seen.push(sent);\n"
+            "document.visibilityState = 'visible'; appShutDown = true; heartbeatOnReturn(); seen.push(sent);\n"
+            "var out = JSON.stringify(seen);"
+        )
+        self.assertEqual(json.loads(_run_js(body)), [0, 1, 1, 1])
+
+
 class Desk6StatusChipsTest(unittest.TestCase):
     """DESK-6: PDF and signing chips next to the version; the report checklist says where the signing key comes from."""
 

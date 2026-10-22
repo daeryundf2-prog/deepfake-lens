@@ -140,6 +140,19 @@ def desktop_smoke(browser: object, port: int, folder: str) -> None:
         page.unroute("**/api/heartbeat")
         page.evaluate("async () => { await sendHeartbeat(); }")
         assert page.locator("#conn-lost").count() == 0, "the box stayed after the server answered again"
+        # RISK A4/B3: the page says it is alive the moment it is seen again (focus, visibilitychange), not only every 30 s
+        beats: list[str] = []
+        page.route("**/api/heartbeat", lambda route: (beats.append(route.request.method), route.continue_()))
+        for event, target in (("focus", "window"), ("visibilitychange", "document")):
+            page.wait_for_function("() => heartbeatInFlight === false", timeout=10_000)
+            count = len(beats)
+            page.evaluate(f"() => {target}.dispatchEvent(new Event('{event}'))")
+            for _ in range(50):
+                if len(beats) > count:
+                    break
+                page.wait_for_timeout(100)
+            assert len(beats) == count + 1, f"no heartbeat on {event}: {beats}"
+        page.unroute("**/api/heartbeat")
 
         # DESK-2: a dismissed confirm does nothing; a refusal (409) is said in the error region; then 종료
         page.once("dialog", lambda d: d.dismiss())

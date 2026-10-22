@@ -3320,6 +3320,15 @@
             clearInterval(heartbeatTimer);
             heartbeatTimer = null;
         }
+        // RISK A4/B3: a sleeping tab (Edge sleeping tabs, efficiency mode, Chrome memory saver) or a PC waking from
+        // sleep missed the 30 s timer — the page says it is alive the moment it is seen again, besides the timer.
+        // Only while the timer runs (desktop mode, not shut down); sendHeartbeat keeps one request in flight.
+        function heartbeatOnReturn() {
+            if (heartbeatTimer && !appShutDown && document.visibilityState === 'visible') sendHeartbeat();
+        }
+        document.addEventListener('visibilitychange', heartbeatOnReturn);
+        window.addEventListener('focus', heartbeatOnReturn);
+        window.addEventListener('pageshow', heartbeatOnReturn);
 
         // DESK-2: 종료 asks, then stops the server; the page is replaced by one sentence (role=alert) and every
         // control is disabled — nothing on it can reach the server any more. A refusal (409: a scan is running)
