@@ -94,3 +94,7 @@
 - BL-54 — 어두운 모드에서 "분석 완료 — 51개 파일" 토스트가 상세 패널 오른쪽을 4초 가린다(BL-32 잔여, 캡처로 재확인). (GUI7 F-31, Cosmetic, GUI)
 - BL-55 — OneDrive로 리디렉션된 경로(바탕 화면·문서)는 Windows에서 검증하지 않은 영역이다(Windows 경로는 mock으로만 — HANDOFF 7장). QA-SYS-4는 프로필 밖 경로(`C:\사건 자료\…`)만 쓰도록 적었다. (GUI7 W-11, Low, 문서)
 - BL-56 — Mac의 zip·Finder 압축은 `__MACOSX`·`._*`를 넣어 픽스처 행 수가 늘어난다 — `ditto -c -k --norsrc --noextattr`를 써야 한다. (GUI7 W-12, Low, 문서) → 처리: 「docs(qa): GUI-REV7 W-1..W-10 W-13 QA-SYS-4 procedure rewritten as a runnable Windows runbook — …」(빌드 머신 절차에 ditto 명령과 이유를 적음)
+- BL-57 — 빠른 검사의 버튼은 `SCAN_INPUTS`에 없어 폴더 검사가 도는 중에도 압축 파일 빠른 검사가 대장을 바꿀 수 있고, 검사가 끝나면 그 결과가 다시 덮는다 — 검사 중에는 F-2의 확인 창 대신 거부해야 한다. (GUI7 구현 중 발견 1, Low-Med, GUI)
+- BL-58 — 증거설명서 미리보기가 도착하면 `loadA4`가 `renderChecks()`를 다시 그려 그 순간의 확인 목록 버튼 클릭을 삼킬 수 있다(F-9 이전부터 있던 경합). (GUI7 구현 중 발견 2, Low, GUI)
+- BL-59 — F-2의 확인 창은 폴더 검사 결과가 있을 때만 뜨고, 올린 파일 행만 있을 때는 묻지 않고 바꾼다. (GUI7 구현 중 발견 3, Low, GUI)
+- BL-60 — 열렸지만 비어 있는 압축 파일 행에도 「'아카이브::경로' 형태의 개별 결과를 확인하세요」 안내가 남는다. (GUI7 구현 중 발견 4, Cosmetic, GUI)
