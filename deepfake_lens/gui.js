@@ -973,7 +973,7 @@
             if (!view) return;
             showView(view, focusTarget);
         });
-        // GUI-REV7 F-1: 「본문으로 건너뛰기」 moves the focus to <main> without changing the hash
+        // GUI-REV7 F-1: "본문으로 건너뛰기" moves the focus to <main> without changing the hash
         // (href="#main" stays for a page without scripts).
         document.querySelector('.skip-link').addEventListener('click', event => {
             event.preventDefault();
@@ -1050,7 +1050,7 @@
             // GUI-REV7 F-9: a keystroke re-renders without the live export note and with the longer preview delay;
             // the side choice renders everything. Leaving a text field (change) writes only the note: a full render
             // rebuilds the checklist, and the blur that fires change on a click of a checklist button would replace
-            // that button under the pointer (gate.sh gui, 「이 폴더의 사건이 맞음」).
+            // that button under the pointer (gate.sh gui, "이 폴더의 사건이 맞음").
             if (currentView !== 'report') return;
             if (event && event.type === 'change' && event.target && event.target.type !== 'radio') { setExportNote(exportNoteText()); return; }
             if (currentView === 'report') renderReport(Boolean(event && event.type === 'input'));
@@ -1109,7 +1109,7 @@
             $('progress-fill').style.width = '';
             $('cancel-banner').hidden = true;
             $('view-results-btn').hidden = true;
-            // GUI-REV7 F-5: a cancelled scan renames it 「부분 결과 보기」 (progressFinish); every new scan names it back.
+            // GUI-REV7 F-5: a cancelled scan renames it "부분 결과 보기" (progressFinish); every new scan names it back.
             $('view-results-btn').textContent = '결과 보기';
             $('scan-cancel').hidden = !canCancel;
             $('cancel-note').hidden = !canCancel;
@@ -1309,7 +1309,7 @@
         document.addEventListener('drop', e => {
             if (!isFileDrag(e) || dropZone.contains(e.target)) return;
             e.preventDefault();
-            toast('파일을 열지 않았습니다 — 검사 화면의 「폴더 대신 파일 올리기」 칸에 놓으십시오.');
+            toast('파일을 열지 않았습니다 — 검사 화면의 '폴더 대신 파일 올리기' 칸에 놓으십시오.');
         });
         function openFilePicker() {
             if (scanBusy) return;
@@ -3156,7 +3156,7 @@
                 .replace(/`(pip install [^`\n]*)`/g, '$1');
         }
         // GUI-REV7 F-12: an unmeasured comparison does not lead with its raw score in large type (read as
-        // "99% 같은 사람"); the head says 「참고 신호 — 미측정」 and the number stays in the sentence
+        // "99% 같은 사람"); the head says "참고 신호 — 미측정" and the number stays in the sentence
         // (the server's reference_note, "참고 원점수 99/100, 미측정 매핑"). Only a comparison the server marks
         // measured shows the large number.
         function compareHeadHtml(data, body) {
