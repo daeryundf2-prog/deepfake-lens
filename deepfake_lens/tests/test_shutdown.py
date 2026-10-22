@@ -917,7 +917,8 @@ class EveryChildIsTrackedMetaTest(unittest.TestCase):
         self.assertEqual(offenders, [])
         users = [p.name for p in sorted(PACKAGE.glob("*.py")) if "run_child(" in p.read_text(encoding="utf-8") and p.name != "shutdown.py"]
         # non-vacuous; R19-1 (round 19): scan_cache.py runs `ffmpeg -version` for the cache key
-        self.assertEqual(sorted(users), ["audio.py", "lipsync.py", "scan_cache.py", "video.py", "video_analysis.py"])
+        # DESK (2026-10-23): desktop.py runs the OS folder-dialog helper (powershell / osascript / zenity) as a tracked child
+        self.assertEqual(sorted(users), ["audio.py", "desktop.py", "lipsync.py", "scan_cache.py", "video.py", "video_analysis.py"])
 
     def test_the_visitor_flags_aliases(self) -> None:
         tree = ast.parse(

@@ -87,6 +87,7 @@ WRITE_SITES_ALLOWED = {
     "webapp_api.py": 2,  # (R28-1, R29-2) an upload's base-named copy, single file or archive (session folder); feedback.jsonl append
     "audio_worker.py": 2,  # native-stderr.log append (the worker's stderr); the worker's reply pipe (fd 1)
     "security.py": 2,  # the security self-check's fixture files in its temp folder
+    "desktop.py": 1,  # DESK: the signing key file — O_EXCL + 0600 on purpose (never replaced; a temp + os.replace would widen the mode)
 }
 WRITE_MODES = ("w", "a", "x", "+")
 

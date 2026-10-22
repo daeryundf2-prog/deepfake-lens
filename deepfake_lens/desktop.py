@@ -21,7 +21,6 @@ import os
 import secrets
 import shutil
 import socket
-import subprocess
 import sys
 import threading
 import time
@@ -159,8 +158,12 @@ def pick_folder(prompt: str = DIALOG_PROMPT) -> Path | None:
     command = _dialog_command(prompt)
     if command is None:
         raise DialogUnavailable(DIALOG_UNAVAILABLE)
+    from .shutdown import ShuttingDown, run_child
+
     try:
-        done = subprocess.run(command, capture_output=True, timeout=None, check=False)
+        done = run_child(command, capture_output=True)  # a tracked child: stopped with the process (R15-1)
+    except ShuttingDown:
+        return None
     except OSError as exc:
         raise DialogUnavailable(DIALOG_FAILED) from exc
     if done.returncode != 0:
