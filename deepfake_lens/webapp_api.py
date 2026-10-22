@@ -579,9 +579,12 @@ def register_user_folder(folder: Path) -> Path:
     Unlike the start-up registration this never evicts an earlier root (a running scan's previews would 403);
     past :data:`_READ_ROOTS_MAX` it raises ValueError(:data:`desktop.ROOTS_FULL`).
     """
-    from .desktop import ROOTS_FULL
+    from .desktop import FOLDER_TOO_WIDE, ROOTS_FULL, FolderTooWide, folder_too_wide
 
     resolved = expand_user(folder).resolve()
+    reason = folder_too_wide(resolved)
+    if reason is not None:
+        raise FolderTooWide(FOLDER_TOO_WIDE.format(what=reason))
     with _READ_ROOTS_LOCK:
         if resolved in _READ_ROOTS:
             return resolved

@@ -334,3 +334,90 @@ class NoProxyProbeTest(unittest.TestCase):
                 self.assertLess(time.monotonic() - started, 5)
         source = Path(desktop.__file__).read_text(encoding="utf-8")
         self.assertIn("urllib.request.ProxyHandler({})", source)
+
+
+class RiskReviewFixesTest(unittest.TestCase):
+    """docs/gui/risk_review_desktop_2026-10-23.md A2..A5, B5, B9: Windows-specific behaviour pinned without Windows."""
+
+    def test_windows_binds_exclusively_and_asks_the_running_instance_first(self) -> None:
+        calls: list[tuple] = []
+
+        class FakeSock:
+            def setsockopt(self, *args: object) -> None:
+                calls.append(args)
+
+        with mock.patch.object(desktop.os, "name", "nt"), mock.patch.object(desktop.socket, "SO_EXCLUSIVEADDRUSE", 0x1234, create=True):
+            desktop.set_exclusive_bind(FakeSock())  # type: ignore[arg-type]
+        self.assertEqual(calls, [(socket.SOL_SOCKET, 0x1234, 1)])
+        from deepfake_lens import webapp
+
+        self.assertEqual(webapp._ExclusiveServer.allow_reuse_address, os.name != "nt")
+        order: list[str] = []
+        with mock.patch.object(desktop, "this_tool_listens", side_effect=lambda *a: order.append("listens") or True), \
+                mock.patch.object(desktop, "port_is_free", side_effect=lambda *a: order.append("free") or True):
+            self.assertEqual(desktop.choose_port(9000, 1), (9000, True))
+        self.assertEqual(order, ["listens"])  # a Windows free-port probe can pass on a port in use, so the probe comes second
+
+    def test_dialog_result_rules(self) -> None:
+        ps = "C:/ps/powershell.exe"
+        self.assertEqual(desktop.dialog_result(ps, 0, "\ufeffOK:C:\\증거 1\r\n".encode("utf-8"), b""), Path("C:\\증거 1"))
+        self.assertIsNone(desktop.dialog_result(ps, 0, b"CANCEL", b""))
+        with self.assertRaises(desktop.DialogUnavailable) as policy:
+            desktop.dialog_result(ps, desktop.POLICY_EXIT, b"", b"")
+        self.assertEqual(str(policy.exception), desktop.DIALOG_POLICY)
+        for code, out in ((1, b""), (0, b""), (0, b"garbage"), (-1073741819, b"")):
+            with self.subTest(code=code, out=out), self.assertRaises(desktop.DialogUnavailable):
+                desktop.dialog_result(ps, code, out, b"Cannot create type")  # a blocked Add-Type is not a cancel
+        self.assertIsNone(desktop.dialog_result("/usr/bin/osascript", 1, b"", b"execution error: User canceled. (-128)"))
+        with self.assertRaises(desktop.DialogUnavailable):
+            desktop.dialog_result("/usr/bin/osascript", 1, b"", b"execution error: Not authorized")
+        self.assertIsNone(desktop.dialog_result("/usr/bin/zenity", 1, b"", b""))
+        self.assertEqual(desktop.dialog_result("/usr/bin/zenity", 0, b"/tmp/x\n", b""), Path("/tmp/x"))
+
+    def test_the_powershell_script_names_the_markers_and_the_language_mode(self) -> None:
+        with mock.patch.object(desktop.os, "name", "nt"), mock.patch.object(desktop.shutil, "which", return_value="C:/ps/powershell.exe"):
+            script = desktop._dialog_command("x")[5]  # type: ignore[index]
+        for needle in ("LanguageMode -ne 'FullLanguage'", "exit 3", "UTF8Encoding $false", "'OK:' + $d.SelectedPath", "Write('CANCEL')"):
+            self.assertIn(needle, script)
+        self.assertNotIn("ShowInTaskbar", script)  # the owner form keeps its taskbar button, so the dialog can be found
+
+    def test_too_wide_folders_are_refused(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            with mock.patch("deepfake_lens.user_data.user_data_dir", return_value=root / "data" / "deepfake-lens"), \
+                    mock.patch("deepfake_lens.native_path.tool_cache_base", return_value=root / "cache"), \
+                    mock.patch.object(tempfile, "gettempdir", return_value=str(root / "tmp")):
+                (root / "evidence").mkdir()
+                self.assertIsNone(desktop.folder_too_wide(root / "evidence"))
+                self.assertIn("기록 폴더", desktop.folder_too_wide(root / "data") or "")
+                self.assertIn("캐시", desktop.folder_too_wide(root / "cache") or "")
+                self.assertIsNotNone(desktop.folder_too_wide(root))  # it holds all three; the first reason found is given
+            self.assertEqual(desktop.folder_too_wide(Path(Path(tmp).anchor)), "드라이브 전체")
+            self.assertEqual(desktop.folder_too_wide(Path.home()), "사용자 폴더 전체")
+            (root / "bundle").mkdir()
+            with mock.patch.object(desktop.sys, "prefix", str(root / "bundle")):
+                self.assertIn("프로그램 폴더", desktop.folder_too_wide(root) or "")
+                self.assertIsNone(desktop.folder_too_wide(root / "evidence"))
+
+    def test_onedrive_note(self) -> None:
+        self.assertEqual(desktop.folder_note(Path("C:/Users/a/OneDrive/증거")), desktop.ONEDRIVE_NOTE)
+        self.assertIsNone(desktop.folder_note(Path("C:/증거")))
+
+    def test_pick_folder_route_refuses_a_too_wide_folder_with_400(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            roots: Any = mock.patch.object(webapp_api, "_READ_ROOTS", OrderedDict())
+            roots.start(); self.addCleanup(roots.stop)
+            state = desktop.DesktopState()
+            server = build_server("127.0.0.1", _free_port(), default_folder=Path(tmp) / "e", desktop=state)
+            self.addCleanup(setattr, desktop, "STATE", None)
+            self.addCleanup(server.server_close)
+            thread = threading.Thread(target=server.serve_forever, daemon=True); thread.start()
+            self.addCleanup(server.shutdown)
+            base = f"http://127.0.0.1:{server.server_address[1]}"
+            with mock.patch.dict(os.environ, {desktop.PICK_FOLDER_STUB_ENV: str(Path.home())}):
+                request = urllib.request.Request(base + "/api/pick-folder", method="POST", headers={CLIENT_HEADER: CLIENT_HEADER_VALUE})
+                with self.assertRaises(urllib.error.HTTPError) as ctx:
+                    urllib.request.urlopen(request, timeout=10)
+                body = json.loads(ctx.exception.read().decode("utf-8"))
+            self.assertEqual(ctx.exception.code, 400)
+            self.assertIn("너무 넓은 폴더", body["error"])

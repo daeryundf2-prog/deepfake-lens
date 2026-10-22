@@ -6,6 +6,7 @@ Provides a web-based GUI that works on Windows, Mac, and Linux.
 from __future__ import annotations
 
 import logging
+import os
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
@@ -461,6 +462,9 @@ def build_server(
                     return
                 try:
                     resolved = register_user_folder(chosen)
+                except _desktop.FolderTooWide as exc:
+                    self._send_json({"error": str(exc)}, status=400)
+                    return
                 except ValueError as exc:
                     self._send_json({"error": str(exc)}, status=409)
                     return
@@ -468,7 +472,7 @@ def build_server(
                 from .webapp_api import scan_root_text
 
                 text = scan_root_text(resolved)
-                self._send_json({"folder": text, "folder_b64": fs_b64encode(text)})
+                self._send_json({"folder": text, "folder_b64": fs_b64encode(text), "note": _desktop.folder_note(resolved)})
                 return
             if path == "/api/shutdown":
                 running = STORE.running_async_jobs()
@@ -631,6 +635,18 @@ def build_server(
             self.end_headers()
             self.wfile.write(body)
     
-    return ThreadingHTTPServer((host, port), Handler)
+    return _ExclusiveServer((host, port), Handler)
+
+
+class _ExclusiveServer(ThreadingHTTPServer):
+    """DESK: on Windows the listening socket is exclusive (SO_EXCLUSIVEADDRUSE) — with the stdlib's SO_REUSEADDR a
+    second server could bind the same port while the first listens (requests then split between the two)."""
+
+    allow_reuse_address = os.name != "nt"
+
+    def server_bind(self) -> None:
+        if os.name == "nt":
+            _desktop.set_exclusive_bind(self.socket)
+        super().server_bind()
 
 

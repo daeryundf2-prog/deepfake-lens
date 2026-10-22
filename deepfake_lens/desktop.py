@@ -50,6 +50,19 @@ KEY_FILE_DAMAGED = (
 )
 NO_KEY_PLACE = "사용자 데이터 폴더를 정할 수 없어 서명 키를 만들지 못했습니다 — 보고서는 서명 없음으로 나갑니다"
 ROOTS_FULL = "등록할 수 있는 폴더 수(64)를 넘었습니다 — 프로그램을 종료하고 다시 시작하십시오"
+DIALOG_TIMEOUT_SECONDS = 600
+DIALOG_TIMED_OUT = "폴더 선택 창이 10분 동안 응답이 없어 닫았습니다 — 다시 누르거나 경로를 직접 입력하십시오"
+DIALOG_POLICY = "폴더 선택 창을 열지 못했습니다(이 PC의 보안 정책이 PowerShell을 제한합니다) — 경로를 직접 입력하십시오"
+FOLDER_TOO_WIDE = (
+    "너무 넓은 폴더입니다({what}) — 이 도구의 기록·임시 파일까지 검사 대상이 되어 증거 폴더 원칙이 깨집니다. "
+    "증거 파일이 든 폴더를 고르십시오"
+)
+ONEDRIVE_NOTE = (
+    "OneDrive 폴더입니다 — 온라인 전용 파일은 내려받으면서 검사되고, OneDrive가 꺼져 있으면 건너뜁니다. "
+    "증거는 로컬 폴더로 복사해 검사하는 것이 안전합니다"
+)
+WAKE_GAP_SECONDS = 60.0
+"""A loop tick this much later than the last one means the machine slept (3.12's Windows monotonic clock counts sleep)."""
 
 
 class DialogUnavailable(RuntimeError):
@@ -58,6 +71,10 @@ class DialogUnavailable(RuntimeError):
 
 class DialogBusy(RuntimeError):
     """A dialog is already open."""
+
+
+class FolderTooWide(ValueError):
+    """The chosen folder would contain this tool's own folders (home, a drive root, AppData, temp, the bundle)."""
 
 
 # ── signing key ───────────────────────────────────────────────────────────────────────────────────────────────
@@ -97,11 +114,26 @@ def prepare_signing_key() -> tuple[str, Path | None]:
     key = secrets.token_hex(32)
     try:
         path.parent.mkdir(parents=True, exist_ok=True)
-        fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+        # Written whole into a private temp file, then linked into place only when no key exists yet: a second
+        # instance started at the same moment reads a complete file or makes its own, never a half-written one.
+        temp = path.with_name(f".{path.name}.{os.getpid()}.{secrets.token_hex(4)}.tmp")
+        fd = os.open(temp, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
         with os.fdopen(fd, "w", encoding="utf-8") as handle:
             handle.write(key + "\n")
-    except FileExistsError:
-        return prepare_signing_key()  # another instance made it first
+        try:
+            os.link(temp, path)
+        except FileExistsError:
+            os.unlink(temp)
+            return prepare_signing_key()  # another instance made it first
+        except OSError:
+            # a file system without hard links: a plain exclusive create of the final name (the content is complete)
+            if path.exists():
+                os.unlink(temp)
+                return prepare_signing_key()
+            os.replace(temp, path)
+        else:
+            os.unlink(temp)
+        _protect_key_file(path)
     except OSError as exc:
         logger.warning("desktop signing key could not be written to %s: %s", path, exc)
         return "none", path
@@ -109,19 +141,37 @@ def prepare_signing_key() -> tuple[str, Path | None]:
     return "created", path
 
 
+def _protect_key_file(path: Path) -> None:
+    """Windows: the file gets an owner-only DACL (0o600 means nothing there; the inherited ACL lets Administrators read)."""
+    if os.name != "nt":
+        return
+    try:
+        from .windows_acl import make_owner_only
+
+        if not make_owner_only(str(path)):
+            logger.warning("desktop signing key %s keeps the inherited ACL (owner-only DACL could not be set)", path)
+    except Exception:  # noqa: BLE001 - the key still works; the ACL is a hardening step
+        logger.warning("desktop signing key %s keeps the inherited ACL", path, exc_info=True)
+
+
 # ── folder dialog ─────────────────────────────────────────────────────────────────────────────────────────────
 
+# The helper prints `OK:<path>` or `CANCEL` and exits 0; a PowerShell that cannot make WinForms objects
+# (ConstrainedLanguage under AppLocker/WDAC) exits 3 before trying, so a policy block is never read as a cancel.
 _POWERSHELL_DIALOG = (
-    "[Console]::OutputEncoding = [Text.Encoding]::UTF8; "
+    "if ($ExecutionContext.SessionState.LanguageMode -ne 'FullLanguage') {{ exit 3 }}; "
+    "[Console]::OutputEncoding = New-Object System.Text.UTF8Encoding $false; "
     "Add-Type -AssemblyName System.Windows.Forms; "
-    "$owner = New-Object System.Windows.Forms.Form; $owner.TopMost = $true; $owner.ShowInTaskbar = $false; "
+    "$owner = New-Object System.Windows.Forms.Form; $owner.TopMost = $true; $owner.Text = '{prompt}'; "
     "$owner.Opacity = 0; $owner.Show(); $owner.Activate(); "
     "$d = New-Object System.Windows.Forms.FolderBrowserDialog; "
     "$d.Description = '{prompt}'; $d.ShowNewFolderButton = $false; "
     "try {{ $d.UseDescriptionForTitle = $true }} catch {{ }}; "
-    "if ($d.ShowDialog($owner) -eq [System.Windows.Forms.DialogResult]::OK) {{ [Console]::Out.Write($d.SelectedPath) }}; "
+    "if ($d.ShowDialog($owner) -eq [System.Windows.Forms.DialogResult]::OK) {{ [Console]::Out.Write('OK:' + $d.SelectedPath) }} "
+    "else {{ [Console]::Out.Write('CANCEL') }}; "
     "$owner.Close()"
 )
+POLICY_EXIT = 3
 
 
 def _dialog_command(prompt: str) -> list[str] | None:
@@ -158,20 +208,90 @@ def pick_folder(prompt: str = DIALOG_PROMPT) -> Path | None:
     command = _dialog_command(prompt)
     if command is None:
         raise DialogUnavailable(DIALOG_UNAVAILABLE)
+    import subprocess
+
     from .shutdown import ShuttingDown, run_child
 
     try:
-        done = run_child(command, capture_output=True)  # a tracked child: stopped with the process (R15-1)
+        done = run_child(command, capture_output=True, timeout=DIALOG_TIMEOUT_SECONDS)  # a tracked child (R15-1)
     except ShuttingDown:
         return None
+    except subprocess.TimeoutExpired as exc:
+        raise DialogUnavailable(DIALOG_TIMED_OUT) from exc
     except OSError as exc:
         raise DialogUnavailable(DIALOG_FAILED) from exc
-    if done.returncode != 0:
-        # osascript: "User canceled." is exit 1; zenity: cancel is exit 1 — both are a cancel, not a failure.
-        logger.info("folder dialog ended with %s: %s", done.returncode, done.stderr[:200])
+    return dialog_result(command[0], done.returncode, done.stdout, done.stderr)
+
+
+def dialog_result(program: str, returncode: int, stdout: bytes, stderr: bytes) -> Path | None:
+    """The chosen folder, None for a cancel, :class:`DialogUnavailable` for anything else.
+
+    Windows (powershell): exit 0 with ``OK:<path>`` or ``CANCEL``; exit :data:`POLICY_EXIT` is the language-mode
+    refusal; any other end (a blocked Add-Type, a killed process) is a failure — it used to be read as a cancel.
+    macOS (osascript): exit 1 with "User canceled" (-128) is a cancel. zenity/kdialog: exit 1 is a cancel.
+    """
+    text = os.fsdecode(stdout).lstrip("\ufeff").strip().replace("\r", "").replace("\n", "")
+    err = os.fsdecode(stderr)[:300]
+    name = Path(program).name.lower()
+    if name.startswith(("powershell", "pwsh")):
+        if returncode == POLICY_EXIT:
+            raise DialogUnavailable(DIALOG_POLICY)
+        if returncode == 0 and text == "CANCEL":
+            return None
+        if returncode == 0 and text.startswith("OK:"):
+            chosen = text[3:].strip()
+            return Path(chosen) if chosen else None
+        logger.warning("folder dialog helper failed (exit %s): %s", returncode, err)
+        raise DialogUnavailable(DIALOG_FAILED)
+    if returncode == 0:
+        return Path(text) if text else None
+    if returncode == 1 and (name != "osascript" or "-128" in err or "canceled" in err.lower() or "cancelled" in err.lower()):
+        return None  # a cancel
+    logger.warning("folder dialog helper failed (exit %s): %s", returncode, err)
+    raise DialogUnavailable(DIALOG_FAILED)
+
+
+def folder_too_wide(folder: Path) -> str | None:
+    """Why ``folder`` must not become a read root: it would contain this tool's own folders (or everything)."""
+    import tempfile
+
+    from .native_path import tool_cache_base
+    from .user_data import user_data_dir
+
+    try:
+        chosen = folder.resolve()
+    except OSError:
         return None
-    text = os.fsdecode(done.stdout).strip().replace("\r", "").replace("\n", "")
-    return Path(text) if text else None
+    anchor = chosen.anchor
+    if anchor and chosen == Path(anchor):
+        return "드라이브 전체"
+    try:
+        home = Path.home().resolve()
+    except (RuntimeError, OSError):
+        home = None
+    if home is not None and chosen == home:
+        return "사용자 폴더 전체"
+    inside: list[tuple[str, Path | None]] = [
+        ("이 도구의 기록 폴더", user_data_dir()),
+        ("이 도구의 캐시·로그 폴더", tool_cache_base()),
+        ("임시 폴더", Path(tempfile.gettempdir())),
+        ("프로그램 폴더", Path(sys.prefix)),
+    ]
+    for what, inner in inside:
+        if inner is None:
+            continue
+        try:
+            inner = inner.resolve()
+        except OSError:
+            continue
+        if inner == chosen or chosen in inner.parents:
+            return f"{what}를 품습니다"
+    return None
+
+
+def folder_note(folder: Path) -> str | None:
+    """A caution about the chosen folder shown next to the path (OneDrive placeholders)."""
+    return ONEDRIVE_NOTE if "onedrive" in str(folder).lower() else None
 
 
 # ── server-side state ─────────────────────────────────────────────────────────────────────────────────────────
@@ -219,9 +339,20 @@ STATE: DesktopState | None = None
 # ── port and browser ──────────────────────────────────────────────────────────────────────────────────────────
 
 
+def set_exclusive_bind(sock: socket.socket) -> None:
+    """Windows: SO_EXCLUSIVEADDRUSE — SO_REUSEADDR there lets a second socket bind a port that is already listening
+    (two servers on 8765, requests split between them). Elsewhere SO_REUSEADDR only skips TIME_WAIT."""
+    if os.name == "nt":
+        exclusive = getattr(socket, "SO_EXCLUSIVEADDRUSE", None)
+        if exclusive is not None:
+            sock.setsockopt(socket.SOL_SOCKET, exclusive, 1)
+        return
+    sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+
+
 def port_is_free(port: int, host: str = "127.0.0.1") -> bool:
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as probe:
-        probe.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        set_exclusive_bind(probe)
         try:
             probe.bind((host, port))
         except OSError:
@@ -251,10 +382,10 @@ def this_tool_listens(port: int, host: str = "127.0.0.1") -> bool:
 def choose_port(start: int = DEFAULT_PORT, tries: int = PORT_TRIES, host: str = "127.0.0.1") -> tuple[int, bool]:
     """``(port, already_running)``: the first free port from ``start``, or the port where this tool already runs."""
     for port in range(start, min(start + tries, 65536)):
+        if this_tool_listens(port, host):  # first: on Windows a free-port probe can succeed on a port in use
+            return port, True
         if port_is_free(port, host):
             return port, False
-        if this_tool_listens(port, host):
-            return port, True
     raise OSError(f"{start}부터 {tries}개 포트가 모두 사용 중입니다 — 다른 프로그램을 닫거나 --port를 지정하십시오")
 
 
@@ -284,6 +415,41 @@ def machine_notes() -> list[str]:
 # ── the command ───────────────────────────────────────────────────────────────────────────────────────────────
 
 
+def prepare_console() -> None:
+    """Windows console: QuickEdit off (a click froze every thread that wrote to the console until Enter — microsoft/terminal#34)
+    and a close-window handler that removes the session temp folder (Python signal handlers never run for CTRL_CLOSE_EVENT)."""
+    if os.name != "nt":
+        return
+    try:
+        import ctypes
+
+        kernel32 = ctypes.windll.kernel32  # type: ignore[attr-defined]
+        handle = kernel32.GetStdHandle(-10)  # STD_INPUT_HANDLE
+        mode = ctypes.c_uint()
+        if kernel32.GetConsoleMode(handle, ctypes.byref(mode)):
+            kernel32.SetConsoleMode(handle, (mode.value & ~0x40) | 0x80)  # -ENABLE_QUICK_EDIT_MODE +ENABLE_EXTENDED_FLAGS
+        handler_type = ctypes.WINFUNCTYPE(ctypes.c_int, ctypes.c_uint)  # type: ignore[attr-defined]
+
+        def on_console_event(event: int) -> int:
+            if event in (2, 5, 6):  # CTRL_CLOSE_EVENT, CTRL_LOGOFF_EVENT, CTRL_SHUTDOWN_EVENT
+                from .native_path import shutdown_session
+
+                try:
+                    shutdown_session()
+                except Exception:  # noqa: BLE001 - the process ends anyway
+                    pass
+            return 0  # the default handling continues (the process ends)
+
+        global _CONSOLE_HANDLER
+        _CONSOLE_HANDLER = handler_type(on_console_event)  # kept alive for the process lifetime
+        kernel32.SetConsoleCtrlHandler(_CONSOLE_HANDLER, 1)
+    except Exception:  # noqa: BLE001 - a console without these calls (pythonw, a pipe) is fine
+        logger.info("console preparation skipped", exc_info=True)
+
+
+_CONSOLE_HANDLER: object | None = None
+
+
 def run_desktop(
     *,
     folder: Path | None,
@@ -310,8 +476,21 @@ def run_desktop(
         if not no_browser and not open_browser(url):
             print(f"브라우저를 열지 못했습니다 — 주소창에 붙여 넣으십시오: {url}", flush=True)
         return 0
+    prepare_console()
     state = DesktopState(idle_exit_minutes=idle_exit_minutes, key_source=key_source, key_file=key_file)
-    server = build_server(host, chosen, default_folder=folder, models_dir=models_dir, desktop=state)
+    server = None
+    for attempt in range(PORT_TRIES if not port else 1):
+        try:
+            server = build_server(host, chosen, default_folder=folder, models_dir=models_dir, desktop=state)
+            break
+        except OSError as exc:  # the port was taken between the probe and the bind
+            logger.info("port %s could not be bound (%s); trying the next", chosen, exc)
+            if port or attempt == PORT_TRIES - 1:
+                print(f"오류: 포트 {chosen}을(를) 열 수 없습니다 ({exc}) — 다른 프로그램을 닫거나 --port를 지정하십시오", file=sys.stderr)
+                return 2
+            chosen += 1
+            url = f"http://{host}:{chosen}/gui"
+    assert server is not None
     state.shutdown = server.shutdown
 
     thread = threading.Thread(target=server.serve_forever, name="deepfake-lens-desktop", daemon=True)
@@ -325,7 +504,7 @@ def run_desktop(
         lines.append(f"  검사할 폴더: {folder}")
     lines.append("  폴더는 화면의 '검사할 폴더 고르기'로 고릅니다.")
     if key_source == "created":
-        lines.append(f"  보고서 서명 키를 새로 만들었습니다: {key_file} (이 PC의 이 계정에서만 검증됩니다)")
+        lines.append(f"  보고서 서명 키를 새로 만들었습니다: {key_file} (이 키 파일을 가진 계정에서만 서명을 검증할 수 있습니다)")
     elif key_source == "file":
         lines.append(f"  보고서 서명 키: {key_file}")
     elif key_source == "env":
@@ -339,20 +518,31 @@ def run_desktop(
     lines.extend("  주의: " + note for note in machine_notes())
     print("\n".join(lines), flush=True)
     if not no_browser and not open_browser(url):
-        print(f"브라우저를 열지 못했습니다 — 브라우저 주소창에 이 주소를 붙여 넣으십시오:\n  {url}", flush=True)
+        print(f"브라우저를 열지 못했습니다 — Edge나 Chrome의 주소창에 이 주소를 붙여 넣으십시오:\n  {url}", flush=True)
+    print("  화면이 비어 있거나 Internet Explorer가 열리면 위 주소를 Edge나 Chrome에 붙여 넣으십시오. 이 창 안을 클릭했다면 Enter를 누르십시오.", flush=True)
 
     from .scan_jobs import STORE
 
+    last_tick = time.monotonic()
     try:
         while thread.is_alive():
             thread.join(1.0)
+            now = time.monotonic()
+            if now - last_tick > WAKE_GAP_SECONDS:
+                state.touch()  # the machine slept (or the process was suspended): not the examiner's idleness
+            last_tick = now
             if state.shutting_down:
                 break
             if state.should_exit(scanning=bool(STORE.running_async_jobs())):
                 print(f"{idle_exit_minutes}분 동안 사용이 없어 종료합니다.", flush=True)
                 server.shutdown()
                 break
+    except KeyboardInterrupt:
+        server.shutdown()
+        thread.join(5.0)
+        raise  # the CLI's interrupt path: cleanup, 중단됨 line, exit 130
     finally:
+        thread.join(5.0)  # serve_forever has returned before the socket is closed (a select on a closed socket is WinError 10038)
         try:
             server.server_close()
         except OSError:
