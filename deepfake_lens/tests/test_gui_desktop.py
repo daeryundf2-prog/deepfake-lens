@@ -13,7 +13,7 @@ import re
 import unittest
 
 from deepfake_lens.tests.test_gui_model_score import _function, _js_engine
-from deepfake_lens.tests.test_gui_rev7 import _html, _run_js, _source
+from deepfake_lens.tests.test_gui_rev7 import _css, _html, _run_js, _source
 
 
 def _element(html: str, element_id: str) -> str:
@@ -181,6 +181,33 @@ class Desk3FolderPickerTest(unittest.TestCase):
         self.assertIn("apiJson('/api/roots')", refresh)
         self.assertIn("readRoots = data.roots.map(root => root && root.path)", refresh)
         self.assertIn("li.textContent = displayName(text);", _function("renderRoots"))  # never innerHTML
+
+
+class Desk4UploadBlockTest(unittest.TestCase):
+    """DESK-4: the upload block says what it is (unsigned, no evidence statement exhibits) and is folded in the desktop
+    mode, where the folder dialog is the way in."""
+
+    def test_title_buttons_and_disclosure(self) -> None:
+        html = _html()
+        self.assertNotIn("폴더 대신 파일 올리기", html)
+        self.assertIn('<details class="block upload-block" id="upload-block" open>', html)
+        self.assertIn('<summary><h2 class="block-h" id="upload-h">파일 올려서 검사(서명 제외 — 감정서 불가)</h2></summary>', html)
+        self.assertIn('<button class="btn" id="file-picker-btn" type="button">올릴 파일 고르기</button>', html)
+        self.assertIn('<button class="btn" id="dir-picker-btn" type="button">올릴 폴더 고르기</button>', html)
+        block = html[html.index('id="upload-block"'):html.index("</details>", html.index('id="upload-block"'))]
+        for inner in ("drop-zone", "file-list", "upload-btn", "upload-clear"):
+            self.assertIn(f'id="{inner}"', block)
+        # the hint no longer says the uploads go into "the 감정서" — they are never exhibits of the statement
+        self.assertIn("증거설명서의 서증이 될 수 없고", block)
+        self.assertNotIn("감정서에는 서명 제외로 실립니다", block)
+
+    def test_folded_only_in_the_desktop_mode_and_opened_for_an_outside_drop(self) -> None:
+        helper = _function("applyDesktopStats")
+        self.assertLess(helper.index("if (!desktopMode) return;"), helper.index("if (!selectedFiles.length) $('upload-block').open = false;"))
+        drop = _handler(_source(), "document.addEventListener('drop', e => {")
+        self.assertLess(drop.index("$('upload-block').open = true;"), drop.index("toast("))
+        self.assertIn('"파일 올려서 검사" 칸에 놓으십시오', drop)
+        self.assertIn(".upload-block > summary", _css())
 
 
 if __name__ == "__main__":

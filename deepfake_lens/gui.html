@@ -113,21 +113,21 @@
                             </details>
                         </form>
 
-                        <section class="block" aria-labelledby="upload-h">
-                            <h2 class="block-h" id="upload-h">폴더 대신 파일 올리기</h2>
+                        <details class="block upload-block" id="upload-block" open>
+                            <summary><h2 class="block-h" id="upload-h">파일 올려서 검사(서명 제외 — 감정서 불가)</h2></summary>
                             <div class="drop" id="drop-zone">
                                 <p>파일이나 폴더를 여기로 끌어 놓거나 고르십시오.</p>
-                                <button class="btn" id="file-picker-btn" type="button">파일 고르기</button>
-                                <button class="btn" id="dir-picker-btn" type="button">폴더 고르기</button>
+                                <button class="btn" id="file-picker-btn" type="button">올릴 파일 고르기</button>
+                                <button class="btn" id="dir-picker-btn" type="button">올릴 폴더 고르기</button>
                                 <input type="file" id="dir-picker" webkitdirectory multiple hidden aria-label="올릴 폴더">
                             </div>
-                            <p class="hint">PNG·JPG·WebP·GIF·TXT·MD·PDF·DOCX·HWP·WAV·MP3·M4A·MP4·MOV·MKV·ZIP·TAR 등. 올린 파일은 분석 후 서버에서 삭제되고, 감정서에는 서명 제외로 실립니다.</p>
+                            <p class="hint">PNG·JPG·WebP·GIF·TXT·MD·PDF·DOCX·HWP·WAV·MP3·M4A·MP4·MOV·MKV·ZIP·TAR 등. 올린 파일은 분석 후 서버에서 삭제됩니다. 서버가 보관한 검사 작업이 아니어서 증거설명서의 서증이 될 수 없고, 감정 보고서·HTML 보고서·서명된 JSON에는 서명 제외(클라이언트 제공 결과)로 실립니다.</p>
                             <ul class="file-chips" id="file-list" aria-label="올릴 파일"></ul>
                             <div class="prog-actions" id="upload-row" hidden>
                                 <button class="btn btn-primary" id="upload-btn" type="button">고른 파일 검사 (<span id="upload-n">0</span>)</button>
                                 <button class="btn" id="upload-clear" type="button">목록 비우기</button>
                             </div>
-                        </section>
+                        </details>
 
                         <details class="disclosure block">
                             <summary>결론 읽는 법</summary>

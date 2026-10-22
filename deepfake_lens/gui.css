@@ -588,6 +588,14 @@ select.field { padding-right: 8px; }
 .roots-list { list-style: none; padding: 0; margin: 4px 0 0; display: flex; flex-direction: column; gap: 2px; }
 .roots-list li { overflow-wrap: anywhere; }
 
+/* DESK-4: the upload block is a disclosure (folded in the desktop mode). */
+.upload-block { display: block; }
+.upload-block > * + * { margin-top: 10px; }
+.upload-block > summary { cursor: pointer; list-style: none; position: relative; padding-right: 28px; }
+.upload-block > summary::-webkit-details-marker { display: none; }
+.upload-block > summary::after { content: "+"; font-family: var(--mono); color: var(--muted); position: absolute; right: 4px; top: 2px; }
+.upload-block[open] > summary::after { content: "−"; }
+
 /* GUI-REV7 F-8: Windows contrast themes (forced colors) drop backgrounds and box-shadows — the current row,
    a pressed verdict filter, a pressed review star, the progress fill, a changed row, the drop zone while a
    file is held over it and the active studio mode were told only by them. Here they get a border, an

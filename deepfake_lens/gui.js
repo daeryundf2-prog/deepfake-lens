@@ -1314,7 +1314,9 @@
         document.addEventListener('drop', e => {
             if (!isFileDrag(e) || dropZone.contains(e.target)) return;
             e.preventDefault();
-            toast('파일을 열지 않았습니다 — 검사 화면의 "폴더 대신 파일 올리기" 칸에 놓으십시오.');
+            // DESK-4: the block is folded in the desktop mode — opened, so the zone the toast names is there.
+            $('upload-block').open = true;
+            toast('파일을 열지 않았습니다 — 검사 화면의 "파일 올려서 검사" 칸에 놓으십시오.');
         });
         function openFilePicker() {
             if (scanBusy) return;
@@ -3241,6 +3243,8 @@
             $('desk-bar').hidden = false;
             $('pick-row').hidden = false;
             $('folder-label').textContent = '또는 폴더 경로 직접 입력';
+            // DESK-4: uploads are the exception here (unsigned, never an exhibit) — folded, unless files are waiting.
+            if (!selectedFiles.length) $('upload-block').open = false;
         }
 
         // DESK-2: 종료 asks, then stops the server; the page is replaced by one sentence (role=alert) and every
