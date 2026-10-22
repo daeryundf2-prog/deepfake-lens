@@ -289,5 +289,48 @@ class F7MaxFilesFollowsTheServerCeilingTest(unittest.TestCase):
         ])
 
 
+def _forced_colors_blocks(css: str) -> list[str]:
+    """The bodies of every ``@media (forced-colors: active) { … }`` block of ``css``."""
+    blocks = []
+    for match in re.finditer(r"@media \(forced-colors: active\) \{", css):
+        depth, index = 1, match.end()
+        while depth:
+            depth += {"{": 1, "}": -1}.get(css[index], 0)
+            index += 1
+        blocks.append(css[match.end():index - 1])
+    return blocks
+
+
+class F8ForcedColorsShowTheStatesTest(unittest.TestCase):
+    """F-8 (Med): in a Windows contrast theme (forced colors) the current row, a pressed filter, a pressed review star,
+    the progress fill, a changed row, the drop zone and the active studio mode were told only by backgrounds and
+    box-shadows, which forced colors drop. Checked by a Playwright forced_colors="active" capture (commit body)."""
+
+    def test_each_state_has_a_forced_colors_rule_that_is_not_a_background(self) -> None:
+        css = _css()
+        blocks = _forced_colors_blocks(css)
+        self.assertGreaterEqual(len(blocks), 2)
+        rules = blocks[-1]
+        # the block comes after every rule it overrides (same specificity — source order decides)
+        self.assertGreater(css.rindex("@media (forced-colors: active) {"), css.index(".row.row-changed { box-shadow"))
+        wanted = {
+            '.row[aria-current="true"]': "border-left: 6px solid Highlight",
+            ".row.row-changed": "border-left: 6px dashed CanvasText",
+            '.seg[aria-pressed="true"]': "outline: 3px solid Highlight",
+            '.rev-star[aria-pressed="true"]': "border: 2px solid Highlight",
+            ".progressbar .fill": "forced-color-adjust: none; background: Highlight",
+            ".progressbar": "border: 1px solid CanvasText",
+            ".drop.over": "border: 3px solid Highlight",
+            ".studio-btn.active": "border: 2px solid Highlight",
+        }
+        for selector, declaration in wanted.items():
+            with self.subTest(selector=selector):
+                rule = re.search(re.escape(selector) + r" \{([^}]*)\}", rules)
+                assert rule is not None, selector
+                self.assertIn(declaration, rule.group(1))
+        # the earlier block (verdict marks) is kept
+        self.assertIn(".mk-m, .mk-a, .mk-x { background: CanvasText; forced-color-adjust: none; }", blocks[0])
+
+
 if __name__ == "__main__":
     unittest.main()

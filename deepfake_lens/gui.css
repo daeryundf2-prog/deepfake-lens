@@ -566,3 +566,22 @@ select.field { padding-right: 8px; }
 /* Merge of phase0 P0R-12: a self-declared record and the reasons a conclusion could be wrong. */
 .self-declared { display: inline-block; margin-left: 6px; padding: 0 6px; border: 1px dashed var(--warn); border-radius: 3px; color: var(--warn); font-size: 12px; font-weight: 600; }
 .d-sec.d-caveat h3 { color: var(--warn); }
+
+/* GUI-REV7 F-8: Windows contrast themes (forced colors) drop backgrounds and box-shadows — the current row,
+   a pressed verdict filter, a pressed review star, the progress fill, a changed row, the drop zone while a
+   file is held over it and the active studio mode were told only by them. Here they get a border, an
+   outline or an underline in system colours (declared last so they win over the rules above). */
+@media (forced-colors: active) {
+    .row[aria-current="true"] { border-left: 6px solid Highlight; padding-left: 4px; }
+    .row.row-changed { border-left: 6px dashed CanvasText; padding-left: 4px; }
+    .row.row-changed[aria-current="true"] { border-left: 6px double Highlight; }
+    .seg[aria-pressed="true"] { outline: 3px solid Highlight; outline-offset: -6px; }
+    .seg[aria-pressed="true"] .seg-top { text-decoration: underline; text-decoration-thickness: 2px; }
+    .seg[aria-pressed="true"]:focus-visible { outline-color: CanvasText; }
+    .rev-star[aria-pressed="true"] { border: 2px solid Highlight; text-decoration: underline; }
+    .progressbar { border: 1px solid CanvasText; }
+    .progressbar .fill { forced-color-adjust: none; background: Highlight; }
+    .progressbar.cancelled .fill { background: GrayText; }
+    .drop.over { border: 3px solid Highlight; }
+    .studio-btn.active { border: 2px solid Highlight; text-decoration: underline; }
+}
