@@ -1,0 +1,622 @@
+"""Build the double-click desktop bundles (DESK-8, docs/gui/plan_desktop_mode.md §5). Not a gate script.
+
+``--platform windows`` makes ``DeepfakeLens-win64/`` and ``DeepfakeLens-win64.zip``:
+
+1. python.org's embeddable CPython 3.12.10 for x64 (URL and sha256 pinned below; a mismatch stops the build),
+   unpacked to ``python/``;
+2. ``python312._pth`` rewritten to add ``Lib\\site-packages`` and ``import site`` (the embeddable build turns
+   ``site`` off — without this nothing installed is importable);
+3. this repository's wheel (``pip wheel . --no-deps``) and the pinned wheel set :data:`WINDOWS_WHEELS` installed
+   with ``pip install --target python/Lib/site-packages --platform win_amd64 --python-version 3.12
+   --only-binary=:all: --no-deps``. Because of ``--no-deps`` the set is explicit; :func:`missing_requirements`
+   reads every installed dist's ``Requires-Dist`` (markers evaluated for win32 / CPython 3.12, extras off) and the
+   build fails when a required dist is not installed;
+4. ``Deepfake Lens.cmd``, ``문제 확인.cmd``, ``읽어보세요.txt``, ``VERSION.txt``;
+5. a zip with ``/`` separators and UTF-8 names;
+6. a check of the folder (python.exe, the ``._pth`` lines, ``deepfake_lens/gui.js``, ``pymupdf``) and its size.
+
+``--platform macos`` makes ``DeepfakeLens-mac/``: ``Deepfake Lens.command`` (creates ``.venv`` with python3.12 or
+python3.13 on first run, installs from the bundled ``wheels/`` with ``--no-index``, then runs
+``python -m deepfake_lens desktop``) and ``wheels/`` with this repository's wheel plus the same pins for macOS arm64
+(CPython 3.12 and 3.13 — numpy 2.5.4 has no 3.11 wheels).
+
+Network: python.org (the embeddable zip) and PyPI (through pip) only. Downloads are cached under ``--cache``.
+The Windows bundle cannot be run on the build machine; the first run is QA-SYS-4's bundle path.
+"""
+
+from __future__ import annotations
+
+import hashlib
+import os
+import shutil
+import subprocess
+import sys
+import urllib.request
+import zipfile
+from datetime import datetime, timezone
+from email.parser import HeaderParser
+from pathlib import Path
+from typing import Any, Iterable, Mapping
+
+REPO_ROOT = Path(__file__).resolve().parents[1]
+
+EMBED_VERSION = "3.12.10"
+EMBED_NAME = f"python-{EMBED_VERSION}-embed-amd64.zip"
+EMBED_URL = f"https://www.python.org/ftp/python/{EMBED_VERSION}/{EMBED_NAME}"
+EMBED_SHA256 = "4acbed6dd1c744b0376e3b1cf57ce906f9dc9e95e68824584c8099a63025a3c3"
+"""sha256 of the file downloaded from python.org over HTTPS on 2026-10-23 (11,133,606 bytes)."""
+PTH_NAME = "python312._pth"
+SITE_PACKAGES_PTH = "Lib\\site-packages"
+
+TOP_LEVEL = ("pymupdf==1.28.2", "numpy==2.5.4", "Pillow==12.3.0", "c2pa-python==0.38.0", "py7zr==1.1.4", "syhwp==0.0.8", "olefile==0.47")
+"""What the bundle is for: PDF reports, pixel checks, C2PA, .7z and .hwp. The rest of :data:`WINDOWS_WHEELS` is their
+dependencies, resolved once with ``pip download`` for win_amd64 / cp312 on 2026-10-23 and pinned here."""
+DEPENDENCIES = (
+    # c2pa-python
+    "toml==0.10.2", "cryptography==50.0.2", "cffi==2.1.1", "pycparser==3.12",
+    "requests==2.34.2", "charset-normalizer==3.5.2", "idna==3.20", "urllib3==2.8.0", "certifi==2026.10.19",
+    # py7zr
+    "texttable==1.7.2", "pycryptodomex==3.24.1", "brotli==1.2.1", "psutil==7.2.2", "backports-zstd==1.8.0",
+    "pyppmd==1.3.1", "pybcj==1.0.8", "multivolumefile==0.2.3", "inflate64==1.0.4",
+)
+WINDOWS_WHEELS = TOP_LEVEL + DEPENDENCIES
+MAC_PYTHONS = ("3.12", "3.13")
+MAC_PLATFORM = "macosx_14_0_arm64"
+
+WIN_DIR = "DeepfakeLens-win64"
+MAC_DIR = "DeepfakeLens-mac"
+WIN_LAUNCHER = "Deepfake Lens.cmd"
+WIN_DOCTOR = "문제 확인.cmd"
+WIN_README = "읽어보세요.txt"
+MAC_LAUNCHER = "Deepfake Lens.command"
+
+DEFAULT_CACHE = Path(os.environ.get("TMPDIR", "/tmp")) / "deepfake-lens-bundle-cache"
+
+
+class BuildError(RuntimeError):
+    """A build step failed; the message is shown as is."""
+
+
+# ── pure parts (unit-tested without network) ──────────────────────────────────────────────────────────────────
+
+
+def rewrite_pth(text: str) -> str:
+    """The embeddable ``._pth`` with ``Lib\\site-packages`` after ``.`` and ``import site`` turned on (idempotent)."""
+    lines = [line.rstrip("\r") for line in text.splitlines()]
+    if not any(line.strip().lower() == SITE_PACKAGES_PTH.lower() for line in lines):
+        at = next((i + 1 for i, line in enumerate(lines) if line.strip() == "."), None)
+        if at is None:
+            lines.append(".")
+            at = len(lines)
+        lines.insert(at, SITE_PACKAGES_PTH)
+    out: list[str] = []
+    has_site = False
+    for line in lines:
+        if line.strip().lstrip("#").strip() == "import site":
+            if not has_site:
+                out.append("import site")
+                has_site = True
+            continue
+        out.append(line)
+    if not has_site:
+        out.append("import site")
+    return "\r\n".join(out) + "\r\n"
+
+
+def _crlf(lines: Iterable[str]) -> str:
+    return "\r\n".join(lines) + "\r\n"
+
+
+def windows_launcher_text() -> str:
+    """``Deepfake Lens.cmd`` (plan §5). A folder dropped on it (``%1`` is a folder) starts with ``--folder``.
+
+    UTF-8 without BOM (a BOM breaks ``@echo off``); ``chcp 65001`` comes before the first Korean line.
+    """
+    return _crlf([
+        "@echo off",
+        "chcp 65001 >nul",
+        "title Deepfake Lens — 이 창을 닫으면 프로그램이 꺼집니다",
+        'cd /d "%~dp0"',
+        'if not exist "python\\python.exe" ( echo python 폴더가 없습니다. 압축을 전부 풀었는지 확인하십시오. & pause & exit /b 2 )',
+        'if "%~1"=="" goto run_plain',
+        'if not exist "%~1\\" goto run_plain',
+        '"python\\python.exe" -X utf8 -m deepfake_lens desktop --folder "%~1"',
+        "goto after_run",
+        ":run_plain",
+        '"python\\python.exe" -X utf8 -m deepfake_lens desktop %*',
+        ":after_run",
+        "if errorlevel 1 ( echo. & echo 프로그램이 오류로 끝났습니다. 위 내용을 캡처해 보내 주십시오. & pause )",
+    ])
+
+
+def doctor_launcher_text() -> str:
+    """``문제 확인.cmd``: ``doctor``, then the log folder (as ``cli_logging.default_log_dir`` places it on Windows).
+
+    ``DEEPFAKE_LENS_LOG_DIR`` wins; otherwise ``%USERPROFILE%\\.cache\\deepfake-lens\\logs``, or the relocated
+    ``%LOCALAPPDATA%\\deepfake-lens\\logs`` when only that one exists (R21-10).
+    """
+    return _crlf([
+        "@echo off",
+        "chcp 65001 >nul",
+        "title Deepfake Lens — 문제 확인",
+        'cd /d "%~dp0"',
+        'if not exist "python\\python.exe" ( echo python 폴더가 없습니다. 압축을 전부 풀었는지 확인하십시오. & pause & exit /b 2 )',
+        '"python\\python.exe" -X utf8 -m deepfake_lens doctor',
+        "echo.",
+        'set "DFL_LOGS=%USERPROFILE%\\.cache\\deepfake-lens\\logs"',
+        'if not exist "%DFL_LOGS%\\" if exist "%LOCALAPPDATA%\\deepfake-lens\\logs\\" set "DFL_LOGS=%LOCALAPPDATA%\\deepfake-lens\\logs"',
+        'if defined DEEPFAKE_LENS_LOG_DIR set "DFL_LOGS=%DEEPFAKE_LENS_LOG_DIR%"',
+        'echo 로그 폴더: "%DFL_LOGS%"',
+        'if exist "%DFL_LOGS%\\" ( start "" explorer "%DFL_LOGS%" ) else ( echo 아직 로그 폴더가 없습니다. 「Deepfake Lens.cmd」를 한 번 실행한 뒤 다시 확인하십시오. )',
+        "echo.",
+        "echo 문제를 알릴 때는 이 창의 내용과 로그 폴더의 파일을 함께 보내 주십시오.",
+        "pause",
+    ])
+
+
+def readme_text() -> str:
+    """``읽어보세요.txt`` (plan §1, §5, §6)."""
+    return _crlf([
+        "Deepfake Lens — 설치 없이 쓰는 꾸러미 (Windows 10/11, 64비트 x64 전용)",
+        "",
+        "■ 사용법 (3단계)",
+        "  1. 이 zip을 C:\\DeepfakeLens 같은 로컬 폴더에 전부 풉니다(zip 안에서 바로 실행하지 마십시오).",
+        "  2. 「Deepfake Lens.cmd」를 더블클릭합니다. 검은 창이 뜨고 브라우저에 검사 화면이 열립니다.",
+        "  3. 화면의 「검사할 폴더 고르기」로 폴더를 고르면 검사가 시작됩니다. 결과 화면에서 감정서(PDF)를 받습니다.",
+        "  폴더를 「Deepfake Lens.cmd」 위에 끌어다 놓으면 그 폴더를 연 채로 시작합니다.",
+        "",
+        "■ 끄는 방법",
+        "  화면 위쪽의 「종료」 단추를 누르거나 검은 창을 닫습니다. 검은 창을 닫으면 진행 중인 검사도 멈춥니다.",
+        "  브라우저 탭만 닫으면 프로그램은 남아 있다가, 20분 동안 화면도 검사도 없으면 스스로 꺼집니다.",
+        "  두 번 실행하면 새로 켜지 않고 이미 실행 중인 화면을 브라우저로 엽니다.",
+        "",
+        "■ 처음 실행할 때 경고가 뜨면",
+        "  인터넷에서 받은 zip에는 차단 표시가 붙어 Windows SmartScreen이 「Windows의 PC 보호」 창을 띄울 수 있습니다.",
+        "  「추가 정보」를 누른 뒤 「실행」을 누르십시오. 이 .cmd 파일들은 코드 서명이 되어 있지 않습니다.",
+        "  미리 막으려면 풀기 전에 zip 파일의 속성에서 「차단 해제」를 체크하거나, PowerShell에서",
+        "    Get-ChildItem -Recurse C:\\DeepfakeLens | Unblock-File",
+        "  을 실행합니다. 백신 프로그램이 막으면 이 폴더를 예외로 등록하십시오.",
+        "",
+        "■ 풀 위치",
+        "  OneDrive·네트워크 드라이브 아래에는 풀지 마십시오(느리고, 파일이 온라인 전용으로 바뀌면 실행되지 않습니다).",
+        "  32비트·ARM Windows는 지원하지 않습니다. 관리자 권한·설치·PATH 변경은 필요 없고, 지우려면 폴더를 삭제하면 됩니다.",
+        "",
+        "■ 기록과 서명 키",
+        "  검토 기록·검사 작업·보고서 서명 키는 %APPDATA%\\deepfake-lens\\ 에 남습니다(꾸러미를 새로 받아도 유지).",
+        "  서명 키 파일: %APPDATA%\\deepfake-lens\\report-key — 처음 실행할 때 자동으로 만들어집니다.",
+        "  이 키로 서명한 감정서는 이 PC의 이 Windows 계정에서만 검증됩니다. 검증 명령:",
+        "    python\\python.exe -X utf8 -m deepfake_lens verify-report <감정서> --key-file %APPDATA%\\deepfake-lens\\report-key",
+        "  키 파일을 지우면 다음 실행 때 새 키가 만들어지고, 그 전의 감정서는 더 이상 검증되지 않습니다.",
+        "",
+        "■ 문제가 생기면",
+        "  「문제 확인.cmd」를 더블클릭하면 점검 결과를 보여 주고 로그 폴더를 엽니다.",
+        "  로그 폴더: %USERPROFILE%\\.cache\\deepfake-lens\\logs",
+        "  검은 창의 내용(캡처)과 로그 폴더의 파일, VERSION.txt를 함께 보내 주십시오.",
+    ])
+
+
+def version_text(sha: str, built: datetime, platform_name: str) -> str:
+    return _crlf([f"commit {sha}", f"built {built.strftime('%Y-%m-%dT%H:%M:%SZ')}", f"platform {platform_name}", f"python {EMBED_VERSION}" if platform_name == "windows" else "python 3.12/3.13 (venv)"])
+
+
+def mac_launcher_text(wheel_name: str, requirements: Iterable[str], pythons: Iterable[str] = MAC_PYTHONS) -> str:
+    """``Deepfake Lens.command``: a venv made once from the bundled ``wheels/`` (no network), then ``desktop``."""
+    reqs = " ".join(f"'{r}'" for r in requirements)
+    candidates = " ".join(f"python{v}" for v in sorted(pythons, reverse=True))
+    accepted = " ".join(pythons)
+    return "\n".join([
+        "#!/bin/bash",
+        "# Deepfake Lens (macOS) — 더블클릭하면 처음 한 번 .venv를 만들고 데스크톱 모드를 시작합니다.",
+        "set -u",
+        'cd "$(dirname "$0")" || exit 2',
+        'stamp=".venv/.deepfake-lens-installed"',
+        'want="$(cat VERSION.txt 2>/dev/null)"',
+        'if [ ! -x .venv/bin/python ] || [ "$(cat "$stamp" 2>/dev/null)" != "$want" ]; then',
+        '  py=""',
+        f"  for cand in {candidates} python3; do",
+        '    command -v "$cand" >/dev/null 2>&1 || continue',
+        "    ver=\"$(\"$cand\" -c 'import sys; print(\"%d.%d\" % sys.version_info[:2])' 2>/dev/null)\"",
+        '    case " ' + accepted + ' " in *" $ver "*) py="$cand"; break;; esac',
+        "  done",
+        '  if [ -z "$py" ]; then',
+        f'    echo "Python {" 또는 ".join(pythons)}이 필요합니다(Homebrew: brew install python@3.12)."',
+        '    read -r -p "Enter를 누르면 창을 닫습니다." _; exit 2',
+        "  fi",
+        '  echo "처음 실행 준비 중입니다(.venv 만들기, 1~2분)…"',
+        '  rm -rf .venv && "$py" -m venv .venv || { echo "가상환경을 만들지 못했습니다."; read -r -p "Enter" _; exit 2; }',
+        f'  .venv/bin/python -m pip install --quiet --disable-pip-version-check --no-index --find-links wheels "wheels/{wheel_name}" {reqs} \\',
+        '    || { echo "꾸러미의 wheels 폴더에서 설치하지 못했습니다."; read -r -p "Enter" _; exit 2; }',
+        '  printf "%s" "$want" > "$stamp"',
+        "fi",
+        'exec .venv/bin/python -X utf8 -m deepfake_lens desktop "$@"',
+        "",
+    ])
+
+
+def canonical(name: str) -> str:
+    """PEP 503 normalised project name."""
+    import re
+
+    return re.sub(r"[-_.]+", "-", name).lower()
+
+
+def marker_environment(platform_name: str, python_version: str = "3.12") -> dict[str, str]:
+    """The PEP 508 marker values of the bundle's interpreter (extras off)."""
+    full = EMBED_VERSION if python_version == "3.12" else python_version + ".0"
+    if platform_name == "windows":
+        osv = {"os_name": "nt", "sys_platform": "win32", "platform_system": "Windows", "platform_machine": "AMD64"}
+    else:
+        osv = {"os_name": "posix", "sys_platform": "darwin", "platform_system": "Darwin", "platform_machine": "arm64"}
+    return {
+        **osv,
+        "python_version": python_version,
+        "python_full_version": full,
+        "implementation_name": "cpython",
+        "implementation_version": full,
+        "platform_python_implementation": "CPython",
+        "platform_release": "",
+        "platform_version": "",
+        "extra": "",
+    }
+
+
+def _packaging() -> tuple[Any, Any]:
+    """``(Requirement, Version)`` from ``packaging``, or from pip's vendored copy (the build venv always has pip)."""
+    import importlib
+
+    for base in ("packaging", "pip._vendor.packaging"):
+        try:
+            return importlib.import_module(base + ".requirements").Requirement, importlib.import_module(base + ".version").Version
+        except ImportError:
+            continue
+    raise BuildError("packaging 모듈이 없습니다 — pip가 있는 Python으로 실행하십시오")
+
+
+def metadata_fields(text: str) -> tuple[str, str, list[str]]:
+    """``(Name, Version, [Requires-Dist …])`` of a METADATA file."""
+    message = HeaderParser().parsestr(text)
+    return message.get("Name", ""), message.get("Version", ""), list(message.get_all("Requires-Dist") or [])
+
+
+def missing_requirements(dists: Mapping[str, tuple[str, list[str]]], environment: Mapping[str, str]) -> list[str]:
+    """Problems with a set of dists ``{name: (version, requires_dist)}`` for one interpreter.
+
+    A requirement whose marker is false in ``environment`` (with ``extra`` empty — no extras are installed) is
+    ignored; any other requirement must name an installed dist whose version satisfies the specifier.
+    """
+    requirement_type, version_type = _packaging()
+    installed = {canonical(name): version for name, (version, _reqs) in dists.items()}
+    problems: list[str] = []
+    for name, (_version, requires) in sorted(dists.items()):
+        for line in requires:
+            req = requirement_type(line)
+            if req.marker is not None and not req.marker.evaluate(dict(environment)):
+                continue
+            have = installed.get(canonical(req.name))
+            if have is None:
+                problems.append(f"{name}: 필요한 {req} 이(가) 설치되지 않았습니다")
+            elif req.specifier and not req.specifier.contains(version_type(have), prereleases=True):
+                problems.append(f"{name}: 필요한 {req} — 설치된 판은 {have}")
+    return problems
+
+
+def site_packages_dists(site_packages: Path) -> dict[str, tuple[str, list[str]]]:
+    """Every ``*.dist-info/METADATA`` under ``site_packages``."""
+    dists: dict[str, tuple[str, list[str]]] = {}
+    for meta in sorted(site_packages.glob("*.dist-info/METADATA")):
+        name, version, requires = metadata_fields(meta.read_text(encoding="utf-8", errors="replace"))
+        if name:
+            dists[name] = (version, requires)
+    return dists
+
+
+def wheel_dists(wheels: Iterable[Path]) -> dict[str, tuple[str, list[str]]]:
+    """The METADATA of each wheel file."""
+    dists: dict[str, tuple[str, list[str]]] = {}
+    for wheel in wheels:
+        with zipfile.ZipFile(wheel) as archive:
+            meta = next(n for n in archive.namelist() if n.endswith(".dist-info/METADATA") and n.count("/") == 1)
+            name, version, requires = metadata_fields(archive.read(meta).decode("utf-8", "replace"))
+        dists[name] = (version, requires)
+    return dists
+
+
+def zip_folder(folder: Path, zip_path: Path) -> int:
+    """Zip ``folder`` (as the top directory) with ``/`` separators; non-ASCII names get the UTF-8 flag. Returns the count."""
+    count = 0
+    with zipfile.ZipFile(zip_path, "w", compression=zipfile.ZIP_DEFLATED, compresslevel=6) as archive:
+        for path in sorted(folder.rglob("*")):
+            arcname = "/".join((folder.name, *path.relative_to(folder).parts))
+            if path.is_dir():
+                continue
+            archive.write(path, arcname)
+            count += 1
+    return count
+
+
+def verify_windows_bundle(folder: Path) -> list[str]:
+    """What is wrong with a built Windows folder (empty when it is complete)."""
+    problems: list[str] = []
+    python = folder / "python"
+    for need in ("python.exe", "pythonw.exe", "python312.dll", "python312.zip"):
+        if not (python / need).is_file():
+            problems.append(f"python/{need} 없음")
+    pth = python / PTH_NAME
+    if not pth.is_file():
+        problems.append(f"python/{PTH_NAME} 없음")
+    else:
+        lines = [line.strip() for line in pth.read_text(encoding="utf-8").splitlines()]
+        for need in ("python312.zip", ".", SITE_PACKAGES_PTH, "import site"):
+            if need not in lines:
+                problems.append(f"{PTH_NAME}에 {need!r} 줄이 없음")
+    site = python / "Lib" / "site-packages"
+    for need in ("deepfake_lens/gui.js", "deepfake_lens/gui.html", "deepfake_lens/__main__.py", "pymupdf/__init__.py", "fitz/__init__.py", "numpy/__init__.py", "PIL/__init__.py", "c2pa/__init__.py", "py7zr/__init__.py", "olefile/__init__.py"):
+        if not (site / need).is_file():
+            problems.append(f"site-packages/{need} 없음")
+    for need in (WIN_LAUNCHER, WIN_DOCTOR, WIN_README, "VERSION.txt"):
+        if not (folder / need).is_file():
+            problems.append(f"{need} 없음")
+    if site.is_dir():
+        problems.extend(missing_requirements(site_packages_dists(site), marker_environment("windows")))
+    return problems
+
+
+def tree_summary(folder: Path, expand: Iterable[str] = (), min_bytes: int = 1_000_000) -> tuple[list[str], int]:
+    """Lines ``size  path`` for the top-level entries and, for each folder in ``expand`` (relative, ``/``), its
+    children of at least ``min_bytes``; plus the total size in bytes."""
+    def size_of(path: Path) -> int:
+        if path.is_file():
+            return path.stat().st_size
+        return sum(p.stat().st_size for p in path.rglob("*") if p.is_file() and not p.is_symlink())
+
+    def line(path: Path, size: int) -> str:
+        return f"{size / 1e6:9.1f} MB  {path.relative_to(folder).as_posix()}{'/' if path.is_dir() else ''}"
+
+    lines = [line(child, size_of(child)) for child in sorted(folder.iterdir(), key=lambda p: p.name.lower())]
+    for rel in expand:
+        base = folder / rel
+        if not base.is_dir():
+            continue
+        sized = sorted(((size_of(child), child) for child in base.iterdir()), key=lambda pair: -pair[0])
+        lines.extend(line(child, size) for size, child in sized if size >= min_bytes)
+    return lines, size_of(folder)
+
+
+PRUNE_SUFFIXES = (".lib", ".pdb")
+"""Linker and debugger files in Windows wheels that Python never loads. c2pa-python 0.38.0's win_amd64 wheel carries
+``c2pa/libs/c2pa_c.lib`` (283 MB) and ``c2pa_c.pdb`` next to the ``c2pa_c.dll`` it loads; numpy ships ``.lib`` files
+for building extensions. Removing them leaves those dists' RECORD files stale, which only ``pip uninstall`` reads."""
+
+
+def prune_site_packages(site: Path) -> tuple[int, int]:
+    """Delete :data:`PRUNE_SUFFIXES` files under ``site``; returns ``(count, bytes)``."""
+    count = freed = 0
+    for path in sorted(site.rglob("*")):
+        if path.is_file() and path.suffix.lower() in PRUNE_SUFFIXES:
+            freed += path.stat().st_size
+            path.unlink()
+            count += 1
+    return count, freed
+
+
+# ── network and process steps (not called by the unit tests) ───────────────────────────────────────────────────
+
+
+def sha256_of(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for block in iter(lambda: handle.read(1 << 20), b""):
+            digest.update(block)
+    return digest.hexdigest()
+
+
+def fetch_embed(cache: Path) -> Path:
+    """The embeddable zip from python.org (cached), refused when its sha256 is not :data:`EMBED_SHA256`."""
+    target = cache / "python" / EMBED_NAME
+    if not target.is_file():
+        target.parent.mkdir(parents=True, exist_ok=True)
+        partial = target.with_suffix(".part")
+        print(f"내려받는 중: {EMBED_URL}", flush=True)
+        with urllib.request.urlopen(EMBED_URL, timeout=120) as answer, partial.open("wb") as out:
+            shutil.copyfileobj(answer, out)
+        partial.replace(target)
+    actual = sha256_of(target)
+    if actual != EMBED_SHA256:
+        raise BuildError(f"{EMBED_NAME}의 sha256이 고정값과 다릅니다: {actual} (기대 {EMBED_SHA256}) — 파일을 지우고 다시 받으십시오: {target}")
+    return target
+
+
+def _run(command: list[str], **kwargs: object) -> None:
+    print("  $ " + " ".join(command[:8]) + (" …" if len(command) > 8 else ""), flush=True)
+    done = subprocess.run(command, check=False, **kwargs)  # type: ignore[call-overload]
+    if done.returncode != 0:
+        raise BuildError(f"명령이 실패했습니다(종료 코드 {done.returncode}): {' '.join(command[:6])} …")
+
+
+def build_repo_wheel(cache: Path) -> Path:
+    """``pip wheel . --no-deps`` of this repository into a fresh folder; returns the wheel."""
+    out = cache / "repo-wheel"
+    shutil.rmtree(out, ignore_errors=True)
+    out.mkdir(parents=True)
+    _run([sys.executable, "-m", "pip", "wheel", "--quiet", "--no-deps", "--wheel-dir", str(out), str(REPO_ROOT)])
+    wheels = sorted(out.glob("deepfake_lens-*.whl"))
+    if len(wheels) != 1:
+        raise BuildError(f"레포 휠이 하나가 아닙니다: {wheels}")
+    return wheels[0]
+
+
+def download_wheels(requirements: Iterable[str], dest: Path, platform_tag: str, python_version: str) -> list[Path]:
+    """``pip download --no-deps --only-binary=:all:`` of each pinned requirement for one platform/interpreter."""
+    dest.mkdir(parents=True, exist_ok=True)
+    reqs = list(requirements)
+    abi = "cp" + python_version.replace(".", "")
+    _run([
+        sys.executable, "-m", "pip", "download", "--quiet", "--disable-pip-version-check", "--no-deps",
+        "--only-binary=:all:", "--platform", platform_tag, "--python-version", python_version,
+        "--implementation", "cp", "--abi", abi, "--abi", "abi3", "--abi", "none", "--dest", str(dest), *reqs,
+    ])
+    found: list[Path] = []
+    for req in reqs:
+        name, _, version = req.partition("==")
+        matches = [w for w in dest.glob("*.whl") if canonical(w.name.split("-")[0]) == canonical(name) and w.name.split("-")[1] == version]
+        compatible = [w for w in matches if _wheel_fits(w.name, platform_tag, abi)]
+        if not compatible:
+            raise BuildError(f"{req}의 휠을 찾지 못했습니다({platform_tag}, {abi})")
+        found.append(sorted(compatible)[-1])
+    return found
+
+
+def _wheel_fits(filename: str, platform_tag: str, abi: str) -> bool:
+    """True when a wheel's tags fit the target (win_amd64, or macOS arm64/universal2) and interpreter ABI."""
+    parts = filename[:-4].split("-")
+    abi_tag, plat_tag = parts[-2], parts[-1]
+    if plat_tag != "any":
+        if platform_tag.startswith("win"):
+            fits = "win_amd64" in plat_tag.split(".")
+        else:
+            fits = any(p.startswith("macosx") and p.endswith(("arm64", "universal2")) for p in plat_tag.split("."))
+        if not fits:
+            return False
+    return abi_tag in ("none", "abi3") or abi in abi_tag.split(".")
+
+
+def git_sha() -> str:
+    done = subprocess.run(["git", "-C", str(REPO_ROOT), "rev-parse", "HEAD"], capture_output=True, text=True, check=False)
+    sha = done.stdout.strip() if done.returncode == 0 else "unknown"
+    dirty = subprocess.run(["git", "-C", str(REPO_ROOT), "status", "--porcelain", "--untracked-files=no"], capture_output=True, text=True, check=False)
+    return sha + ("-dirty" if dirty.stdout.strip() else "")
+
+
+def _fresh(folder: Path) -> None:
+    """Empty the output folder; refuse one that holds something other than an earlier bundle."""
+    if folder.exists():
+        if any(folder.iterdir()) and not (folder / "VERSION.txt").is_file():
+            raise BuildError(f"출력 폴더가 비어 있지 않고 이전 꾸러미도 아닙니다: {folder}")
+        shutil.rmtree(folder)
+    folder.mkdir(parents=True)
+
+
+def _write(path: Path, text: str) -> None:
+    path.write_bytes(text.encode("utf-8"))
+
+
+def build_windows(out_parent: Path, cache: Path) -> Path:
+    folder = out_parent / WIN_DIR
+    _fresh(folder)
+    print("[1/6] python.org 임베더블 Python", flush=True)
+    embed = fetch_embed(cache)
+    python = folder / "python"
+    with zipfile.ZipFile(embed) as archive:
+        archive.extractall(python)
+    print(f"[2/6] {PTH_NAME} 고치기", flush=True)
+    pth = python / PTH_NAME
+    _write(pth, rewrite_pth(pth.read_text(encoding="utf-8")))
+    print("[3/6] 휠 설치(win_amd64, cp312, --no-deps)", flush=True)
+    repo_wheel = build_repo_wheel(cache)
+    wheels = download_wheels(WINDOWS_WHEELS, cache / "wheels-win_amd64-cp312", "win_amd64", "3.12")
+    site = python / "Lib" / "site-packages"
+    site.mkdir(parents=True)
+    _run([
+        sys.executable, "-m", "pip", "install", "--quiet", "--disable-pip-version-check", "--no-index", "--no-deps",
+        "--no-compile", "--target", str(site), "--platform", "win_amd64", "--python-version", "3.12",
+        "--implementation", "cp", "--abi", "cp312", "--only-binary=:all:", str(repo_wheel), *map(str, wheels),
+    ])
+    pruned, freed = prune_site_packages(site)
+    print(f"  링커·디버그 파일 {pruned}개 삭제({freed / 1e6:.1f} MB)", flush=True)
+    problems = missing_requirements(site_packages_dists(site), marker_environment("windows"))
+    if problems:
+        raise BuildError("의존성 검사 실패:\n  " + "\n  ".join(problems))
+    print("[4/6] 실행 파일·안내문", flush=True)
+    _write(folder / WIN_LAUNCHER, windows_launcher_text())
+    _write(folder / WIN_DOCTOR, doctor_launcher_text())
+    _write(folder / WIN_README, readme_text())
+    _write(folder / "VERSION.txt", version_text(git_sha(), datetime.now(timezone.utc), "windows"))
+    print("[5/6] zip 묶기", flush=True)
+    zip_path = out_parent / f"{WIN_DIR}.zip"
+    zip_path.unlink(missing_ok=True)
+    count = zip_folder(folder, zip_path)
+    print(f"  {zip_path} — 파일 {count}개, {zip_path.stat().st_size / 1e6:.1f} MB", flush=True)
+    print("[6/6] 검사", flush=True)
+    report(folder, verify_windows_bundle(folder), ("python/Lib/site-packages",))
+    with zipfile.ZipFile(zip_path) as archive:
+        names = archive.namelist()
+        bad = [n for n in names if "\\" in n]
+        korean = [i for i in archive.infolist() if not i.filename.isascii()]
+        if bad or any(not i.flag_bits & 0x800 for i in korean) or f"{WIN_DIR}/python/python.exe" not in names:
+            raise BuildError("zip 검사 실패(구분자·UTF-8 플래그·python.exe)")
+    print("  Windows에서의 실행은 이 Mac에서 시험할 수 없습니다 — QA-SYS-4 꾸러미 경로가 첫 시험입니다.", flush=True)
+    return folder
+
+
+def build_macos(out_parent: Path, cache: Path) -> Path:
+    folder = out_parent / MAC_DIR
+    _fresh(folder)
+    print("[1/3] 휠 모으기(macOS arm64, CPython " + ", ".join(MAC_PYTHONS) + ")", flush=True)
+    wheels_dir = folder / "wheels"
+    wheels_dir.mkdir()
+    repo_wheel = build_repo_wheel(cache)
+    shutil.copy2(repo_wheel, wheels_dir / repo_wheel.name)
+    for version in MAC_PYTHONS:
+        got = download_wheels(WINDOWS_WHEELS, cache / f"wheels-mac-cp{version.replace('.', '')}", MAC_PLATFORM, version)
+        for wheel in got:
+            shutil.copy2(wheel, wheels_dir / wheel.name)
+        problems = missing_requirements(wheel_dists([repo_wheel, *got]), marker_environment("macos", version))
+        if problems:
+            raise BuildError(f"의존성 검사 실패(macOS, {version}):\n  " + "\n  ".join(problems))
+    print("[2/3] 실행 파일", flush=True)
+    launcher = folder / MAC_LAUNCHER
+    _write(launcher, mac_launcher_text(repo_wheel.name, WINDOWS_WHEELS))
+    launcher.chmod(0o755)
+    _write(folder / "VERSION.txt", version_text(git_sha(), datetime.now(timezone.utc), "macos").replace("\r\n", "\n"))
+    print("[3/3] 검사", flush=True)
+    problems = [] if (wheels_dir / repo_wheel.name).is_file() else ["레포 휠 없음"]
+    if not any(w.name.startswith("pymupdf-") for w in wheels_dir.iterdir()):
+        problems.append("pymupdf 휠 없음")
+    with zipfile.ZipFile(wheels_dir / repo_wheel.name) as archive:
+        if "deepfake_lens/gui.js" not in archive.namelist():
+            problems.append("레포 휠에 deepfake_lens/gui.js 없음")
+    report(folder, problems, ("wheels",))
+    return folder
+
+
+def report(folder: Path, problems: list[str], expand: Iterable[str] = ()) -> None:
+    lines, total = tree_summary(folder, expand)
+    print(f"  {folder}", flush=True)
+    for line in lines:
+        print("  " + line)
+    print(f"  합계 {total / 1e6:.1f} MB", flush=True)
+    if problems:
+        raise BuildError("꾸러미 검사 실패:\n  " + "\n  ".join(problems))
+    print("  검사 통과", flush=True)
+
+
+def main(argv: list[str] | None = None) -> int:
+    if str(REPO_ROOT) not in sys.path:
+        sys.path.insert(0, str(REPO_ROOT))
+    from deepfake_lens.cli_parser import KoreanArgumentParser
+
+    parser = KoreanArgumentParser(
+        description="설치 없이 더블클릭으로 쓰는 데스크톱 꾸러미를 만듭니다(비게이트). windows는 python.org 임베더블 Python과 "
+        "고정된 휠을 담은 폴더와 zip을, macos는 처음 실행할 때 가상환경을 만드는 실행 파일과 휠 폴더를 만듭니다. "
+        "내려받기는 python.org와 PyPI만 씁니다.",
+    )
+    parser.add_argument("--platform", choices=("windows", "macos"), required=True, help="만들 꾸러미의 운영체제")
+    parser.add_argument("--out", type=Path, default=REPO_ROOT / "dist", metavar="<폴더>", help="꾸러미 폴더(와 zip)를 만들 상위 폴더(기본: 레포의 dist)")
+    parser.add_argument("--cache", type=Path, default=DEFAULT_CACHE, metavar="<폴더>", help="내려받은 파일을 보관할 폴더(다시 만들 때 재사용)")
+    args = parser.parse_args(argv)
+    out = args.out.expanduser().resolve()
+    cache = args.cache.expanduser().resolve()
+    out.mkdir(parents=True, exist_ok=True)
+    try:
+        if args.platform == "windows":
+            build_windows(out, cache)
+        else:
+            build_macos(out, cache)
+    except BuildError as exc:
+        print(f"오류: {exc}", file=sys.stderr)
+        return 1
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

@@ -317,6 +317,9 @@ files = [
     "deepfake_lens/tests/test_generator_strings.py",
     "deepfake_lens/tests/test_imwatermark_registry.py",
     "deepfake_lens/tests/test_tb_tables_korean.py",
+    # DESK-8
+    "scripts/build_desktop_bundle.py",
+    "deepfake_lens/tests/test_desktop_bundle.py",
 ]
 follow_imports = "skip"
 ignore_missing_imports = true
