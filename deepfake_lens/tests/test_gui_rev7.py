@@ -385,5 +385,17 @@ class F10FilesDroppedOutsideTheZoneAreNotOpenedTest(unittest.TestCase):
         self.assertEqual(json.loads(_run_js(body)), [True, True, False, False, False])
 
 
+class F11FilterFocusRingIsNotClippedTest(unittest.TestCase):
+    """F-11 (Med): the verdict filter cells fill .strip, which clips (overflow: hidden) — the outer focus ring
+    (outline-offset 2px) was cut on three sides."""
+
+    def test_the_focus_ring_is_inside_the_cell(self) -> None:
+        css = _css()
+        self.assertRegex(css, r"\.strip \{[^}]*overflow: hidden;")
+        self.assertIn(":focus-visible { outline: 3px solid var(--focus); outline-offset: 2px; }", css)
+        rule = css.index(".seg:focus-visible { outline-offset: -3px; }")
+        self.assertGreater(rule, css.index(":focus-visible { outline: 3px solid var(--focus); outline-offset: 2px; }"))
+
+
 if __name__ == "__main__":
     unittest.main()

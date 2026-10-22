@@ -275,6 +275,8 @@ select.field { padding-right: 8px; }
     cursor: pointer; text-align: left; box-shadow: inset 0 -4px 0 var(--seg-c, var(--neutral));
 }
 .seg:last-child { border-right: 0; }
+/* GUI-REV7 F-11: .strip clips its children (overflow: hidden) — the focus ring is drawn inside the cell. */
+.seg:focus-visible { outline-offset: -3px; }
 .seg:hover { background: var(--hover); }
 .seg[data-band="manipulation_evidence"] { --seg-c: var(--manip); }
 .seg[data-band="authenticity_evidence"] { --seg-c: var(--auth); }
