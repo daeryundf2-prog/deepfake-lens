@@ -569,6 +569,16 @@ select.field { padding-right: 8px; }
 .self-declared { display: inline-block; margin-left: 6px; padding: 0 6px; border: 1px dashed var(--warn); border-radius: 3px; color: var(--warn); font-size: 12px; font-weight: 600; }
 .d-sec.d-caveat h3 { color: var(--warn); }
 
+/* DESK-2: the desktop mode's top-bar line and the page left after 종료. */
+.desk-bar { display: flex; align-items: center; gap: 10px; }
+.desk-run { display: inline-flex; align-items: center; gap: 6px; color: var(--ink-2); }
+.desk-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--auth); }
+.shutdown-page { max-width: 760px; margin: 0 auto; padding: 96px var(--gutter); }
+#shutdown-alert { display: flex; flex-direction: column; gap: 12px; }
+@media (forced-colors: active) {
+    .desk-dot { forced-color-adjust: none; background: CanvasText; }
+}
+
 /* GUI-REV7 F-8: Windows contrast themes (forced colors) drop backgrounds and box-shadows — the current row,
    a pressed verdict filter, a pressed review star, the progress fill, a changed row, the drop zone while a
    file is held over it and the active studio mode were told only by them. Here they get a border, an

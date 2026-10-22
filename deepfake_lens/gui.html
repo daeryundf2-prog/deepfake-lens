@@ -26,6 +26,10 @@
             <a href="#/report" data-view-link="report" class="nav-primary">감정서 만들기</a>
             <a href="#/tools" data-view-link="tools">빠른 검사·비교</a>
         </nav>
+        <div class="desk-bar" id="desk-bar" hidden>
+            <span class="desk-run small"><span class="desk-dot" aria-hidden="true"></span>이 PC에서 실행 중</span>
+            <button class="btn btn-sm" id="shutdown-btn" type="button">종료</button>
+        </div>
     </header>
 
     <main id="main" tabindex="-1">
@@ -329,6 +333,10 @@
             </section>
         </div>
     </main>
+
+    <div class="shutdown-page" id="shutdown-page" hidden>
+        <div id="shutdown-alert" role="alert"></div>
+    </div>
 
     <div id="toasts" role="status" aria-live="polite"></div>
 

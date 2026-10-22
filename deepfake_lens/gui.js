@@ -31,6 +31,9 @@
         let defaultFolder = '';
         let defaultFolderB64 = '';
         let pdfAvailable = null;
+        // DESK-2: the desktop mode (`deepfake-lens desktop`, /api/stats desktop) and whether the page has been shut down.
+        let desktopMode = false;
+        let appShutDown = false;
 
         /* Review marks stored locally and synchronized with backend API */
         const REVIEW_KEY = 'dflens-review-v1';
@@ -3203,6 +3206,58 @@
             if (!field.value && document.activeElement !== field) field.value = folder;
         }
 
+        /* ── desktop mode (DESK-2..7: `deepfake-lens desktop`) ── */
+        // The product name as the top bar shows it (one place for it).
+        const PRODUCT = document.querySelector('.brand-name').textContent.trim();
+        const SHUTDOWN_QUESTION = `${PRODUCT}를 종료할까요? 종료하면 이 화면은 더 쓸 수 없습니다 — 다시 쓰려면 바탕 화면의 ${PRODUCT}를 다시 실행하십시오.`;
+        const FORM_CONTROLS = [HTMLButtonElement, HTMLInputElement, HTMLSelectElement, HTMLTextAreaElement];
+
+        // DESK-2: one call when /api/stats has answered. The plain web server says desktop false — the
+        // desktop-only controls stay hidden there.
+        function applyDesktopStats(d) {
+            desktopMode = d.desktop === true;
+            if (!desktopMode) return;
+            $('desk-bar').hidden = false;
+        }
+
+        // DESK-2: 종료 asks, then stops the server; the page is replaced by one sentence (role=alert) and every
+        // control is disabled — nothing on it can reach the server any more. A refusal (409: a scan is running)
+        // is said in the error region with the server's text.
+        $('shutdown-btn').addEventListener('click', async () => {
+            const btn = $('shutdown-btn');
+            if (appShutDown || isBusyButton(btn)) return;
+            if (!window.confirm(SHUTDOWN_QUESTION)) return;
+            setBusyButton(btn, true);
+            try {
+                const res = await apiFetch('/api/shutdown', { method: 'POST' });
+                if (res.ok) { showShutdownPage(); return; }
+                showError(await apiError(res), '종료하지 못했습니다');
+            } catch (e) {
+                showError(e.message, '종료하지 못했습니다');
+            } finally {
+                if (!appShutDown) setBusyButton(btn, false);
+            }
+        });
+        function showShutdownPage() {
+            appShutDown = true;
+            clearTimeout(a4Timer);
+            if ($('token-modal').open) $('token-modal').close();
+            document.querySelectorAll('*').forEach(el => { if (FORM_CONTROLS.some(type => el instanceof type)) el.disabled = true; });
+            [document.querySelector('.skip-link'), document.querySelector('.topbar'), $('main'), $('toasts')].forEach(el => {
+                el.hidden = true;
+                el.inert = true;
+            });
+            const head = document.createElement('h1');
+            head.className = 'view-h';
+            head.tabIndex = -1;
+            head.textContent = '종료되었습니다. 이 탭을 닫으십시오.';
+            const next = document.createElement('p');
+            next.textContent = `다시 쓰려면 바탕 화면의 ${PRODUCT}를 다시 실행하십시오.`;
+            $('shutdown-page').hidden = false;
+            $('shutdown-alert').replaceChildren(head, next);
+            head.focus();
+        }
+
         /* ── initialization ───────────────────────── */
         updateCaseLine();
         showView(viewFromHash() || 'scan', null, true);
@@ -3215,6 +3270,7 @@
                 applyDefaultFolder(d.default_folder, typeof d.default_folder_b64 === 'string' ? d.default_folder_b64 : '');
             }
             if (typeof d.pdf_available === 'boolean') pdfAvailable = d.pdf_available;
+            applyDesktopStats(d);
             if (currentView === 'report') renderReport();
         }).catch(() => {});
         resumeJob();
