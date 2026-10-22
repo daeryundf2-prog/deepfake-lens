@@ -13,8 +13,10 @@ import threading
 import time
 import unittest
 import urllib.error
+import urllib.parse
 import urllib.request
 from pathlib import Path
+from typing import Any
 from unittest import mock
 
 from collections import OrderedDict
@@ -141,7 +143,7 @@ class _ServerMixin:
     state: desktop.DesktopState | None = None
 
     def start(self, folder: Path, state: desktop.DesktopState | None) -> str:
-        roots = mock.patch.object(webapp_api, "_READ_ROOTS", OrderedDict())  # the registry is per process
+        roots: Any = mock.patch.object(webapp_api, "_READ_ROOTS", OrderedDict())  # the registry is per process
         roots.start()
         self.addCleanup(roots.stop)  # type: ignore[attr-defined]
         port = _free_port()
@@ -191,6 +193,8 @@ class PlainServerUnchangedTest(_ServerMixin, unittest.TestCase):
 
 
 class DesktopServerTest(_ServerMixin, unittest.TestCase):
+    state: desktop.DesktopState
+
     def setUp(self) -> None:
         self.tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self.tmp.cleanup)
@@ -223,7 +227,7 @@ class DesktopServerTest(_ServerMixin, unittest.TestCase):
         _, roots = self.call(self.base + "/api/roots")
         self.assertEqual([r["path"] for r in roots["roots"]], [str(self.folder.resolve()), str(self.other.resolve())])
         # the new root is usable: a scan of it is not a 403
-        status, _ = self.call(self.base + "/api/scan?folder=" + urllib.request.quote(str(self.other)) + "&async=0")
+        status, _ = self.call(self.base + "/api/scan?folder=" + urllib.parse.quote(str(self.other)) + "&async=0")
         self.assertEqual(status, 200)
 
     def test_pick_folder_cancel_unavailable_and_not_a_folder(self) -> None:
@@ -280,3 +284,32 @@ class CommandSurfaceTest(unittest.TestCase):
         self.assertNotIn(NON_GATE_NOTE, description)
         self.assertNotIn(NON_GATE_MARK, description)
         self.assertIn("데스크톱", description)
+
+
+class DialogCommandTest(unittest.TestCase):
+    """The helper command lines are well-formed on each platform (the dialog itself is not shown in tests)."""
+
+    def test_windows_uses_powershell_command_not_a_script_file(self) -> None:
+        with mock.patch.object(desktop.os, "name", "nt"), mock.patch.object(desktop.shutil, "which", return_value="C:/ps/powershell.exe"):
+            command = desktop._dialog_command("검사할 폴더를 고르십시오 'a'")
+        self.assertIsNotNone(command)
+        assert command is not None
+        self.assertEqual(command[:5], ["C:/ps/powershell.exe", "-NoProfile", "-NonInteractive", "-STA", "-Command"])
+        script = command[5]
+        self.assertIn("FolderBrowserDialog", script)
+        self.assertIn("TopMost = $true", script)
+        self.assertIn("'검사할 폴더를 고르십시오 ''a'''", script)  # a quote in the prompt is doubled, not injected
+        self.assertNotIn("{{", script)  # the format template was rendered
+
+    def test_macos_uses_osascript_choose_folder(self) -> None:
+        with mock.patch.object(desktop.os, "name", "posix"), mock.patch.object(desktop.sys, "platform", "darwin"), \
+                mock.patch.object(desktop.shutil, "which", return_value="/usr/bin/osascript"):
+            command = desktop._dialog_command('고르십시오 "x"')
+        assert command is not None
+        self.assertEqual(command[:2], ["/usr/bin/osascript", "-e"])
+        self.assertIn('choose folder with prompt "고르십시오 \\"x\\""', command[2])
+
+    def test_no_helper_anywhere_is_none(self) -> None:
+        with mock.patch.object(desktop.os, "name", "posix"), mock.patch.object(desktop.sys, "platform", "linux"), \
+                mock.patch.object(desktop.shutil, "which", return_value=None):
+            self.assertIsNone(desktop._dialog_command("x"))
