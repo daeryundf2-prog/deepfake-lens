@@ -36,18 +36,13 @@ python scripts/make_qa_manual_fixtures.py --out qa-manual
 `qa-manual/resume-500/`(500개), `qa-manual/timing/`(타이밍 세트)이 만들어진다. 같은 커밋이면
 내용이 바이트 단위로 같다.
 
-결과 JSON 비교에 쓰는 스니펫(타임스탬프·절대경로를 빼고 항목별 결과를 비교, 같으면 `동일` 출력):
+결과 JSON 비교는 `scripts/qa_compare_results.py`로 한다(표준 라이브러리만 쓰므로 레포 밖에서도
+`python -I qa_compare_results.py a.json b.json`으로 돈다 — 이전의 히어독 스니펫은 PowerShell에서 돌지 않았다, W-4).
+항목을 행 경로별로 맞추되 경로의 `\`는 `/`로 바꾸고, `cached`·`path_b64`와 설치 폴더가 든 모델 프로필 경로(파일
+이름만 비교)를 빼고 비교한다. 같으면 `동일`(exit 0), 다르면 `다름 N건`과 행마다 다른 키·두 값(exit 1):
 
 ```bash
-python - a.json b.json <<'EOF'
-import json, sys
-def items(path):
-    data = json.load(open(path, encoding="utf-8"))
-    return {item["path"]: {k: v for k, v in item.items() if k not in {"cached"}} for item in data["items"]}
-a, b = (items(p) for p in sys.argv[1:3])
-diff = sorted(p for p in a.keys() | b.keys() if a.get(p) != b.get(p))
-print("동일" if not diff else f"다름 {len(diff)}건: {diff[:10]}")
-EOF
+python -I scripts/qa_compare_results.py a.json b.json
 ```
 
 ## QA-IN-3
@@ -73,7 +68,7 @@ unshare --net --map-root-user strace -f -e trace=connect -o connect.log \
     --json-out offline.json --format json > /dev/null; echo "exit=$?"
 grep connect connect.log | grep -v 'AF_UNIX' | grep -c 'AF_INET'     # 0이어야 함
 unshare --net --map-root-user python -m deepfake_lens doctor; echo "exit=$?"
-# 3) 비교: 공통 준비의 비교 스니펫에 online.json offline.json 을 넘긴다 → "동일"
+# 3) 비교: 공통 준비의 비교 스크립트에 online.json offline.json 을 넘긴다 → "동일"
 ```
 
 Windows 11(관리자 PowerShell):
@@ -104,37 +99,148 @@ Remove-NetFirewallRule -DisplayName dfl-qa-in-3
 1. Python과 이 도구 외에 아무것도 설치되지 않은 Windows 11(Windows Sandbox 또는 새 VM)에서
    설치·실행 중 traceback이 한 번도 나오지 않는다.
 2. `doctor`, `scan`, `web`, `evidence-statement`가 동작하고, 한글 출력이 PowerShell과 cmd 모두에서
-   깨지지 않는다.
+   깨지지 않는다(화면 캡처로 판단 — 아래 "한글 판단").
 3. 한글과 공백이 들어간 경로(`C:\사건 자료\증거 1`)를 검사할 수 있다.
 4. `api-serve`는 fastapi/uvicorn이 없으면 한국어 설치 안내와 종료 코드 2로 끝난다(traceback 없음).
-5. `qa-manual/formats` 결과가 Linux에서 같은 커밋으로 만든 결과와 `동일`하다.
+5. `qa-manual/formats` 결과가 빌드 머신에서 같은 커밋·**같은 설치 상태**(휠만 설치, 선택 패키지 없음,
+   PATH에 ffmpeg 없음)로 만든 기준 결과 `reference-wheel.json`과 `동일`하다. numpy·Pillow·ffmpeg·pymupdf가
+   있으면 검사 범위(coverage)의 사유가 달라지므로, extras가 깔린 개발 환경의 결과와는 비교하지 않는다
+   (GUI-REV7 W-4 — 같은 픽스처를 extras 환경에서 검사하면 51행 중 31행이 다르다).
 
-절차:
+PDF 증거설명서는 통과 기준이 아니다. pymupdf는 어떤 extra에도 들어 있지 않아(게이트 lock에만 있음)
+휠만 설치한 Windows에서는 PDF를 만들 수 없고, GUI의 PDF 버튼이 비활성인 것이 정상이다. PDF는 비교를
+마친 뒤 아래 "선택: PDF"에서 따로 확인한다(W-5).
 
-```powershell
-# 빌드 머신(이 저장소): 휠과 픽스처를 만든다
-python -m pip wheel . --no-deps -w dist
+### 빌드 머신에서 준비할 것
+
+`scripts/make_qa_manual_fixtures.py`는 테스트 패키지가 휠에서 빠져 있어 Windows에서 돌릴 수 없다 —
+픽스처와 기준 결과는 빌드 머신(macOS 또는 Linux)에서 만들어 USB로 넘긴다.
+
+```bash
+git rev-parse HEAD                                        # 기록 표의 "커밋"
+python -m pip wheel . --no-deps -w dist                   # dist/deepfake_lens-0.1.0-py3-none-any.whl
 python scripts/make_qa_manual_fixtures.py --out qa-manual
-python -m deepfake_lens scan qa-manual\formats --recursive --json-out linux.json --format json   # Linux에서 실행해 복사
-
-# 깨끗한 Windows 11: python.org의 Python 3.12 x64 설치("Add python.exe to PATH" 체크)
-py -3.12 -m venv C:\dfl\venv
-C:\dfl\venv\Scripts\activate
-pip install C:\dfl\dist\deepfake_lens-0.1.0-py3-none-any.whl
-deepfake-lens --help
-deepfake-lens doctor; "exit=$LASTEXITCODE"
-New-Item -ItemType Directory "C:\사건 자료\증거 1" | Out-Null
-Copy-Item C:\dfl\qa-manual\formats\* "C:\사건 자료\증거 1\"
-deepfake-lens scan "C:\사건 자료\증거 1" --recursive --json-out C:\dfl\out\windows.json --html-out C:\dfl\out\scan.html --evidence-statement-out C:\dfl\out\statement.md; "exit=$LASTEXITCODE"
-$env:DEEPFAKE_LENS_REPORT_KEY = "qa-sys-4-key"
-deepfake-lens evidence-statement C:\dfl\out\windows.json --json-out C:\dfl\out\statement.json --format table
-deepfake-lens api-serve; "exit=$LASTEXITCODE"        # 2 + 한국어 안내
-deepfake-lens web --folder "C:\사건 자료\증거 1"      # 브라우저로 http://127.0.0.1:8765/gui 열고 폴더 검사 1회
-cmd /c "chcp 949 & C:\dfl\venv\Scripts\deepfake-lens.exe doctor"   # cmd 기본 코드 페이지에서 한글 확인
+# macOS: Finder 압축·zip은 __MACOSX·._* 를 넣어 행 수가 늘어난다(W-12). 반드시 ditto로:
+ditto -c -k --norsrc --noextattr qa-manual qa-manual.zip  # Linux: (cd qa-manual && zip -qr ../qa-manual.zip .)
+# 기준 결과: 휠만 깐 새 venv, PATH에서 ffmpeg가 있는 폴더를 뺀다(Windows 쪽과 같은 설치 상태)
+python3 -m venv /tmp/wheelvenv && /tmp/wheelvenv/bin/pip install dist/deepfake_lens-0.1.0-py3-none-any.whl
+PATH=/tmp/wheelvenv/bin:/usr/bin:/bin sh -c 'command -v ffmpeg' # 아무것도 안 나와야 함(Linux에서 /usr/bin/ffmpeg가 있으면 ffmpeg 없는 컨테이너에서)
+PATH=/tmp/wheelvenv/bin:/usr/bin:/bin deepfake-lens scan qa-manual/formats --recursive \
+    --json-out reference-wheel.json --format json > /dev/null; echo "exit=$?"     # 0
+cp scripts/qa_compare_results.py compare.py
+# 선택 단계(PDF)용 Windows 휠 — 게이트 lock과 같은 판
+python -m pip download pymupdf==1.28.2 --platform win_amd64 --python-version 3.12 --only-binary=:all: -d win-wheels
 ```
 
-비교는 공통 준비의 스니펫으로 `linux.json`과 `windows.json`을 비교한다(경로 구분자만 다른 경우는
-항목 경로를 `/`로 바꿔 비교).
+USB에 넣을 것(Windows에서 `C:\dfl\`에 그대로 복사): `python-3.12.10-amd64.exe`,
+`dist\deepfake_lens-0.1.0-py3-none-any.whl`, `qa-manual.zip`, `reference-wheel.json`, `compare.py`,
+`win-wheels\`(선택). Python은 3.12.10을 쓴다 — python.org 첫 화면의 최신판(3.14)은 검증하지 않았고
+(`requires-python >=3.11`, CI는 3.11/3.12), 3.12의 Windows 설치 파일은 3.12.10이 마지막이다(W-6):
+https://www.python.org/ftp/python/3.12.10/python-3.12.10-amd64.exe
+
+### 깨끗한 Windows 11에서 (후임용 runbook)
+
+Python 설치: `python-3.12.10-amd64.exe` 실행 → 첫 화면에서 "Add python.exe to PATH"를 체크 →
+"Install Now" → 마지막 화면의 "Disable path length limit"를 누른다. 그다음 PowerShell(관리자 아님)을 열고
+아래를 한 줄씩 실행한다. 각 줄 오른쪽 주석이 정상 결과다.
+
+```powershell
+# 0) 이 창에서만 스크립트 실행 허용(W-3). 창을 새로 열면 다시 실행하십시오.
+#    정책을 바꾸고 싶지 않으면 Activate.ps1 대신 C:\dfl\venv\Scripts\python.exe -m deepfake_lens … 로 실행하거나,
+#    cmd에서 C:\dfl\venv\Scripts\activate.bat 을 쓰십시오.
+Set-ExecutionPolicy -Scope Process -ExecutionPolicy RemoteSigned -Force
+# 1) 출력 폴더와 증거 폴더를 먼저 만듭니다(W-2 — 이 도구는 출력 폴더를 만들지 않습니다:
+#    없으면 "오류: 출력 폴더가 없습니다: …"와 exit 2). 바탕 화면·문서(OneDrive 리디렉션)는 쓰지 마십시오(W-11).
+New-Item -ItemType Directory -Force C:\dfl\out, "C:\사건 자료\증거 1" | Out-Null
+py -3.12 -m venv C:\dfl\venv
+C:\dfl\venv\Scripts\Activate.ps1                                  # 프롬프트 앞에 (venv)
+python --version                                                  # Python 3.12.10
+python -m pip install C:\dfl\dist\deepfake_lens-0.1.0-py3-none-any.whl   # 휠만 설치(의존 패키지 없음)
+deepfake-lens --help; "exit=$LASTEXITCODE"                        # 사용법 화면, exit=0
+deepfake-lens doctor; "exit=$LASTEXITCODE"                        # exit=0 (아래 "정상 화면" 참고)
+Expand-Archive C:\dfl\qa-manual.zip -DestinationPath C:\dfl\qa-manual
+# 2) 경로를 따옴표로 감쌀 때 끝에 \ 를 붙이지 마십시오(W-7): "C:\사건 자료\증거 1\" 처럼 Tab 완성이 붙이는 끝의 \ 는
+#    PowerShell 5.1이 프로그램에 넘길 때 닫는 따옴표를 먹어 "폴더를 찾을 수 없습니다 …1\"" 가 됩니다.
+Copy-Item C:\dfl\qa-manual\formats\* "C:\사건 자료\증거 1"
+deepfake-lens scan "C:\사건 자료\증거 1" --recursive --json-out C:\dfl\out\windows.json --html-out C:\dfl\out\scan.html --evidence-statement-out C:\dfl\out\statement.md; "exit=$LASTEXITCODE"
+#    exit=0, 51행 표, C:\dfl\out 에 windows.json·scan.html·statement.md 세 파일
+# 3) 기준과 비교(통과 기준 5). pymupdf 등을 설치하기 전에 하십시오.
+python -I C:\dfl\compare.py C:\dfl\reference-wheel.json C:\dfl\out\windows.json; "exit=$LASTEXITCODE"   # 동일, exit=0
+# 4) 서명 키는 32바이트 이상이어야 합니다(W-1 — 짧으면 evidence-statement·web·api-serve가 exit 2).
+#    GUID 두 개를 이어 64자 키를 만듭니다. 이 창을 닫으면 사라집니다.
+$env:DEEPFAKE_LENS_REPORT_KEY = [guid]::NewGuid().ToString('N') + [guid]::NewGuid().ToString('N')
+deepfake-lens evidence-statement C:\dfl\out\windows.json --json-out C:\dfl\out\statement.json --format table; "exit=$LASTEXITCODE"
+#    증거 목록 51건, 끝에 "서명 JSON 저장 완료: C:\dfl\out\statement.json", "서명: HMAC-SHA256 hmac-sha256-v1:…", exit=0
+deepfake-lens api-serve; "exit=$LASTEXITCODE"
+#    "오류: API 서버에 필요한 패키지가 설치되어 있지 않습니다: fastapi, uvicorn" + 설치 안내 2줄, exit=2, traceback 없음
+# 5) GUI(W-10). 이 창은 서버가 차지하므로 그대로 두십시오.
+deepfake-lens web --folder "C:\사건 자료\증거 1"
+#    "Deepfake Lens GUI: http://127.0.0.1:8765" 와 "Windows에서 접속: http://localhost:8765" 두 줄이 나오면 정상.
+#    web은 요청·오류를 이 창에 찍지 않습니다 — 오류는 로그 파일(아래 "버그 보고")과 브라우저 F12를 보십시오.
+#    Edge/Chrome에서 http://127.0.0.1:8765/gui 를 엽니다.
+#    "2 / 2 검사할 폴더"의 "폴더 경로" 상자에 C:\사건 자료\증거 1 이 저절로 채워질 때까지 기다린 뒤(채워지기 전에
+#    상자를 누르고 치면 글자가 섞일 수 있음) 상자를 누르고 Enter(또는 「검사 시작」)를 누르십시오.
+#    다른 폴더를 검사하려면 경로를 직접 치고 Enter — 끝에 \ 를 붙이지 말고, --folder 안의 폴더만 됩니다.
+#    「폴더 대신 파일 올리기」의 「폴더 고르기」·「파일 고르기」는 폴더 검사가 아니라 업로드입니다(최대 20개씩,
+#    서명 제외, 증거설명서를 만들 수 없음). 이번 시험에서는 누르지 마십시오.
+#    정상: 진행 표시 → 사건 대장에 51행(모두 「판단 불가」) → 감정서 만들기에서 HTML·서명된 JSON 내려받기.
+#    PDF 버튼 비활성은 pymupdf가 없어서이며 정상입니다.
+#    종료: 이 창에서 Ctrl-C → "중단됨(사용자 요청) — 임시 파일과 자식 프로세스를 정리하고 종료합니다." (exit 130이 정상)
+"exit=$LASTEXITCODE"                                              # 130
+# 6) cmd 기본 코드 페이지(949)에서 한글 확인(통과 기준 2). 화면 캡처로만 판단하십시오.
+cmd /c "chcp 949 & C:\dfl\venv\Scripts\deepfake-lens.exe doctor"
+```
+
+한글 판단(W-8): 콘솔 화면에서는 한글이 정상으로 보여야 한다. 출력을 `> 파일`·`Out-File`·`| Tee-Object`로
+받으면 PowerShell 5.1이 cp949로 다시 인코딩해 한글이 깨질 수 있는데, 이는 이 도구의 결함이 아니다 —
+한글 깨짐은 **화면 캡처로만** 판단하고 리다이렉트한 파일로 판단하지 않는다(파일이 필요하면 도구의
+`--json-out`·`--html-out` 등 출력 옵션으로 받는다).
+
+정상 화면(W-13, 빌드 머신에서 휠만 깐 venv·PATH에 ffmpeg 없음으로 캡처한 출력 — 인계 꾸러미의
+`expected-output\`에 전문이 있다. 개수나 문구가 다르면 그 화면을 캡처해 보고한다):
+- `doctor`(exit 0): 첫 줄 "실행 가능: 0/10 프로필 — …", 이어서 "!! 실행 가능한 모델 프로필 없음 — …" 경고,
+  모델 프로필 10개가 모두 `[ WARN]`(pin·의존성·체크포인트 `MISS`, "실행 가능: 아니오 (supported:false — 측정
+  게이트 미충족)"), 의존성 표에 `[ MISS]` 다수(torch·numpy·Pillow·PyMuPDF·fastapi 등), 외부 도구 "ffmpeg: PATH에
+  없음", 마지막 줄 "요약: 실행 가능 0/10, 누락 18건, 경고 11건". 전부 정상이며 오류가 아니다.
+- `scan`(exit 0): 표 위에 "!! 신경망 미탑재(측정 게이트 미충족) — 재현 가능한 기록 근거만 반영 !!",
+  "!! 판정 임계값: in-sample(참고) — … !!", "총 51건(압축 파일 10건 포함) — 조작·생성 근거 있음 0건, 원본성 근거
+  있음 0건, 판단 불가 51건(검사 실패 포함 0건), 미지원/분석 실패 0건, …". 표준 오류에 두 줄 —
+  "기본 엔진 프로필(C:\dfl\venv\Lib\site-packages\deepfake_lens\models): [...]"과 "경고: 임계값 프로필 …
+  thresholds.json은(는) in-sample(참고)입니다 — …" — 이 나오는 것도 정상이다(오류 아님).
+- `evidence-statement`(exit 0): "=== (사건명 입력) 증거설명서 ===", 증거 목록 51건(호증마다 SHA-256),
+  "서명 JSON 저장 완료: …", "서명: HMAC-SHA256 hmac-sha256-v1:…". 키가 32바이트 미만이면 "오류: 보고서 서명 키가
+  너무 짧습니다(12바이트) — …"와 exit 2(W-1).
+- `api-serve`: "오류: API 서버에 필요한 패키지가 설치되어 있지 않습니다: fastapi, uvicorn", "설치: `pip install
+  fastapi uvicorn`", "설치 없이 쓰려면 내장 웹 서버를 사용하세요: deepfake-lens web", exit 2.
+
+### 선택: PDF (통과 기준 아님, 비교를 마친 뒤)
+
+```powershell
+python -m pip install --no-index --find-links C:\dfl\win-wheels pymupdf==1.28.2
+deepfake-lens doctor                                              # "[ OK  ] PyMuPDF: v1.28.2 — …", 요약 "누락 17건"
+deepfake-lens evidence-statement C:\dfl\out\windows.json --pdf-out C:\dfl\out\statement.pdf --format table; "exit=$LASTEXITCODE"
+#    끝에 "PDF 저장 완료: C:\dfl\out\statement.pdf", exit=0. pymupdf 없이 실행하면 "오류: PDF 증거설명서를 만들려면
+#    pymupdf 패키지가 필요합니다(…)"와 exit 2.
+#    web을 다시 띄우면 감정서 화면의 PDF 버튼이 활성입니다.
+```
+
+pymupdf를 설치한 뒤에는 `sample.pdf` 행의 검사 범위가 달라져 기준 결과와 `다름 1건`이 되는 것이 정상이다
+(그래서 비교를 먼저 한다).
+
+### 버그 보고(W-9)
+
+보고마다 다음을 넣는다: ① 실행한 명령 그대로 ② `exit=` 값 ③ 화면 캡처 ④ 로그 파일 ⑤ `C:\dfl\out\*`
+⑥ GUI 오류는 F12 → Network에서 실패한 요청의 응답 본문(`{"error": …}`) ⑦ `python --version`과 `winver`.
+
+로그 파일은 명령마다 같은 파일에 덧붙는다: 기본은 `C:\Users\<사용자>\.cache\deepfake-lens\logs\deepfake-lens.log`
+(`DEEPFAKE_LENS_LOG_DIR`를 지정했으면 그 폴더). 검사 대상 폴더나 `--folder`가 이 기본 위치를 품으면(예:
+`C:\Users\<사용자>` 자체를 검사) 실행할 때 "알림: 도구 폴더(로그·히트맵·오디오 numba 캐시)의 기본 위치 … 이번 실행은
+<위치>에 만듭니다 …" 한 줄이 나오고, 로그는 그 `<위치>\logs\deepfake-lens.log`에 있다 — Windows에서는 보통
+`%LOCALAPPDATA%\deepfake-lens`가 프로필 안이라 `C:\ProgramData\deepfake-lens\<사용자>\logs\`가 된다.
+
+비교(통과 기준 5)는 `compare.py`(= `scripts/qa_compare_results.py`)로 한다. 행 경로의 `\`를 `/`로 바꿔 맞추고
+`cached`·`path_b64`를 빼며, 설치 폴더가 들어 있는 모델 프로필 경로는 파일 이름만 비교한다. `다름 N건`이면 다른 행마다
+키와 두 값이 나오므로 그 출력 전체를 보고에 붙인다.
 
 기록 상태: **미실시(기록 없음)** — 아래 표는 비어 있는 기록 양식이다. 수행하면 행을 채우고
 이 줄을 `기록 상태: 실시(<날짜>, <커밋>)`로 바꾼다. 아래 "사전 점검"은 공식 기록이 아니다.
@@ -166,7 +272,7 @@ python -c "import json; d=json.load(open('cache.json')); print('캐시 항목', 
 python -m deepfake_lens scan resume-500 --cache cache.json --json-out resumed.json --format json > /dev/null; echo "exit=$?"
 python -c "import json; print(json.load(open('resumed.json'))['summary'])"   # cached > 0, total 500
 python -m deepfake_lens scan resume-500 --json-out fresh.json --format json > /dev/null
-# 비교: 공통 준비의 스니펫으로 fresh.json 과 resumed.json
+# 비교: 공통 준비의 비교 스크립트로 fresh.json 과 resumed.json
 find resume-500 -type f | wc -l                                   # 여전히 500
 ```
 
