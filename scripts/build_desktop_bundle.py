@@ -722,6 +722,11 @@ def install_msvc_runtime(wheel: Path, python_dir: Path) -> list[str]:
     return list(MSVC_RUNTIME_DLLS)
 
 
+PRECOMPILE_SKIP = r"[/\\]olefile[/\\]olefile2\.py$"
+"""Files ``compileall`` skips: olefile 0.47 still ships ``olefile2.py``, its Python 2 module (``0xFFFFFFFAL``
+literals — a SyntaxError on Python 3; nothing imports it). Any other file that does not compile stops the build."""
+
+
 def python312_for_bytecode() -> str:
     """RISK A7: a CPython 3.12 on the build machine whose ``importlib.util.MAGIC_NUMBER`` is :data:`PYC_MAGIC_312`
     (the embeddable 3.12.10 reads that bytecode). ``sys.executable`` when it is 3.12, else ``python3.12`` on PATH."""
@@ -744,7 +749,7 @@ def precompile(site: Path) -> None:
     first start does not compile 1,000+ modules while antivirus scans each new file."""
     python = python312_for_bytecode()
     done = subprocess.run(
-        [python, "-I", "-m", "compileall", "-q", "-j", "0", "--invalidation-mode", "unchecked-hash", str(site)],
+        [python, "-I", "-m", "compileall", "-q", "-j", "0", "--invalidation-mode", "unchecked-hash", "-x", PRECOMPILE_SKIP, str(site)],
         capture_output=True, text=True, check=False,
     )
     if done.returncode != 0:

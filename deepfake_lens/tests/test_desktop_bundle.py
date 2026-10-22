@@ -313,6 +313,15 @@ class ZipAndVerifyTest(unittest.TestCase):
             self.assertEqual(bundle.PYC_MAGIC_312, importlib.util.MAGIC_NUMBER)
         self.assertEqual(bundle.PYC_MAGIC_312, (3531).to_bytes(2, "little") + b"\r\n")
 
+    def test_precompile_skips_only_olefile2(self) -> None:
+        import re
+
+        skip = re.compile(bundle.PRECOMPILE_SKIP)
+        self.assertTrue(skip.search("/b/python/Lib/site-packages/olefile/olefile2.py"))
+        self.assertTrue(skip.search("C:\\b\\python\\Lib\\site-packages\\olefile\\olefile2.py"))
+        for kept in ("/s/olefile/olefile.py", "/s/olefile/olefile2.pyc", "/s/x/olefile2.py", "/s/olefile/olefile2.py.bak"):
+            self.assertIsNone(skip.search(kept), kept)
+
     def test_install_msvc_runtime_takes_the_data_folder(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             wheel = Path(tmp) / bundle.MSVC_RUNTIME_WHEEL
