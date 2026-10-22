@@ -210,5 +210,40 @@ class Desk4UploadBlockTest(unittest.TestCase):
         self.assertIn(".upload-block > summary", _css())
 
 
+class Desk5HeartbeatTest(unittest.TestCase):
+    """DESK-5: every 30 s in the desktop mode; two failures in a row put a lasting box in the error region (not a
+    scan's), a success removes it; nothing is sent after the shutdown."""
+
+    @unittest.skipUnless(_js_engine(), "no JavaScript engine (node or osascript)")
+    def test_two_failures_in_a_row_and_a_success_clears(self) -> None:
+        body = _function("heartbeatFailuresAfter") + _function("connectionLost") + (
+            "var n = 0, seen = [];\n"
+            "[false, false, false, true, false, true].forEach(function (ok) { n = heartbeatFailuresAfter(n, ok); seen.push(connectionLost(n)); });\n"
+            "var out = JSON.stringify(seen);"
+        )
+        self.assertEqual(json.loads(_run_js(body)), [False, True, True, False, False, False])
+
+    def test_the_box_is_lasting_and_not_a_scans(self) -> None:
+        source = _source()
+        self.assertIn("const HEARTBEAT_MS = 30000;", source)
+        self.assertIn("const CONNECTION_LOST = `서버와 연결이 끊겼습니다 — 바탕 화면의 ${PRODUCT}를 다시 실행하십시오`;", source)
+        box = _function("showConnectionLost")
+        self.assertIn("box.id = 'conn-lost';", box)
+        self.assertNotIn("dataset.scan", box)  # retireErrors / dropRetiredErrors never touch it
+        self.assertNotIn("button", box)  # no 닫기: it stays until the server answers again
+        self.assertIn("$('error-region').prepend(box);", box)
+        self.assertIn("if (old) old.remove();", box)
+        # the error region keeps at most four other boxes — the connection box is never the one trimmed
+        self.assertIn("const trimmable = () => region.querySelectorAll('.err-item:not(#conn-lost)');", _function("showError"))
+        beat = _async_function("sendHeartbeat")
+        self.assertIn("apiFetch('/api/heartbeat', { method: 'POST', signal: controller.signal })", beat)
+        self.assertIn("if (heartbeatInFlight || appShutDown) return;", beat)
+        self.assertIn("showConnectionLost(connectionLost(heartbeatFailures));", beat)
+        helper = _function("applyDesktopStats")
+        self.assertLess(helper.index("if (!desktopMode) return;"), helper.index("startHeartbeat();"))
+        self.assertIn("clearInterval(heartbeatTimer);", _function("stopHeartbeat"))
+        self.assertIn("stopHeartbeat();", _function("showShutdownPage"))  # nothing is sent after the shutdown
+
+
 if __name__ == "__main__":
     unittest.main()

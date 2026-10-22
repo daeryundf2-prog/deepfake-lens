@@ -155,7 +155,9 @@
             // check or export error is never later marked "이전 검사".
             if (fromScan) box.dataset.scan = String(scanGeneration);
             region.appendChild(box);
-            while (region.children.length > 4) region.firstElementChild.remove();
+            // DESK-5: the lost-connection box stays while the server is gone — only the other boxes are trimmed.
+            const trimmable = () => region.querySelectorAll('.err-item:not(#conn-lost)');
+            while (trimmable().length > 4) trimmable()[0].remove();
         }
 
         // GUI-REV G-4: an error belongs to the scan it was raised in. When a new
@@ -3230,6 +3232,9 @@
         const PICK_WAIT = '폴더 선택 창이 떠 있습니다 — 보이지 않으면 작업 표시줄을 확인하십시오';
         // DESK-3: the folder last chosen in the OS dialog, with its bytes (a non-UTF-8 name survives the scan request).
         let pickedFolder = null;
+        const CONNECTION_LOST = `서버와 연결이 끊겼습니다 — 바탕 화면의 ${PRODUCT}를 다시 실행하십시오`;
+        const HEARTBEAT_MS = 30000;
+        const HEARTBEAT_TIMEOUT_MS = 10000;
         const SHUTDOWN_QUESTION = `${PRODUCT}를 종료할까요? 종료하면 이 화면은 더 쓸 수 없습니다 — 다시 쓰려면 바탕 화면의 ${PRODUCT}를 다시 실행하십시오.`;
         const FORM_CONTROLS = [HTMLButtonElement, HTMLInputElement, HTMLSelectElement, HTMLTextAreaElement];
 
@@ -3245,6 +3250,66 @@
             $('folder-label').textContent = '또는 폴더 경로 직접 입력';
             // DESK-4: uploads are the exception here (unsigned, never an exhibit) — folded, unless files are waiting.
             if (!selectedFiles.length) $('upload-block').open = false;
+            startHeartbeat();
+        }
+
+        // DESK-5: the desktop server exits by itself after a while without a page; the page says it is alive every
+        // 30 s. Two failures in a row put a lasting box in the error region (not a scan's box); a success removes it.
+        let heartbeatTimer = null;
+        let heartbeatFailures = 0;
+        let heartbeatInFlight = false;
+        function heartbeatFailuresAfter(previous, ok) {
+            return ok ? 0 : previous + 1;
+        }
+        function connectionLost(failures) {
+            return failures >= 2;
+        }
+        function showConnectionLost(lost) {
+            const old = $('conn-lost');
+            if (!lost) {
+                if (old) old.remove();
+                return;
+            }
+            if (old) return;
+            const box = document.createElement('div');
+            box.className = 'err-item';
+            box.id = 'conn-lost';
+            const text = document.createElement('p');
+            text.className = 'err-text';
+            const head = document.createElement('b');
+            head.textContent = '연결 끊김 ';
+            const body = document.createElement('span');
+            body.textContent = CONNECTION_LOST;
+            text.append(head, body);
+            box.append(text);
+            $('error-region').prepend(box);
+        }
+        async function sendHeartbeat() {
+            if (heartbeatInFlight || appShutDown) return;
+            heartbeatInFlight = true;
+            const controller = new AbortController();
+            const timer = setTimeout(() => controller.abort(), HEARTBEAT_TIMEOUT_MS);
+            let ok = false;
+            try {
+                const res = await apiFetch('/api/heartbeat', { method: 'POST', signal: controller.signal });
+                ok = res.ok;
+            } catch (e) {
+                ok = false;
+            } finally {
+                clearTimeout(timer);
+                heartbeatInFlight = false;
+            }
+            if (appShutDown) return;
+            heartbeatFailures = heartbeatFailuresAfter(heartbeatFailures, ok);
+            showConnectionLost(connectionLost(heartbeatFailures));
+        }
+        function startHeartbeat() {
+            if (heartbeatTimer || appShutDown) return;
+            heartbeatTimer = setInterval(sendHeartbeat, HEARTBEAT_MS);
+        }
+        function stopHeartbeat() {
+            clearInterval(heartbeatTimer);
+            heartbeatTimer = null;
         }
 
         // DESK-2: 종료 asks, then stops the server; the page is replaced by one sentence (role=alert) and every
@@ -3267,6 +3332,7 @@
         });
         function showShutdownPage() {
             appShutDown = true;
+            stopHeartbeat();
             clearTimeout(a4Timer);
             if ($('token-modal').open) $('token-modal').close();
             document.querySelectorAll('*').forEach(el => { if (FORM_CONTROLS.some(type => el instanceof type)) el.disabled = true; });
