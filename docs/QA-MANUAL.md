@@ -123,14 +123,14 @@ PDF 증거설명서는 통과 기준이 아니다. pymupdf는 어떤 extra에도
    PowerShell에서는 `Unblock-File`). 콘솔 창의 제목은 「Deepfake Lens — 이 창을 닫으면 프로그램이 꺼집니다」다.
 3. 콘솔에 다음 줄이 나와야 한다(traceback 없음):
    - `Deepfake Lens 데스크톱 모드`와 `화면 주소: http://127.0.0.1:8765/gui`(포트는 8765부터 첫 빈 포트)
-   - 종료 방법 줄: 이 창을 닫거나 Ctrl-C, 화면의 「종료」 단추
+   - 종료 방법 줄: 이 창을 닫거나 Ctrl-C, 화면의 「프로그램 종료」 단추
    - 서명 키 줄: 처음에는 `보고서 서명 키를 새로 만들었습니다: C:\Users\<이름>\AppData\Roaming\deepfake-lens\report-key (이 PC의 이 계정에서만 검증됩니다)`
    - 로그 파일 줄: `문제가 생기면 이 로그 파일을 보내 주십시오: …`
    - 유휴 종료 줄: `20분 동안 화면이 열려 있지 않고 검사도 없으면 스스로 꺼집니다.`
 4. 브라우저가 저절로 열리고 `/gui`가 보인다. 「검사할 폴더 고르기」를 누르면 Windows 폴더 선택 창이 뜬다. `C:\dfl\qa-manual\formats`를
    고르면 폴더 칸이 채워진다. 검사를 시작해 51행 표가 나오고, 감정서 만들기에서 HTML·서명된 JSON·**PDF 버튼이 활성**인지 확인한다
    (꾸러미에는 pymupdf가 들어 있어 이 경로에서는 PDF가 만들어진다).
-5. 화면의 「종료」를 누른다. 콘솔에 `Deepfake Lens를 종료했습니다.`가 나오고 콘솔 창이 저절로 닫힌다.
+5. 화면의 「프로그램 종료」를 누른다. 콘솔에 `Deepfake Lens를 종료했습니다.`가 나오고 콘솔 창이 저절로 닫힌다.
 6. 선택: `문제 확인.cmd`를 더블클릭하면 `doctor` 결과와 로그 폴더(`%USERPROFILE%\.cache\deepfake-lens\logs`)가 나오고 키를 누르면 닫힌다.
    서명한 감정서는 `deepfake-lens verify-report --key-file %APPDATA%\deepfake-lens\report-key`로 이 PC에서만 검증된다.
 
