@@ -33,7 +33,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-from .bundle_info import bundle_advice
+from .bundle_info import PDF_ENGINE_FAILED, bundle_text
 from .core import ScanItem
 from .office_config import DEFAULT_CASE_NAME, DEFAULT_CENTER, office_identity
 from .result_text import (
@@ -602,15 +602,18 @@ def write_evidence_statement_markdown(
 # is missing (CLI exit 2, web JSON error) — never an English traceback.
 PDF_DEPENDENCY = "pymupdf"
 STATEMENT_NOTICE_TITLE = "무결성/해석 고지"
-# RISK B10: the bundle has no pip — bundle_advice swaps the pip command for "not included" there.
-PDF_DEPENDENCY_MESSAGE = bundle_advice(
+# RISK B10 / REV2-D4: the bundle ships pymupdf and has no pip — there a PDF engine that does not load is a broken
+# install (a missing or blocked DLL), so the bundle text points at 「문제 확인.cmd」 instead of a pip command.
+PDF_DEPENDENCY_MESSAGE = bundle_text(
     "PDF 증거설명서를 만들려면 pymupdf 패키지가 필요합니다(설치: `pip install pymupdf`). "
-    "Markdown(.md) 또는 JSON(.json) 증거설명서는 pymupdf 없이 만들 수 있습니다."
+    "Markdown(.md) 또는 JSON(.json) 증거설명서는 pymupdf 없이 만들 수 있습니다.",
+    PDF_ENGINE_FAILED + " Markdown(.md) 또는 JSON(.json) 증거설명서는 만들 수 있습니다.",
 )
 # B8: the same refusal for the scan PDF reports (--pdf-out, --forensic-pdf-out).
-PDF_REPORT_DEPENDENCY_MESSAGE = bundle_advice(
+PDF_REPORT_DEPENDENCY_MESSAGE = bundle_text(
     "PDF 보고서를 만들려면 pymupdf 패키지가 필요합니다(설치: `pip install pymupdf`). "
-    "HTML(--html-out), JSON(--json-out), CSV(--csv-out) 보고서는 pymupdf 없이 만들 수 있습니다."
+    "HTML(--html-out), JSON(--json-out), CSV(--csv-out) 보고서는 pymupdf 없이 만들 수 있습니다.",
+    PDF_ENGINE_FAILED + " HTML(--html-out), JSON(--json-out), CSV(--csv-out) 보고서는 만들 수 있습니다.",
 )
 
 
