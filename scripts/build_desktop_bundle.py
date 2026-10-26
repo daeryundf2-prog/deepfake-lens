@@ -12,8 +12,10 @@
    reads every installed dist's ``Requires-Dist`` (markers evaluated for win32 / CPython 3.12, extras off) and the
    build fails when a required dist is not installed; ``site-packages/bin/`` and ``direct_url.json`` are deleted
    (RISK B22); the C++ runtime ``msvcp140*.dll`` from the pinned msvc-runtime wheel goes into ``python/`` and every
-   ``.pyd``/``.dll``'s import table is checked (RISK A1); site-packages is precompiled with the build machine's
-   CPython 3.12 (``compileall --invalidation-mode unchecked-hash``, RISK A7);
+   ``.pyd``/``.dll``'s import table is checked (RISK A1); the embeddable's ``vcruntime140*.dll`` (14.42) are replaced
+   by the same wheel's copies so the C runtime set has one version (REV2-D7); site-packages is precompiled with the
+   build machine's CPython 3.12 (``compileall --invalidation-mode checked-hash`` with the build path stripped,
+   RISK A7, REV2-D5 D6);
 4. ``Deepfake Lens.cmd``, ``문제 확인.cmd``, ``읽어보세요.txt``, ``VERSION.txt``;
 5. a zip with ``/`` separators and UTF-8 names;
 6. a check of the folder (python.exe, the ``._pth`` lines, ``deepfake_lens/gui.js``, ``pymupdf``) and its size.
@@ -75,6 +77,11 @@ MSVC_RUNTIME_DLLS = ("msvcp140.dll", "msvcp140_1.dll", "msvcp140_2.dll", "msvcp1
 """RISK A1: the C++ runtime that PyMuPDF's ``_mupdf.pyd``/``mupdfcpp64.dll``/``_extra.pyd`` import. The embeddable
 Python ships only ``vcruntime140.dll``/``vcruntime140_1.dll``; these go into ``python\\`` (the application folder,
 searched for every extension's imports) from the wheel's ``msvc_runtime-<v>.data/data/``."""
+VCRUNTIME_DLLS = ("vcruntime140.dll", "vcruntime140_1.dll")
+"""REV2-D7: the embeddable 3.12.10 ships these as 14.42; ``msvcp140.dll`` 14.51 from the wheel expects a vcruntime at
+least as new as itself (Microsoft: the runtime DLLs of one redistributable version go together). The wheel carries
+them only under ``msvc_runtime-<v>.data/data/Scripts/``; they overwrite the embeddable's copies in ``python\\``.
+(``python.cat`` then no longer matches those two files — Windows does not check that catalog when loading DLLs.)"""
 
 SYSTEM_DLLS = frozenset({
     "kernel32.dll", "kernelbase.dll", "ntdll.dll", "user32.dll", "gdi32.dll", "advapi32.dll", "shell32.dll", "ole32.dll",
@@ -87,7 +94,9 @@ SYSTEM_DLLS = frozenset({
     "bcryptprimitives.dll", "ntmarta.dll", "sspicli.dll", "mpr.dll", "mscoree.dll", "oleacc.dll", "winspool.drv", "msi.dll",
 })
 """DLLs every supported Windows 10/11 x64 has in System32 (RISK A1's import check accepts them by name)."""
-SYSTEM_DLL_PREFIXES = ("api-ms-win-", "ext-ms-")
+SYSTEM_DLL_PREFIXES = ("api-ms-win-",)
+"""API sets every Windows 10/11 resolves. ``ext-ms-`` extension sets are optional per edition (REV2-D13) — a module
+importing one is reported, not waved through."""
 
 PYC_MAGIC_312 = (3531).to_bytes(2, "little") + b"\r\n"
 """``importlib.util.MAGIC_NUMBER`` of CPython 3.12.x (3531 for the whole 3.12 series): the bytecode of the build
@@ -99,6 +108,11 @@ WIN_LAUNCHER = "Deepfake Lens.cmd"
 WIN_DOCTOR = "문제 확인.cmd"
 WIN_README = "읽어보세요.txt"
 MAC_LAUNCHER = "Deepfake Lens.command"
+
+ALREADY_RUNNING_NO_BROWSER_EXIT = 3
+"""``deepfake_lens.desktop.ALREADY_RUNNING_NO_BROWSER_EXIT`` (a test keeps them equal): an instance already runs but
+the browser could not be opened — the console printed the address, so the launcher pauses without an error line
+(REV2-D9)."""
 
 DEFAULT_CACHE = Path(os.environ.get("TMPDIR", "/tmp")) / "deepfake-lens-bundle-cache"
 
@@ -137,28 +151,40 @@ def _crlf(lines: Iterable[str]) -> str:
     return "\r\n".join(lines) + "\r\n"
 
 
+TEMP_MARKERS = ("\\AppData\\Local\\Temp\\", "\\Windows\\Temp\\", "Rar$", "\\7zO", "\\7zE")
+"""Path parts that mean "run from an archive tool's temp copy" (REV2-D1). Explorer runs a .cmd opened inside a zip
+from ``%LOCALAPPDATA%\\Temp\\Temp1_<zip>\\`` (``C:\\Windows\\Temp`` for a SYSTEM-profile TEMP); WinRAR uses ``Rar$…``
+and 7-Zip ``7zO…``/``7zE…`` folders under TEMP (a bare ``7z`` would also match ``D:\\7zip``). A bare ``\\Temp\\`` was
+too wide: it refused ``C:\\Temp\\DeepfakeLens-win64\\``, a normal place to unpack. A temp folder elsewhere is still
+caught one line later: only the clicked file is extracted there, so ``python\\`` is missing (``no_python``)."""
+
+CODEPAGE_SAVE = """for /f "tokens=2 delims=:." %%a in ('chcp') do set "DFL_CP=%%a\""""
+"""REV2-D13: the console's code page before ``chcp 65001`` (``활성 코드 페이지: 949`` → `` 949``; ``.`` is also a
+delimiter for locales that print ``850.``). Restored by :data:`CODEPAGE_RESTORE` on every exit path, so a cmd window
+the launcher was started from keeps its code page. A Ctrl-C answered with Y ends the batch where it stands (cmd's own
+rule) — the window started by a double-click closes then anyway."""
+CODEPAGE_RESTORE = "if defined DFL_CP chcp %DFL_CP% >nul"
+
 LOCATION_CHECKS = (
     'set "DFL_HERE=%~dp0"',
-    'if not "%DFL_HERE:\\Temp\\=%"=="%DFL_HERE%" goto not_extracted',
-    'if not "%DFL_HERE:Rar$=%"=="%DFL_HERE%" goto not_extracted',
-    'if not "%DFL_HERE:\\7zO=%"=="%DFL_HERE%" goto not_extracted',
-    'if not "%DFL_HERE:\\7zE=%"=="%DFL_HERE%" goto not_extracted',
+    *(f'if not "%DFL_HERE:{marker}=%"=="%DFL_HERE%" goto not_extracted' for marker in TEMP_MARKERS),
     'set "DFL_ARCH=%PROCESSOR_ARCHITECTURE%"',
     'if defined PROCESSOR_ARCHITEW6432 set "DFL_ARCH=%PROCESSOR_ARCHITEW6432%"',
     'if /i not "%DFL_ARCH%"=="AMD64" goto not_x64',
     'if not "%DFL_HERE:OneDrive=%"=="%DFL_HERE%" echo 주의: OneDrive 폴더에서 실행 중입니다. 느리거나 실행되지 않으면 C:\\DeepfakeLens 같은 로컬 폴더에 다시 푸십시오.',
     'if not exist "python\\python.exe" goto no_python',
 )
-"""Lines run right after ``pushd``: an unextracted zip (Explorer runs a .cmd opened inside a zip from
-``%TEMP%``/``AppData\\Local\\Temp``; WinRAR and 7-Zip use ``Rar$…`` and ``7zO…``/``7zE…`` temp folders — a bare ``7z`` would also match a folder such
-as ``D:\\7zip``), a non-x64 Windows
-(``PROCESSOR_ARCHITEW6432`` is set when a 32-bit cmd runs on 64-bit Windows), an OneDrive folder (warning only).
-``%var:x=%`` is case-insensitive. No parenthesised blocks — a ``)`` in a folder name would end the block early."""
+"""Lines run right after ``pushd``: an unextracted zip (:data:`TEMP_MARKERS`), a non-x64 Windows
+(``PROCESSOR_ARCHITEW6432`` is set when a 32-bit cmd runs on 64-bit Windows), an OneDrive folder (warning only), no
+``python\\`` (an archive opened elsewhere, or a partial extraction). ``%var:x=%`` is case-insensitive. No parenthesised
+blocks — a ``)`` in a folder name would end the block early."""
+
+EXTRACT_FIRST = "echo 압축을 먼저 푸십시오(오른쪽 클릭 → 모두 압축 풀기). 그다음 압축을 푼 폴더의 「Deepfake Lens.cmd」를 실행하십시오."
 
 LOCATION_LABELS = (
     ":not_extracted",
     "echo 압축 파일 안이나 임시 폴더에서 실행했습니다.",
-    "echo 압축을 먼저 푸십시오(오른쪽 클릭 → 모두 압축 풀기). 그다음 압축을 푼 폴더의 「Deepfake Lens.cmd」를 실행하십시오.",
+    EXTRACT_FIRST,
     "pause",
     'set "DFL_CODE=2"',
     "goto end",
@@ -168,18 +194,24 @@ LOCATION_LABELS = (
     'set "DFL_CODE=2"',
     "goto end",
     ":no_python",
-    "echo python 폴더가 없습니다. 압축을 전부 풀었는지 확인하십시오.",
+    "echo python 폴더가 없습니다. 압축 파일 안에서 실행했거나 압축을 일부만 풀었습니다.",
+    EXTRACT_FIRST,
     "pause",
     'set "DFL_CODE=2"',
     "goto end",
     ":no_folder",
     'echo 이 폴더로 이동하지 못했습니다: "%~dp0"',
     "pause",
+    CODEPAGE_RESTORE,
     "exit /b 2",
     ":end",
     "popd",
+    CODEPAGE_RESTORE,
     "exit /b %DFL_CODE%",
 )
+
+LAUNCHER_HEAD = ("@echo off", "setlocal", CODEPAGE_SAVE, "chcp 65001 >nul")
+"""ASCII only before ``chcp 65001`` (the file is UTF-8 without BOM; a Korean line before it would be read as CP949)."""
 
 
 def windows_launcher_text() -> str:
@@ -195,9 +227,7 @@ def windows_launcher_text() -> str:
     STATUS_CONTROL_C_EXIT — how CPython on Windows exits on an uncaught KeyboardInterrupt), is a Ctrl-C stop.
     """
     return _crlf([
-        "@echo off",
-        "chcp 65001 >nul",
-        "setlocal",
+        *LAUNCHER_HEAD,
         "title Deepfake Lens — 이 창을 닫으면 프로그램이 꺼집니다",
         'set "DFL_CODE=0"',
         'pushd "%~dp0" || goto no_folder',
@@ -219,6 +249,8 @@ def windows_launcher_text() -> str:
         ":after_run",
         'set "DFL_CODE=%errorlevel%"',
         'if "%DFL_CODE%"=="0" goto end',
+        f'if "%DFL_CODE%"=="{ALREADY_RUNNING_NO_BROWSER_EXIT}" pause',
+        f'if "%DFL_CODE%"=="{ALREADY_RUNNING_NO_BROWSER_EXIT}" goto end',
         'if "%DFL_CODE%"=="-1073741510" set "DFL_CODE=130"',
         'if "%DFL_CODE%"=="130" echo 사용자가 중단했습니다.',
         'if "%DFL_CODE%"=="130" goto end',
@@ -238,9 +270,7 @@ def doctor_launcher_text() -> str:
     checks as the launcher (RISK B12).
     """
     return _crlf([
-        "@echo off",
-        "chcp 65001 >nul",
-        "setlocal",
+        *LAUNCHER_HEAD,
         "title Deepfake Lens — 문제 확인",
         'set "DFL_CODE=0"',
         'pushd "%~dp0" || goto no_folder',
@@ -268,20 +298,26 @@ def readme_text() -> str:
         "",
         "■ 지원 사양",
         "  Windows 10/11 64비트(x64) 전용입니다. 32비트·ARM Windows에서는 실행되지 않습니다.",
-        "  CPU는 2010년 이후의 x64 CPU(SSE4.2 지원)여야 합니다. 더 오래된 CPU나 CPU 기능을 가린 가상 PC에서는 시작되지 않습니다.",
+        "  CPU는 인텔 2008년(Nehalem)·AMD 2011년(Bulldozer) 이후 x64 CPU(SSE4.2)여야 합니다.",
+        "    더 오래된 CPU나 CPU 기능을 가린 가상 PC에서는 시작되지 않습니다.",
         "  관리자 권한·설치·PATH 변경은 필요 없습니다. 지우려면 폴더를 삭제하면 됩니다.",
         "",
         "■ 사용법",
-        "  1. zip 파일을 오른쪽 클릭 → 속성 → 「차단 해제」를 체크하고 확인을 누릅니다(풀기 전에).",
+        "  1. zip 파일을 오른쪽 클릭 → 속성 → (있으면) 「차단 해제」를 체크하고 확인을 누릅니다(풀기 전에).",
         "  2. 오른쪽 클릭 → 모두 압축 풀기로 C:\\DeepfakeLens 같은 로컬 폴더에 전부 풉니다. zip 안에서 바로 실행하지 마십시오.",
         "  3. 압축을 푼 폴더의 「Deepfake Lens.cmd」를 더블클릭합니다. 검은 창이 뜨고 브라우저에 검사 화면이 열립니다.",
         "     처음에는 시작까지 1분쯤 걸릴 수 있습니다. 기다리는 동안 다시 누르지 마십시오.",
         "  4. 화면의 「검사할 폴더 고르기」로 폴더를 고르면 검사가 시작됩니다. 결과 화면에서 감정서(PDF)를 받습니다.",
         "  폴더(또는 그 안의 파일)를 「Deepfake Lens.cmd」 위에 끌어다 놓으면 그 폴더를 연 채로 시작합니다.",
+        "  끌어 놓기가 안 되면(경로에 & , ; = 가 있고 공백이 없으면) 화면에서 고르십시오.",
+        "  폴더 고르기 창은 오래된 「폴더 찾아보기」 트리 창입니다. 정상입니다(주소를 붙여 넣는 칸은 없습니다).",
+        "    창이 보이지 않으면 Alt+Tab으로 「폴더 찾아보기」 창을 찾으십시오.",
+        "  네트워크 드라이브(예: Z:)의 폴더를 고르면 화면과 감정서에 \\\\서버\\공유 형태의 경로로 표시됩니다.",
         "",
         "■ 끄는 방법",
-        "  화면 위쪽의 종료 단추를 누르거나 검은 창을 닫습니다. 검은 창을 닫으면 진행 중인 검사도 멈춥니다.",
-        "  검은 창에서 Ctrl+C를 누르면 「일괄 작업을 끝내시겠습니까 (Y/N)?」가 나옵니다. Y를 누르십시오.",
+        "  화면 위쪽의 「프로그램 종료」 단추를 누르거나 검은 창을 닫습니다. 검은 창을 닫으면 진행 중인 검사도 멈춥니다.",
+        "  검은 창에서 Ctrl+C를 누르면 「중단됨(사용자 요청)」이 나온 뒤 「일괄 작업을 끝내시겠습니까 (Y/N)?」가 나옵니다.",
+        "    Y를 누르십시오(N을 누르면 「사용자가 중단했습니다.」가 나오고 창이 닫힙니다).",
         "  브라우저 탭만 닫으면 프로그램은 남아 있다가, 20분 동안 화면도 검사도 없으면 스스로 꺼집니다.",
         "  꺼진 뒤 다시 쓰려면 압축을 푼 폴더의 「Deepfake Lens.cmd」를 다시 실행하십시오.",
         "  두 번 실행하면 새로 켜지 않고 이미 실행 중인 화면을 브라우저로 엽니다.",
@@ -289,6 +325,7 @@ def readme_text() -> str:
         "■ 브라우저",
         "  Edge나 Chrome을 쓰십시오. Edge는 오래 둔 탭을 절전시키므로 그사이 프로그램이 꺼질 수 있습니다.",
         "  Edge 설정 → 시스템 및 성능에서 절전하지 않을 사이트 목록에 127.0.0.1을 추가하십시오.",
+        "  Chrome은 설정 → 성능 → 「항상 활성 상태로 유지할 사이트」에 127.0.0.1을 추가하십시오(메모리 절약 모드 예외).",
         "",
         "■ 실행이 막힐 때",
         "  「Windows의 PC 보호」 창: 「추가 정보」를 누른 뒤 「실행」을 누르십시오(이 .cmd 파일들은 코드 서명이 없습니다).",
@@ -309,8 +346,11 @@ def readme_text() -> str:
         "■ 기록과 서명 키",
         "  검토 기록·검사 작업·보고서 서명 키는 %APPDATA%\\deepfake-lens\\ 에 남습니다(꾸러미를 새로 받아도 유지).",
         "  서명 키 파일: %APPDATA%\\deepfake-lens\\report-key — 처음 실행할 때 자동으로 만들어집니다.",
-        "  이 키로 서명한 감정서는 이 PC의 이 Windows 계정에서만 검증됩니다. 검증 명령:",
-        "    python\\python.exe -X utf8 -m deepfake_lens verify-report <감정서> --key-file %APPDATA%\\deepfake-lens\\report-key",
+        "  이 키로 서명한 감정서는 이 키 파일을 가진 계정에서만 검증됩니다",
+        "    (%APPDATA%는 로밍 프로필에서는 다른 PC로 동기화될 수 있습니다).",
+        "  검증: 이 폴더에서 명령 프롬프트(cmd)를 열고 다음을 실행합니다(<서명된 JSON>은 내려받은 서명된 JSON 감정서).",
+        "    python\\python.exe -X utf8 -m deepfake_lens verify-report <서명된 JSON> --key-file %APPDATA%\\deepfake-lens\\report-key",
+        "  PowerShell에서는 %APPDATA% 대신 $env:APPDATA, python\\python.exe 대신 .\\python\\python.exe 를 씁니다.",
         "  키 파일을 지우면 다음 실행 때 새 키가 만들어지고, 그 전의 감정서는 더 이상 검증되지 않습니다.",
         "",
         "■ 문제가 생기면",
@@ -484,11 +524,14 @@ def verify_windows_bundle(folder: Path) -> list[str]:
     for need in MSVC_RUNTIME_DLLS:  # RISK A1
         if not (python / need).is_file():
             problems.append(f"python/{need} 없음")
+    if python.is_dir():
+        problems.extend(runtime_version_problems(python))  # REV2-D7
     if site.is_dir():
         problems.extend(missing_requirements(site_packages_dists(site), marker_environment("windows")))
         problems.extend(f"{trace} 남음" for trace in build_traces(site))  # RISK B22
         if not (site / "deepfake_lens" / "__pycache__").is_dir():  # RISK A7
             problems.append("site-packages/deepfake_lens/__pycache__ 없음(미리 컴파일 안 됨)")
+        problems.extend(f"빌드 경로가 남은 .pyc: {leak}" for leak in pyc_build_path_leaks(site))  # REV2-D5
     if python.is_dir():
         problems.extend(unresolved_imports(python)[0])
     return problems
@@ -515,10 +558,11 @@ def tree_summary(folder: Path, expand: Iterable[str] = (), min_bytes: int = 1_00
     return lines, size_of(folder)
 
 
-PRUNE_SUFFIXES = (".lib", ".pdb")
+PRUNE_SUFFIXES = (".lib", ".pdb", ".exp", ".d")
 """Linker and debugger files in Windows wheels that Python never loads. c2pa-python 0.38.0's win_amd64 wheel carries
-``c2pa/libs/c2pa_c.lib`` (283 MB) and ``c2pa_c.pdb`` next to the ``c2pa_c.dll`` it loads; numpy ships ``.lib`` files
-for building extensions. Removing them leaves those dists' RECORD files stale, which only ``pip uninstall`` reads."""
+``c2pa/libs/c2pa_c.lib`` (283 MB) and ``c2pa_c.pdb`` next to the ``c2pa_c.dll`` it loads; linker exports (``.exp``)
+and compiler dep-info (``.d``) files are removed as well (REV2-D13); numpy ships ``.lib`` files for building
+extensions. Removing them leaves those dists' RECORD files stale, which only ``pip uninstall`` reads."""
 
 
 def prune_site_packages(site: Path) -> tuple[int, int]:
@@ -711,15 +755,45 @@ def fetch_msvc_runtime(cache: Path) -> Path:
 
 
 def install_msvc_runtime(wheel: Path, python_dir: Path) -> list[str]:
-    """Copy :data:`MSVC_RUNTIME_DLLS` from the wheel's ``msvc_runtime-<v>.data/data/`` into ``python_dir``."""
+    """Copy :data:`MSVC_RUNTIME_DLLS` from the wheel's ``msvc_runtime-<v>.data/data/`` and :data:`VCRUNTIME_DLLS`
+    from its ``data/Scripts/`` (the only place the wheel has them) into ``python_dir``, overwriting the embeddable's
+    vcruntime (REV2-D7)."""
     prefix = f"msvc_runtime-{MSVC_RUNTIME_VERSION}.data/data/"
+    wanted = [(dll, prefix + dll) for dll in MSVC_RUNTIME_DLLS] + [(dll, prefix + "Scripts/" + dll) for dll in VCRUNTIME_DLLS]
     with zipfile.ZipFile(wheel) as archive:
         names = set(archive.namelist())
-        for dll in MSVC_RUNTIME_DLLS:
-            if prefix + dll not in names:
-                raise BuildError(f"{wheel.name}에 {prefix + dll}이(가) 없습니다")
-            (python_dir / dll).write_bytes(archive.read(prefix + dll))
-    return list(MSVC_RUNTIME_DLLS)
+        for dll, member in wanted:
+            if member not in names:
+                raise BuildError(f"{wheel.name}에 {member}이(가) 없습니다")
+            (python_dir / dll).write_bytes(archive.read(member))
+    return [dll for dll, _member in wanted]
+
+
+def pe_file_version(data: bytes) -> str | None:
+    """The file version in a PE image's ``VS_FIXEDFILEINFO`` (signature 0xFEEF04BD, the struct version, then
+    ``dwFileVersionMS``/``LS``) as ``a.b.c.d``; None when the image has no version resource."""
+    at = data.find((0xFEEF04BD).to_bytes(4, "little"))
+    if at < 0 or at + 16 > len(data):
+        return None
+    high, low = int.from_bytes(data[at + 8:at + 12], "little"), int.from_bytes(data[at + 12:at + 16], "little")
+    return f"{high >> 16}.{high & 0xFFFF}.{low >> 16}.{low & 0xFFFF}"
+
+
+def runtime_versions(python_dir: Path) -> dict[str, str | None]:
+    """REV2-D7: the file version of every C/C++ runtime DLL in ``python_dir`` (vcruntime and msvcp; None if absent)."""
+    return {
+        dll: pe_file_version((python_dir / dll).read_bytes()) if (python_dir / dll).is_file() else None
+        for dll in (*VCRUNTIME_DLLS, *MSVC_RUNTIME_DLLS)
+    }
+
+
+def runtime_version_problems(python_dir: Path) -> list[str]:
+    """REV2-D7: a runtime DLL without a version, or more than one version among them."""
+    versions = runtime_versions(python_dir)
+    problems = [f"python/{dll}: 파일 버전을 읽지 못함" for dll, version in versions.items() if version is None and (python_dir / dll).is_file()]
+    if len({version for version in versions.values() if version is not None}) > 1:
+        problems.append("C/C++ 런타임 DLL의 버전이 섞여 있음: " + ", ".join(f"{dll} {version}" for dll, version in versions.items() if version))
+    return problems
 
 
 PRECOMPILE_SKIP = r"[/\\]olefile[/\\]olefile2\.py$"
@@ -744,12 +818,51 @@ def python312_for_bytecode() -> str:
     raise BuildError("미리 컴파일에 쓸 Python 3.12가 없습니다(바이트코드 매직이 3.12와 같아야 합니다) — python3.12를 설치하십시오")
 
 
+PYC_PREPEND = "Lib\\site-packages"
+"""REV2-D5: what ``compileall -s <site-packages> -p`` puts in front of each module's path in the code objects'
+``co_filename`` — the build folder (``/Users/<name>/…``) is stripped. At import CPython replaces ``co_filename`` with
+the real source path anyway (``_imp._fix_co_filename``); this keeps the build machine's paths out of the files."""
+PYC_CHECKED_HASH_FLAGS = 0b11
+"""PEP 552 flags of a ``checked-hash`` .pyc: bit 0 hash-based, bit 1 check the source."""
+
+
+def build_path_needles() -> list[bytes]:
+    """REV2-D5: byte strings no shipped .pyc may contain — the build machine's home folder and the user name in it."""
+    home = Path.home()
+    needles = [str(home).encode("utf-8")]
+    if len(home.name) >= 3:
+        needles.append(home.name.encode("utf-8"))
+    return needles
+
+
+def pyc_build_path_leaks(site: Path, needles: Iterable[bytes] | None = None) -> list[str]:
+    """REV2-D5: the .pyc files under ``site`` that contain one of ``needles`` (default :func:`build_path_needles`)."""
+    wanted = list(build_path_needles() if needles is None else needles)
+    leaks: list[str] = []
+    for pyc in sorted(site.rglob("*.pyc")):
+        data = pyc.read_bytes()
+        found = [needle.decode("utf-8", "replace") for needle in wanted if needle in data]
+        if found:
+            leaks.append(f"{pyc.relative_to(site).as_posix()}: {', '.join(found)}")
+    return leaks
+
+
 def precompile(site: Path) -> None:
-    """RISK A7: ``compileall --invalidation-mode unchecked-hash`` over ``site`` with a 3.12 build interpreter, so the
-    first start does not compile 1,000+ modules while antivirus scans each new file."""
+    """RISK A7: ``compileall`` over ``site`` with a 3.12 build interpreter, so the first start does not compile
+    1,000+ modules while antivirus scans each new file.
+
+    REV2-D6: ``checked-hash``, not ``unchecked-hash``. An unchecked .pyc is used even when its ``.py`` has changed,
+    so a module patched by hand in the field would silently keep running the old code. A checked .pyc carries the
+    source's hash; Python hashes the ``.py`` at import (cheap next to compiling it) and recompiles when it differs.
+    Timestamp-based .pyc files are not used: unzipping and copying rewrite mtimes, which would invalidate them all.
+    REV2-D5: ``-s``/``-p`` strip the build folder from the paths stored in the code objects.
+    """
     python = python312_for_bytecode()
     done = subprocess.run(
-        [python, "-I", "-m", "compileall", "-q", "-j", "0", "--invalidation-mode", "unchecked-hash", "-x", PRECOMPILE_SKIP, str(site)],
+        [
+            python, "-I", "-m", "compileall", "-q", "-j", "0", "--invalidation-mode", "checked-hash",
+            "-s", str(site), "-p", PYC_PREPEND, "-x", PRECOMPILE_SKIP, str(site),
+        ],
         capture_output=True, text=True, check=False,
     )
     if done.returncode != 0:
@@ -758,11 +871,14 @@ def precompile(site: Path) -> None:
     tags = {p.name.split(".")[-2] for p in pycs}
     if tags != {"cpython-312"}:
         raise BuildError(f"미리 컴파일된 .pyc의 태그가 cpython-312만이 아닙니다: {sorted(tags)}")
-    # header: magic, then flags 0b01 (hash-based, source not checked — PEP 552 unchecked-hash)
-    wrong = [p for p in pycs if p.read_bytes()[:8] != PYC_MAGIC_312 + (1).to_bytes(4, "little")]
+    # header: magic, then flags 0b11 (hash-based, source checked — PEP 552 checked-hash)
+    wrong = [p for p in pycs if p.read_bytes()[:8] != PYC_MAGIC_312 + PYC_CHECKED_HASH_FLAGS.to_bytes(4, "little")]
     if wrong:
-        raise BuildError(f".pyc {len(wrong)}개의 머리(매직·unchecked-hash 플래그)가 다릅니다: {wrong[0]}")
-    print(f"  .pyc {len(pycs)}개(cpython-312, unchecked-hash, {python})", flush=True)
+        raise BuildError(f".pyc {len(wrong)}개의 머리(매직·checked-hash 플래그)가 다릅니다: {wrong[0]}")
+    leaks = pyc_build_path_leaks(site)
+    if leaks:
+        raise BuildError(f".pyc {len(leaks)}개에 빌드 머신의 경로가 남아 있습니다:\n  " + "\n  ".join(leaks[:20]))
+    print(f"  .pyc {len(pycs)}개(cpython-312, checked-hash, 빌드 경로 없음, {python})", flush=True)
 
 
 def _run(command: list[str], **kwargs: object) -> None:
@@ -868,7 +984,12 @@ def build_windows(out_parent: Path, cache: Path) -> Path:
     if problems:
         raise BuildError("의존성 검사 실패:\n  " + "\n  ".join(problems))
     runtime = install_msvc_runtime(fetch_msvc_runtime(cache), python)
-    print(f"  C++ 런타임(msvc-runtime {MSVC_RUNTIME_VERSION}): {', '.join(runtime)}", flush=True)
+    print(f"  C/C++ 런타임(msvc-runtime {MSVC_RUNTIME_VERSION}): {', '.join(runtime)}", flush=True)
+    for dll, version in runtime_versions(python).items():
+        print(f"    {dll} {version}", flush=True)
+    mixed = runtime_version_problems(python)
+    if mixed:
+        raise BuildError("런타임 DLL 검사 실패:\n  " + "\n  ".join(mixed))
     unresolved, checked = unresolved_imports(python)
     print(f"  DLL import 검사: .pyd/.dll {checked}개, 찾지 못한 DLL {len(unresolved)}건", flush=True)
     if unresolved:

@@ -63,8 +63,9 @@ class LauncherTextTest(unittest.TestCase):
         text = bundle.windows_launcher_text()
         lines = text.split("\r\n")
         self.assertEqual(lines[0], "@echo off")
-        self.assertEqual(lines[1], "chcp 65001 >nul")  # before any Korean line
-        self.assertTrue(all(line.isascii() for line in lines[:2]))
+        # REV2-D13: the old code page is saved before `chcp 65001`, which still comes before any Korean line
+        self.assertEqual(lines[1:4], ["setlocal", 'for /f "tokens=2 delims=:." %%a in (\'chcp\') do set "DFL_CP=%%a"', "chcp 65001 >nul"])
+        self.assertTrue(all(line.isascii() for line in lines[:4]))
         self.assertIn("title Deepfake Lens — 이 창을 닫으면 프로그램이 꺼집니다", lines)
         # RISK B12: pushd (a UNC folder gets a drive letter; `cd /d` failed there) and popd on the way out
         self.assertIn('pushd "%~dp0" || goto no_folder', lines)
@@ -90,6 +91,9 @@ class LauncherTextTest(unittest.TestCase):
         self.assertIn('set "DFL_CODE=%errorlevel%"', lines)
         self.assertIn('if "%DFL_CODE%"=="0" goto end', lines)
         self.assertIn('if "%DFL_CODE%"=="130" echo 사용자가 중단했습니다.', lines)
+        # REV2-D9: 3 = already running but no browser — the address is on the screen; pause without an error line
+        self.assertLess(lines.index('if "%DFL_CODE%"=="3" pause'), lines.index('if "%DFL_CODE%"=="3" goto end'))
+        self.assertLess(lines.index('if "%DFL_CODE%"=="3" goto end'), lines.index("echo 프로그램이 오류로 끝났습니다(코드 %DFL_CODE%). 위 내용을 캡처해 보내 주십시오."))
         self.assertIn("echo 프로그램이 오류로 끝났습니다(코드 %DFL_CODE%). 위 내용을 캡처해 보내 주십시오.", lines)
         error_at = lines.index("echo 프로그램이 오류로 끝났습니다(코드 %DFL_CODE%). 위 내용을 캡처해 보내 주십시오.")
         self.assertEqual(lines[error_at + 1], "pause")
@@ -114,16 +118,59 @@ class LauncherTextTest(unittest.TestCase):
             self.assertFalse([line for line in lines if line.rstrip().endswith(")") and line.startswith("if ")])
             self.assertNotIn(" ( ", text)
 
+    def test_temp_markers_refuse_archive_temp_copies_only(self) -> None:
+        """REV2-D1: the bare `\\Temp\\` check also refused C:\\Temp\\DeepfakeLens-win64\\, a normal place to unpack."""
+
+        def refused(folder: str) -> bool:  # cmd's `%var:x=%` is case-insensitive
+            return any(marker.lower() in folder.lower() for marker in bundle.TEMP_MARKERS)
+
+        self.assertNotIn("\\Temp\\", bundle.TEMP_MARKERS)
+        for folder in (
+            "C:\\Users\\홍길동\\AppData\\Local\\Temp\\Temp1_DeepfakeLens-win64.zip\\DeepfakeLens-win64\\",
+            "C:\\WINDOWS\\TEMP\\Temp1_x.zip\\DeepfakeLens-win64\\",
+            "C:\\Users\\a\\AppData\\Local\\Temp\\Rar$EXa1234.5678\\DeepfakeLens-win64\\",
+            "C:\\Users\\a\\AppData\\Local\\Temp\\7zO12345678\\DeepfakeLens-win64\\",
+            "D:\\tmp\\7zE0A1B2C3\\DeepfakeLens-win64\\",
+        ):
+            self.assertTrue(refused(folder), folder)
+        for folder in ("C:\\Temp\\DeepfakeLens-win64\\", "D:\\7zip\\DeepfakeLens-win64\\", "C:\\DeepfakeLens\\DeepfakeLens-win64\\"):
+            self.assertFalse(refused(folder), folder)
+        for text in (bundle.windows_launcher_text(), bundle.doctor_launcher_text()):
+            for marker in bundle.TEMP_MARKERS:
+                self.assertIn(f'if not "%DFL_HERE:{marker}=%"=="%DFL_HERE%" goto not_extracted', text.split("\r\n"))
+
+    def test_no_python_says_to_extract_first(self) -> None:
+        """REV2-D1: an archive opened from a temp folder outside the markers only has the clicked file — no python\\."""
+        lines = bundle.windows_launcher_text().split("\r\n")
+        at = lines.index(":no_python")
+        self.assertIn(bundle.EXTRACT_FIRST, lines[at:at + 4])
+        self.assertIn("압축을 먼저 푸십시오", bundle.EXTRACT_FIRST)
+
+    def test_code_page_is_restored_on_every_exit(self) -> None:
+        """REV2-D13: `chcp 65001` changed the code page of the cmd window the launcher was started from."""
+        for text in (bundle.windows_launcher_text(), bundle.doctor_launcher_text()):
+            lines = text.split("\r\n")
+            exits = [i for i, line in enumerate(lines) if line.startswith("exit /b")]
+            self.assertEqual(len(exits), 2)  # :no_folder and :end
+            for at in exits:
+                self.assertEqual(lines[at - 1], "if defined DFL_CP chcp %DFL_CP% >nul")
+            self.assertLess(lines.index(bundle.CODEPAGE_SAVE), lines.index("chcp 65001 >nul"))
+
+    def test_already_running_exit_code_matches_desktop(self) -> None:
+        from deepfake_lens.desktop import ALREADY_RUNNING_NO_BROWSER_EXIT
+
+        self.assertEqual(bundle.ALREADY_RUNNING_NO_BROWSER_EXIT, ALREADY_RUNNING_NO_BROWSER_EXIT)
+
     def test_doctor_launcher_runs_doctor_and_shows_log_folder(self) -> None:
         text = bundle.doctor_launcher_text()
-        self.assertTrue(text.startswith("@echo off\r\nchcp 65001 >nul\r\n"))
+        self.assertTrue(text.startswith("@echo off\r\nsetlocal\r\n" + bundle.CODEPAGE_SAVE + "\r\nchcp 65001 >nul\r\n"))
         self.assertNotIn("cd /d", text)  # RISK B12
         self.assertIn('"python\\python.exe" -X utf8 -m deepfake_lens doctor', text)
         self.assertIn("%USERPROFILE%\\.cache\\deepfake-lens\\logs", text)  # cli_logging.builtin_log_dir on Windows
         self.assertIn("DEEPFAKE_LENS_LOG_DIR", text)
         # RISK B12: the file now ends in the shared `:end` (popd); the window still waits after the report
         self.assertIn("echo 문제를 알릴 때는 이 창의 내용과 로그 폴더의 파일을 함께 보내 주십시오.\r\npause\r\ngoto end\r\n", text)
-        self.assertTrue(text.rstrip().endswith("popd\r\nexit /b %DFL_CODE%"))
+        self.assertTrue(text.rstrip().endswith("popd\r\nif defined DFL_CP chcp %DFL_CP% >nul\r\nexit /b %DFL_CODE%"))
 
     def test_log_folder_matches_cli_logging(self) -> None:
         from deepfake_lens.cli_logging import LOG_DIR_ENV
@@ -133,18 +180,42 @@ class LauncherTextTest(unittest.TestCase):
 
     def test_readme_covers_the_plan_points(self) -> None:
         text = bundle.readme_text()
-        for needle in ("x64", "C:\\DeepfakeLens", "추가 정보", "실행", "Unblock-File", "차단 해제", "OneDrive", "종료", "%APPDATA%\\deepfake-lens\\report-key", "이 PC의 이 Windows 계정에서만", ".cache\\deepfake-lens\\logs", "문제 확인.cmd"):
+        for needle in ("x64", "C:\\DeepfakeLens", "추가 정보", "실행", "Unblock-File", "차단 해제", "OneDrive", "「프로그램 종료」 단추", "%APPDATA%\\deepfake-lens\\report-key", "이 키 파일을 가진 계정에서만 검증됩니다", ".cache\\deepfake-lens\\logs", "문제 확인.cmd"):
             self.assertIn(needle, text)
 
     def test_readme_covers_the_risk_review_points(self) -> None:
         text = bundle.readme_text()
         for needle in (
-            "SSE4.2", "2010년", "(Y/N)?", "Y를 누르십시오", "스마트 앱 컨트롤(SAC)", "이 PC에서는 쓸 수 없습니다", "AppLocker",
+            "SSE4.2", "인텔 2008년(Nehalem)·AMD 2011년(Bulldozer) 이후 x64 CPU(SSE4.2)", "(있으면) 「차단 해제」", "(Y/N)?", "Y를 누르십시오", "스마트 앱 컨트롤(SAC)", "이 PC에서는 쓸 수 없습니다", "AppLocker",
             "IT 담당자", "V3: 환경 설정 → 검사 예외 설정", "DRM", "Edge", "127.0.0.1", "압축을 푼 폴더의 「Deepfake Lens.cmd」",
             "1분", "모두 압축 풀기",
         ):
             self.assertIn(needle, text)
         self.assertNotIn("바탕 화면의 Deepfake Lens", text)  # RISK B13: there is no desktop shortcut
+        # REV2-D2: %APPDATA% is Roaming — "only on this PC" was false (the key file follows a roaming profile)
+        self.assertNotIn("이 PC의 이 Windows 계정에서만", text)
+        self.assertIn("(%APPDATA%는 로밍 프로필에서는 다른 PC로 동기화될 수 있습니다)", text)
+        self.assertNotIn("2010년", text)  # REV2-D12: SSE4.2 came with Nehalem (2008) and Bulldozer (2011)
+        for needle in (
+            "끌어 놓기가 안 되면(경로에 & , ; = 가 있고 공백이 없으면) 화면에서 고르십시오",  # REV2-D8
+            "「중단됨(사용자 요청)」",  # REV2-D10: Python's line comes before cmd's Y/N question
+            "설정 → 성능 → 「항상 활성 상태로 유지할 사이트」",  # REV2-D12
+            "「폴더 찾아보기」 트리 창입니다. 정상입니다",  # REV2-D12 (RISK B6)
+            "\\\\서버\\공유",  # REV2-D12 (RISK B7)
+        ):
+            self.assertIn(needle, text)
+
+    def test_readme_verify_command_runs_from_the_bundle_folder(self) -> None:
+        """REV2-D11: `deepfake-lens` is not on PATH in the bundle; the command is the bundle's python, from cmd."""
+        text = bundle.readme_text()
+        self.assertIn(
+            "    python\\python.exe -X utf8 -m deepfake_lens verify-report <서명된 JSON> --key-file %APPDATA%\\deepfake-lens\\report-key",
+            text.split("\r\n"),
+        )
+        self.assertIn("이 폴더에서 명령 프롬프트(cmd)를 열고", text)
+        self.assertIn("$env:APPDATA", text)
+        self.assertIn(".\\python\\python.exe", text)
+        self.assertNotIn("deepfake-lens verify-report", text)
         self.assertTrue(all(len(line) <= 120 for line in text.split("\r\n")))
 
     def test_version_text(self) -> None:
@@ -245,9 +316,9 @@ class ZipAndVerifyTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             site = Path(tmp)
             (site / "c2pa" / "libs").mkdir(parents=True)
-            for name in ("c2pa_c.dll", "c2pa_c.lib", "c2pa_c.pdb"):
+            for name in ("c2pa_c.dll", "c2pa_c.lib", "c2pa_c.pdb", "c2pa_c.dll.exp", "c2pa_c.d"):  # REV2-D13: .exp, .d
                 (site / "c2pa" / "libs" / name).write_bytes(b"x" * 10)
-            self.assertEqual(bundle.prune_site_packages(site), (2, 20))
+            self.assertEqual(bundle.prune_site_packages(site), (4, 40))
             self.assertEqual([p.name for p in (site / "c2pa" / "libs").iterdir()], ["c2pa_c.dll"])
 
     def test_verify_reports_an_empty_folder(self) -> None:
@@ -330,11 +401,66 @@ class ZipAndVerifyTest(unittest.TestCase):
                 for dll in (*bundle.MSVC_RUNTIME_DLLS, "vcomp140.dll"):
                     archive.writestr(prefix + dll, dll.encode())
                     archive.writestr(prefix + "Scripts/" + dll, b"wrong copy")
+                for dll in bundle.VCRUNTIME_DLLS:  # REV2-D7: the wheel has these only under data/Scripts/
+                    archive.writestr(prefix + "Scripts/" + dll, b"new " + dll.encode())
             python = Path(tmp) / "python"
             python.mkdir()
-            self.assertEqual(bundle.install_msvc_runtime(wheel, python), list(bundle.MSVC_RUNTIME_DLLS))
-            self.assertEqual(sorted(p.name for p in python.iterdir()), sorted(bundle.MSVC_RUNTIME_DLLS))
+            (python / "vcruntime140.dll").write_bytes(b"embeddable 14.42 copy")
+            everything = [*bundle.MSVC_RUNTIME_DLLS, *bundle.VCRUNTIME_DLLS]
+            self.assertEqual(bundle.install_msvc_runtime(wheel, python), everything)
+            self.assertEqual(sorted(p.name for p in python.iterdir()), sorted(everything))
             self.assertEqual((python / "msvcp140.dll").read_bytes(), b"msvcp140.dll")
+            self.assertEqual((python / "vcruntime140.dll").read_bytes(), b"new vcruntime140.dll")
+
+    def test_runtime_versions_must_agree(self) -> None:
+        """REV2-D7: vcruntime 14.42 (embeddable) beside msvcp140 14.51 (wheel) was a mixed runtime set."""
+
+        def dll(version: tuple[int, int, int, int]) -> bytes:
+            a, b, c, d = version
+            fixed = (0xFEEF04BD).to_bytes(4, "little") + (0x10000).to_bytes(4, "little")
+            fixed += ((a << 16) | b).to_bytes(4, "little") + ((c << 16) | d).to_bytes(4, "little")
+            return b"MZ" + b"\0" * 100 + b"V\0S\0_\0" + fixed + b"\0" * 40
+
+        self.assertEqual(bundle.pe_file_version(dll((14, 51, 36247, 0))), "14.51.36247.0")
+        self.assertIsNone(bundle.pe_file_version(b"MZ no resource"))
+        with tempfile.TemporaryDirectory() as tmp:
+            python = Path(tmp)
+            for name in bundle.MSVC_RUNTIME_DLLS:
+                (python / name).write_bytes(dll((14, 51, 36247, 0)))
+            for name in bundle.VCRUNTIME_DLLS:
+                (python / name).write_bytes(dll((14, 42, 34438, 0)))
+            problems = bundle.runtime_version_problems(python)
+            self.assertEqual(len(problems), 1)
+            self.assertIn("vcruntime140.dll 14.42.34438.0", problems[0])
+            for name in bundle.VCRUNTIME_DLLS:
+                (python / name).write_bytes(dll((14, 51, 36247, 0)))
+            self.assertEqual(bundle.runtime_version_problems(python), [])
+            self.assertEqual(set(bundle.runtime_versions(python).values()), {"14.51.36247.0"})
+            (python / "vcruntime140_1.dll").write_bytes(b"MZ")
+            self.assertEqual(bundle.runtime_version_problems(python), ["python/vcruntime140_1.dll: 파일 버전을 읽지 못함"])
+
+    def test_pyc_build_path_leaks(self) -> None:
+        """REV2-D5: compileall wrote the build folder (/Users/<name>/…) into every co_filename."""
+        with tempfile.TemporaryDirectory() as tmp:
+            site = Path(tmp)
+            cache = site / "pkg" / "__pycache__"
+            cache.mkdir(parents=True)
+            (cache / "a.cpython-312.pyc").write_bytes(b"\0" * 16 + b"Lib\\site-packages/pkg/a.py")
+            (cache / "b.cpython-312.pyc").write_bytes(b"\0" * 16 + b"/Users/builder/out/python/Lib/site-packages/pkg/b.py")
+            self.assertEqual(bundle.pyc_build_path_leaks(site, [b"/Users/builder", b"builder"]), ["pkg/__pycache__/b.cpython-312.pyc: /Users/builder, builder"])
+        home = Path.home()
+        self.assertIn(str(home).encode("utf-8"), bundle.build_path_needles())
+        if len(home.name) >= 3:
+            self.assertIn(home.name.encode("utf-8"), bundle.build_path_needles())
+
+    def test_precompile_flags_are_checked_hash(self) -> None:
+        """REV2-D6: an unchecked-hash .pyc keeps running after its .py is edited; checked-hash recompiles."""
+        self.assertEqual(bundle.PYC_CHECKED_HASH_FLAGS, 0b11)
+        self.assertEqual(bundle.PYC_PREPEND, "Lib\\site-packages")
+        source = (REPO_ROOT / "scripts" / "build_desktop_bundle.py").read_text(encoding="utf-8")
+        self.assertIn('"--invalidation-mode", "checked-hash"', source)
+        self.assertNotIn('"unchecked-hash"', source)
+        self.assertIn('"-s", str(site), "-p", PYC_PREPEND', source)
 
 
 def _pe(imports: list[str], *, pe32: bool = False) -> bytes:
@@ -413,9 +539,10 @@ class PEImportTableTest(unittest.TestCase):
             self.assertIn("PE를 읽지 못함", "\n".join(bundle.unresolved_imports(python)[0]))
 
     def test_system_dlls(self) -> None:
-        for name in ("KERNEL32.dll", "api-ms-win-crt-runtime-l1-1-0.dll", "ucrtbase.dll", "WS2_32.dll", "ext-ms-win-x.dll"):
+        for name in ("KERNEL32.dll", "api-ms-win-crt-runtime-l1-1-0.dll", "ucrtbase.dll", "WS2_32.dll"):
             self.assertTrue(bundle.is_system_dll(name), name)
-        for name in ("MSVCP140.dll", "VCRUNTIME140.dll", "python312.dll", "mupdfcpp64.dll"):
+        # REV2-D13: ext-ms-* API sets are optional per Windows edition — not waved through
+        for name in ("MSVCP140.dll", "VCRUNTIME140.dll", "python312.dll", "mupdfcpp64.dll", "ext-ms-win-x.dll"):
             self.assertFalse(bundle.is_system_dll(name), name)
 
 
