@@ -1,1 +1,33 @@
-/* OMO-1 app shell: first-run welcome panel styles. */
+/* OMO-10: the first-run welcome panel: a centered card with the three numbered steps and one way in. */
+.welcome {
+    max-width: 720px; margin: 24px auto; padding: 24px; box-sizing: border-box;
+    border: 1px solid var(--line); border-radius: 4px; background: var(--panel); color: var(--ink);
+    display: flex; flex-direction: column; align-items: flex-start; gap: 16px;
+}
+.welcome[hidden] { display: none; }
+.welcome h2 { margin: 0; font-size: 22px; }
+.welcome-steps {
+    list-style: none; margin: 0; padding: 0; width: 100%; counter-reset: welcome-step;
+    display: flex; flex-direction: column; gap: 12px;
+}
+.welcome-steps li { position: relative; padding-left: 36px; min-height: 26px; min-width: 0; counter-increment: welcome-step; }
+.welcome-steps li::before {
+    content: counter(welcome-step); position: absolute; left: 0; top: 0; width: 26px; height: 26px; box-sizing: border-box;
+    border: 2px solid var(--ink); border-radius: 50%; font-family: var(--mono); font-weight: 700;
+    display: inline-flex; align-items: center; justify-content: center;
+}
+.welcome-steps .hint { display: inline; margin: 0; }
+.welcome > .btn { max-width: 100%; }
+
+/* The same three steps are not shown twice. */
+body.has-welcome #scan-guide { display: none; }
+
+@media (max-width: 480px) {
+    .welcome { margin: 12px 0; padding: 16px; }
+    .welcome > .btn { width: 100%; white-space: normal; }
+}
+
+@media (forced-colors: active) {
+    .welcome { border: 2px solid CanvasText; }
+    .welcome-steps li::before { border-color: CanvasText; }
+}
