@@ -1617,7 +1617,9 @@ class DocumentedEndpointsExistTest(unittest.TestCase):
                     return exc.code, exc.read().decode("utf-8", "replace")
 
             env = patch.dict(os.environ, {"DEEPFAKE_LENS_REVIEWS": str(Path(tmp) / "r.json"),
-                                          "DEEPFAKE_LENS_FEEDBACK": str(Path(tmp) / "f.jsonl")})
+                                          "DEEPFAKE_LENS_FEEDBACK": str(Path(tmp) / "f.jsonl"),
+                                          "DEEPFAKE_LENS_CASES": str(Path(tmp) / "c.json"),
+                                          "DEEPFAKE_LENS_SCAN_JOBS": str(Path(tmp) / "jobs")})
             with env:
                 for method, path in sorted(web_rows):
                     with self.subTest(method=method, path=path):

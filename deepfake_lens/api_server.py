@@ -1317,6 +1317,30 @@ def create_app(
         store = get_default_review_store()
         return {"status": "success", "reviews": store.list_reviews(_evidence())}
 
+    # OMO-4: the sidebar history and the case fields kept per scan job (owner as /api/scan-status).
+    @app.get("/api/history")
+    async def api_history():
+        from .webapp_api import _history_payload
+        return _api_json(await run_in_threadpool(lambda: _history_payload(owner=job_owner, evidence=_evidence())))
+
+    @app.post("/api/history-delete")
+    async def api_history_delete(request: Request):
+        from .webapp_api import _history_delete_payload
+        body = await request.body()
+        return _api_json(await run_in_threadpool(lambda: _history_delete_payload(body, owner=job_owner, evidence=_evidence())))
+
+    @app.get("/api/job-case")
+    async def api_get_job_case(request: Request):
+        from .webapp_api import _job_case_get_payload
+        query = str(request.url.query)
+        return _api_json(await run_in_threadpool(lambda: _job_case_get_payload(query, owner=job_owner, evidence=_evidence())))
+
+    @app.post("/api/job-case")
+    async def api_post_job_case(request: Request):
+        from .webapp_api import _job_case_post_payload
+        body = await request.body()
+        return _api_json(await run_in_threadpool(lambda: _job_case_post_payload(body, owner=job_owner, evidence=_evidence())))
+
     return app
 
 

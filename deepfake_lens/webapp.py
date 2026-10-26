@@ -339,6 +339,14 @@ def build_server(
                     return
                 self._send_json({"status": "success", "artifact_id": art_id, "review": get_default_review_store().get_review(art_id, evidence_folders(default_folder))})
                 return
+            if parsed.path == "/api/history":  # OMO-4
+                from .webapp_api import _history_payload
+                self._send_json(_history_payload(owner=job_owner, evidence=evidence_folders(default_folder)))
+                return
+            if parsed.path == "/api/job-case":  # OMO-4
+                from .webapp_api import _job_case_get_payload
+                self._send_json(_job_case_get_payload(parsed.query, owner=job_owner, evidence=evidence_folders(default_folder)))
+                return
             self.send_error(404, "찾을 수 없는 경로입니다")
 
         def do_POST(self) -> None:
@@ -442,6 +450,20 @@ def build_server(
                     self._send_json({"error": str(exc)}, status=getattr(exc, "status", USER_DATA_REFUSED_STATUS))  # R23-7: 409/507
                     return
                 self._send_json({"status": "success", "artifact_id": art_id, "review": saved})
+                return
+            if parsed.path == "/api/history-delete" or parsed.path == "/api/job-case":  # OMO-4
+                from .webapp_api import _history_delete_payload, _job_case_post_payload
+                try:
+                    length = int(self.headers.get("Content-Length") or "0")
+                except ValueError:
+                    self.send_error(400, "Content-Length가 올바르지 않습니다")
+                    return
+                if length < 0 or length > 64 * 1024:
+                    self.send_error(400, "요청 본문 크기가 올바르지 않습니다")
+                    return
+                body = self.rfile.read(length) if length else b""
+                handler = _history_delete_payload if parsed.path == "/api/history-delete" else _job_case_post_payload
+                self._send_json(handler(body, owner=job_owner, evidence=evidence_folders(default_folder)))
                 return
             self.send_error(404, "찾을 수 없는 경로입니다")
 

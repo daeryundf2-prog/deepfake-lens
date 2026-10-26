@@ -1471,6 +1471,145 @@ def _feedback_payload(body: bytes, evidence: list[Path] | tuple[Path, ...] = ())
     return {"ok": True, "feedback_file": str(feedback_file)}
 
 
+# OMO-4: the sidebar history (/api/history, /api/history-delete) and the case fields kept per scan job (/api/job-case).
+HISTORY_JOB_INVALID = "job 값이 올바른 검사 작업 id가 아닙니다"
+HISTORY_JOB_UNKNOWN = "검사 작업을 찾을 수 없습니다"
+HISTORY_JOB_RUNNING = "검사가 진행 중인 기록은 지울 수 없습니다 — 검사가 끝난 뒤 지우십시오"
+HISTORY_BODY_NOT_OBJECT = "요청 본문은 JSON 객체여야 합니다"
+HISTORY_CASE_NOT_OBJECT = "case 값은 JSON 객체여야 합니다"
+HISTORY_SKIPPED_NOTE = "{count}개 기록은 무결성을 확인할 수 없어 목록에서 뺐습니다"
+
+
+def _history_job(value: object) -> str | ApiError:
+    from .scan_jobs import JOB_ID_PATTERN
+
+    if value in (None, ""):
+        return ApiError(JOB_PARAM_REQUIRED, 400)
+    if not isinstance(value, str) or not JOB_ID_PATTERN.match(value):
+        return ApiError(HISTORY_JOB_INVALID, 400)
+    return value
+
+
+def _history_body(body: bytes) -> dict[str, Any] | ApiError:
+    try:
+        raw = load_json_body(body, empty={})
+    except JsonBodyError as exc:
+        return ApiError(str(exc), 400)
+    if not isinstance(raw, dict):
+        return ApiError(HISTORY_BODY_NOT_OBJECT, 400)
+    return raw
+
+
+def _visible_job(job: str, owner: str, evidence: list[Path] | tuple[Path, ...]) -> dict[str, Any] | ApiError:
+    try:
+        entry = STORE.get(job, owner, evidence=evidence)
+    except JobIntegrityError as exc:
+        return ApiError(str(exc), JOB_INTEGRITY_STATUS)
+    if entry is None:
+        return ApiError(HISTORY_JOB_UNKNOWN, 404)
+    return entry
+
+
+def _user_data_error(exc: Exception) -> ApiError:
+    return ApiError(str(exc), getattr(exc, "status", USER_DATA_REFUSED_STATUS))
+
+
+def _history_payload(*, owner: str = LOCAL_OWNER, evidence: list[Path] | tuple[Path, ...] = ()) -> dict[str, object]:
+    """The finished scan jobs of this owner, newest first, each with its case number and name (``/api/history``)."""
+    from .case_store import prune_cases, read_all
+    from .scan_jobs import store_folder, ttl_seconds
+    from .user_data import UserDataRefused
+
+    items = STORE.list_finished(owner, evidence=evidence)
+    notes: list[str] = []
+    if STORE.last_history_skipped:
+        notes.append(HISTORY_SKIPPED_NOTE.format(count=STORE.last_history_skipped))
+    try:
+        prune_cases([item["job_id"] for item in items], evidence)  # party names never outlive their job record
+        cases = read_all(evidence)
+    except UserDataRefused as exc:
+        cases = {}
+        notes.append(str(exc))
+    for item in items:
+        case = cases.get(item["job_id"], {})
+        item["case"] = {"case_no": case.get("case_no", ""), "case_name": case.get("case_name", "")}
+    folder, reason = store_folder(evidence)
+    if reason:
+        notes.insert(0, reason)
+    return {
+        "items": items, "retention_days": ttl_seconds() / 86400, "store": str(folder) if folder else None,
+        "note": " · ".join(notes) or None,
+    }
+
+
+def _history_delete_payload(body: bytes, *, owner: str = LOCAL_OWNER, evidence: list[Path] | tuple[Path, ...] = ()) -> dict[str, object]:
+    """``POST /api/history-delete {"job"}``: a finished job's record and its case fields are removed."""
+    from .case_store import delete_case
+    from .user_data import UserDataRefused
+
+    raw = _history_body(body)
+    if isinstance(raw, ApiError):
+        return raw
+    job = _history_job(raw.get("job"))
+    if isinstance(job, ApiError):
+        return job
+    entry = _visible_job(job, owner, evidence)
+    if isinstance(entry, ApiError):
+        return entry
+    if entry.get("status") == "running":
+        return ApiError(HISTORY_JOB_RUNNING, 409)
+    deleted = STORE.delete(job, owner, evidence=evidence)
+    try:
+        delete_case(job, evidence)
+    except UserDataRefused as exc:
+        return _user_data_error(exc)
+    return {"status": "success", "job": job, "deleted": deleted}
+
+
+def _job_case_get_payload(query: str, *, owner: str = LOCAL_OWNER, evidence: list[Path] | tuple[Path, ...] = ()) -> dict[str, object]:
+    """``GET /api/job-case?job=<id>``: the case fields saved with that scan job (empty when none)."""
+    from .case_store import read_case
+    from .user_data import UserDataRefused
+
+    job = _history_job(parse_qs(query).get("job", [""])[0])
+    if isinstance(job, ApiError):
+        return job
+    entry = _visible_job(job, owner, evidence)
+    if isinstance(entry, ApiError):
+        return entry
+    try:
+        case = read_case(job, evidence)
+    except UserDataRefused as exc:
+        return _user_data_error(exc)
+    return {"status": "success", "job": job, "case": case}
+
+
+def _job_case_post_payload(body: bytes, *, owner: str = LOCAL_OWNER, evidence: list[Path] | tuple[Path, ...] = ()) -> dict[str, object]:
+    """``POST /api/job-case {"job", "case"}``: the case fields of a scan job this owner can see are saved."""
+    from .case_store import CaseInputInvalid, write_case
+    from .user_data import UserDataRefused
+
+    raw = _history_body(body)
+    if isinstance(raw, ApiError):
+        return raw
+    job = _history_job(raw.get("job"))
+    if isinstance(job, ApiError):
+        return job
+    case = raw.get("case")
+    if not isinstance(case, dict):
+        return ApiError(HISTORY_CASE_NOT_OBJECT, 400)
+    entry = _visible_job(job, owner, evidence)
+    if isinstance(entry, ApiError):
+        return entry
+    try:
+        saved = write_case(job, case, evidence)
+    except CaseInputInvalid as exc:
+        return ApiError(str(exc), 400)
+    except UserDataRefused as exc:
+        return _user_data_error(exc)
+    return {"status": "success", "job": job, "case": saved}
+
+
 # B8: /api/report?format=pdf without pymupdf answers this body with HTTP 501
 # (both the stdlib web server and the FastAPI server) instead of a PDF.
 # P8: the install command in backticks, as in evidence_statement (an unquoted

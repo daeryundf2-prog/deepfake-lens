@@ -9,7 +9,7 @@ from typing import Any
 from .error_text import read_error_ko
 from .json_text import json_dumps
 from .output_files import write_output_text
-from .scan_jobs import JOB_ID_PATTERN
+from .scan_jobs import JOB_ID_PATTERN, STORE, store_folder
 from .user_data import (
     USER_DATA_READ_FAILED,
     UserDataRefused,
@@ -119,6 +119,14 @@ def delete_case(job_id: str, evidence: list[Path] | tuple[Path, ...] = ()) -> bo
 
 def prune_cases(keep_job_ids: Iterable[str], evidence: list[Path] | tuple[Path, ...] = ()) -> int:
     keep = set(keep_job_ids)
+    folder, _reason = store_folder(evidence)
+    if folder is not None and folder.is_dir():
+        for name in os.listdir(folder):
+            job = name[: -len(".json")] if name.endswith(".json") else ""
+            if JOB_ID_PATTERN.match(job):
+                keep.add(job)
+    with STORE._lock:
+        keep.update(STORE._jobs)
     path = _path(evidence)
     store = _load(path)
     stale = [job for job in store if job not in keep]
