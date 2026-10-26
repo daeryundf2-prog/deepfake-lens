@@ -634,3 +634,28 @@ select.field { padding-right: 8px; }
     .drop.over { border: 3px solid Highlight; }
     .studio-btn.active { border: 2px solid Highlight; text-decoration: underline; }
 }
+
+/* OMO-11: long caveats fold behind 자세한 설명; the headline stays visible, print shows everything */
+.caveat-more { margin-top: 2px; }
+.caveat-more > summary {
+    cursor: pointer; min-height: 44px; display: flex; align-items: center; font-size: 13px; font-weight: 600;
+    color: var(--ink-2); list-style: none;
+}
+.caveat-more > summary::-webkit-details-marker { display: none; }
+.caveat-more > summary::after { content: "+"; font-family: var(--mono); color: var(--muted); font-weight: 400; margin-left: 8px; }
+.caveat-more[open] > summary::after { content: "−"; }
+.caveat-more > summary:focus-visible { outline: 3px solid var(--focus); outline-offset: 2px; }
+.caveat-more > :not(summary) { margin-top: 4px; }
+/* the 44px target sits on the headline's own line (its box overlaps the line gap) so a folded warning costs no extra row */
+.caveat-item > p, .caveat-item > .caveat-more, .band-advice > .caveat-more { display: inline; }
+.caveat-item > .caveat-more[open] > :not(summary) { display: block; }
+.caveat-item > .caveat-more > summary, .band-advice > .caveat-more > summary, .prov-details > .caveat-more > summary {
+    display: inline-flex; vertical-align: middle; margin: -12px 0 -12px 8px; padding: 0 4px;
+}
+.prov-details > .caveat-more > summary { margin-left: 0; }
+@media print {
+    .caveat-more[open], .caveat-more { display: block; }
+    .caveat-more > :not(summary) { display: block; }
+    .caveat-more > summary { display: none; }
+    .caveat-more::details-content { content-visibility: visible; display: block; }
+}

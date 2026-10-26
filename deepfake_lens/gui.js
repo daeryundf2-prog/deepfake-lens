@@ -359,6 +359,30 @@
             }
         }
 
+        // OMO-11: a long caveat keeps its headline in view; the explanation after it (same text) folds behind 자세한 설명.
+        function caveatMoreHtml(restHtml) {
+            return `<details class="caveat-more"><summary>자세한 설명</summary>${restHtml}</details>`;
+        }
+        // Headline = up to the first </b>, else the first ' — ', else the first sentence ('. '); nothing to fold when none.
+        function foldWarningHtml(html) {
+            const bold = html.indexOf('</b>');
+            let cut = bold >= 0 ? bold + 4 : html.indexOf(' — ');
+            if (cut < 0) { const dot = html.indexOf('. '); cut = dot >= 0 ? dot + 1 : -1; }
+            if (cut < 0 || !html.slice(cut).trim()) return `<p>${html}</p>`;
+            return `<div class="caveat-item"><p>${html.slice(0, cut)}</p>${caveatMoreHtml(`<p>${html.slice(cut)}</p>`)}</div>`;
+        }
+        // The verdict advice / one-liner: the first sentence (or clause before ' — ') stays, the rest folds.
+        function foldTextHtml(text, escape) {
+            const dash = text.indexOf(' — ');
+            const dot = text.indexOf('. ');
+            const cut = dash >= 0 && (dot < 0 || dash < dot) ? dash : (dot >= 0 ? dot + 1 : -1);
+            if (cut < 0) return { head: escape(text), more: '' };
+            return { head: escape(text.slice(0, cut)), more: caveatMoreHtml(escape(text.slice(cut))) };
+        }
+        function adviceHtml(text) {
+            const f = foldTextHtml(text, escapeHtml);
+            return `<div class="band-advice">${f.head}${f.more}</div>`;
+        }
         function provenanceBannerHtml() {
             const cov = lastProvenance.coverage || {};
             const thr = lastProvenance.thresholds || {};
@@ -387,7 +411,7 @@
             const overCap = (lastProvenance.summary || {}).files_over_cap || 0;
             if (overCap) parts.push(`파일 수 상한에 도달해 <b>${overCap}개 파일은 검사·기록하지 않았습니다</b> — ${escapeHtml(overCapAdvice(lastScanOptions.max_files))}`);
             if (!parts.length) return '';
-            return `${parts.map(p => `<p>${p}</p>`).join('')}<p class="note">이 결과는 결론과 근거로 읽으십시오; 점수는 보정된 경우에만 표시됩니다. 유죄·불법성의 확정 판정이 아닙니다.</p>`;
+            return `${parts.map(foldWarningHtml).join('')}${caveatMoreHtml('<p class="note">이 결과는 결론과 근거로 읽으십시오; 점수는 보정된 경우에만 표시됩니다. 유죄·불법성의 확정 판정이 아닙니다.</p>')}`;
         }
 
         // P7: inverse of result_text.escape_row_path ("\\:" -> ":", "\\\\" -> "\\").
@@ -823,6 +847,12 @@
             // R24-1 merge: the partial roll-up of a cancelled archive is said before its conclusion.
             const cancelled = cancelledContainerText(item);
             return cancelled ? cancelled + ' ' + verdictLineOf(item) : verdictLineOf(item);
+        }
+        // The heading holds the first sentence of the verdict line; a second sentence folds right under it.
+        function verdictLineHeadHtml(item, tag) {
+            const f = foldTextHtml(verdictLine(item), shown);
+            const open = tag === 'h2' ? 'h2 id="detail-h" tabindex="-1"' : tag;
+            return `<${open}>${f.head}</${tag.split(' ')[0]}>${f.more}`;
         }
         function verdictLineOf(item) {
             const v = verdictOf(item);
@@ -2087,7 +2117,7 @@
             const rev = reviewStore[itemKey(item)] || {};
             const parts = [];
             parts.push(`<div class="d-head"><div class="d-verdict vt-${mk}"><span class="mk mk-lg mk-${mk}" aria-hidden="true"></span><span>${shown(shortVerdict(item))}</span>${r && r.grade === 'reference' ? '<span class="grade-pill">참고 등급</span>' : ''}</div>` +
-                `<h2 id="detail-h" tabindex="-1">${shown(verdictLine(item))}</h2>` +
+                verdictLineHeadHtml(item, 'h2') +
                 `<div class="d-name">${shown(item.path || item.name || '파일')}</div>` +
                 `<div class="d-meta">${shown(metaLine(item))}</div>` +
                 `<button type="button" class="linkbtn d-back">목록으로 돌아가기</button></div>`);
@@ -2142,7 +2172,7 @@
             }
             if (r) {
                 discs.push(`<details class="disc"><summary>기술 세부</summary><div class="disc-body">${verdictHeadHtml(r)}${evidenceHtml(r)}${coverageHtml(r)}` +
-                    `<div class="band-advice">${escapeHtml(verdictAdvice(r.verdict_code || 'undetermined', r.grade))}</div>` +
+                    adviceHtml(verdictAdvice(r.verdict_code || 'undetermined', r.grade)) +
                     `<div class="caveat">결론은 재현 가능한 기록 근거로만 내립니다. 통계적·어휘적 근거와 검사 실패 내역은 근거·검사 범위 목록에 전부 남습니다.</div>` +
                     `<pre class="tech">${escapeHtml(techText(item))}</pre></div></details>`);
             } else {
@@ -3153,7 +3183,7 @@
             const top = [];
             top.push(`<div class="qc-head"><span class="mk mk-lg mk-${mk}" aria-hidden="true"></span>
                 <div><div class="d-verdict vt-${mk}">${shown(shortVerdict(item))}</div>
-                <h3 class="qc-line">${shown(verdictLine(item))}</h3>
+                ${verdictLineHeadHtml(item, 'h3 class="qc-line"')}
                 <div class="note">${shown(item.name || '')}</div></div></div>`);
             // GUI-REV G-7: a text result leads with the fixed legal limitation, and
             // its reference signals are shown with it — not inside the disclosure.
@@ -3212,7 +3242,7 @@
             }
             parts.push(listItems('참고 신호(미측정 휴리스틱 — 결론 불참여)', (r.reference_signals || []).map(s => ({ title: `${s.title} (${s.weight})`, detail: s.detail }))));
             parts.push(listItems('다음 확인', r.next_checks));
-            parts.push(`<div class="band-advice">${escapeHtml(verdictAdvice(r.verdict_code || 'undetermined', r.grade))}</div>`);
+            parts.push(adviceHtml(verdictAdvice(r.verdict_code || 'undetermined', r.grade)));
             parts.push(`<div class="caveat">결론은 재현 가능한 기록 근거로만 내립니다. 통계적·어휘적 근거와 검사 실패 내역은 근거·검사 범위 목록에 전부 남습니다.</div>`);
             box.innerHTML = top.join('') + `<details class="disc"><summary>세부 — 근거 종류별·검사 범위·참고 신호·계층 진단</summary><div class="disc-body">${parts.join('')}</div></details>`;
             // A11Y-6: only the one-line result is announced, not the whole block.
