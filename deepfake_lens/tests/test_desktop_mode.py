@@ -331,7 +331,7 @@ class NoProxyProbeTest(unittest.TestCase):
             with mock.patch.dict(os.environ, {"HTTP_PROXY": "http://10.0.0.1:1", "http_proxy": "http://10.0.0.1:1"}):
                 started = time.monotonic()
                 self.assertFalse(desktop.this_tool_listens(port))  # the socket never answers; no proxy is contacted
-                self.assertLess(time.monotonic() - started, 5)
+                self.assertLess(time.monotonic() - started, desktop.PROBE_TIMEOUT_SECONDS + 3)
         source = Path(desktop.__file__).read_text(encoding="utf-8")
         self.assertIn("urllib.request.ProxyHandler({})", source)
 
@@ -396,8 +396,10 @@ class RiskReviewFixesTest(unittest.TestCase):
             self.assertEqual(desktop.folder_too_wide(Path.home()), "사용자 폴더 전체")
             (root / "bundle").mkdir()
             with mock.patch.object(desktop.sys, "prefix", str(root / "bundle")):
-                self.assertIn("프로그램 폴더", desktop.folder_too_wide(root) or "")
+                # the bundle inside the chosen folder is a note, not a refusal (a Downloads folder holding both)
                 self.assertIsNone(desktop.folder_too_wide(root / "evidence"))
+                self.assertIn("프로그램 폴더", desktop.folder_note(root / "bundle") or "")
+                self.assertIsNone(desktop.folder_note(root / "evidence"))
 
     def test_onedrive_note(self) -> None:
         self.assertEqual(desktop.folder_note(Path("C:/Users/a/OneDrive/증거")), desktop.ONEDRIVE_NOTE)
@@ -421,3 +423,56 @@ class RiskReviewFixesTest(unittest.TestCase):
                 body = json.loads(ctx.exception.read().decode("utf-8"))
             self.assertEqual(ctx.exception.code, 400)
             self.assertIn("너무 넓은 폴더", body["error"])
+
+
+class SecondReviewFixesTest(unittest.TestCase):
+    """Second review (2026-10-26): F1 no working-folder root in desktop mode, F2 the probe wants desktop:true and the
+    same user, F4 a broken-link key file, F5 a wildcard listener is not a free port."""
+
+    def test_desktop_server_without_a_root_reads_nothing(self) -> None:
+        roots: Any = mock.patch.object(webapp_api, "_READ_ROOTS", OrderedDict())
+        roots.start(); self.addCleanup(roots.stop)
+        desktop.STATE = desktop.DesktopState()
+        self.addCleanup(setattr, desktop, "STATE", None)
+        self.assertEqual(webapp_api._effective_roots(None), [])
+        desktop.STATE = None
+        self.assertEqual(len(webapp_api._effective_roots(None)), 1)  # the plain server keeps its working-folder default
+
+    def test_the_probe_rejects_a_plain_web_server_and_another_user(self) -> None:
+        import json as _json
+
+        class FakeAnswer:
+            def __init__(self, body: dict) -> None: self.body = _json.dumps(body).encode()
+            def read(self) -> bytes: return self.body
+            def __enter__(self): return self
+            def __exit__(self, *a: object) -> None: return None
+
+        def opener_for(body: dict):
+            opener = mock.Mock(); opener.open.return_value = FakeAnswer(body); return opener
+
+        me = desktop.instance_user()
+        cases = {
+            "plain web": ({"status": "ok", "version": "0.1.0", "desktop": False, "instance_user": None}, False),
+            "other user": ({"status": "ok", "version": "0.1.0", "desktop": True, "instance_user": "000000000000"}, False),
+            "mine": ({"status": "ok", "version": "0.1.0", "desktop": True, "instance_user": me}, True),
+        }
+        for name, (body, expected) in cases.items():
+            with self.subTest(name=name), mock.patch("urllib.request.build_opener", return_value=opener_for(body)):
+                self.assertEqual(desktop.this_tool_listens(1), expected)
+
+    def test_a_broken_link_as_key_file_is_refused_not_a_recursion(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            folder = Path(tmp)
+            (folder / desktop.KEY_FILE_NAME).symlink_to(folder / "gone")
+            with mock.patch("deepfake_lens.user_data.user_data_dir", return_value=folder), \
+                    mock.patch.dict(os.environ, {}, clear=False):
+                os.environ.pop(REPORT_KEY_ENV, None)
+                with self.assertRaises(ReportKeyError):
+                    desktop.prepare_signing_key()
+
+    def test_a_wildcard_listener_is_not_a_free_port(self) -> None:
+        with socket.socket() as other:
+            other.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            other.bind(("0.0.0.0", 0)); other.listen(1)
+            port = other.getsockname()[1]
+            self.assertFalse(desktop.port_is_free(port))

@@ -41,8 +41,12 @@ DEFAULT_IDLE_EXIT_MINUTES = 20
 DIALOG_PROMPT = "검사할 폴더를 고르십시오"
 
 DIALOG_BUSY = "폴더 선택 창이 이미 열려 있습니다 — 그 창에서 폴더를 고르거나 닫으십시오"
-DIALOG_UNAVAILABLE = "이 환경에서는 폴더 선택 창을 열 수 없습니다 — 경로를 직접 입력하십시오"
-DIALOG_FAILED = "폴더 선택 창을 열지 못했습니다 — 경로를 직접 입력하십시오"
+NO_DIALOG_WAY_OUT = (
+    "프로그램을 종료한 뒤 검사할 폴더를 'Deepfake Lens.cmd' 아이콘에 끌어 놓아 다시 시작하십시오"
+    "(터미널에서는 --folder <폴더>)"
+)
+DIALOG_UNAVAILABLE = f"이 환경에서는 폴더 선택 창을 열 수 없습니다 — {NO_DIALOG_WAY_OUT}"
+DIALOG_FAILED = f"폴더 선택 창을 열지 못했습니다 — {NO_DIALOG_WAY_OUT}"
 SHUTDOWN_WHILE_SCANNING = "검사가 진행 중입니다 — 검사를 중단한 뒤 종료하십시오"
 KEY_FILE_DAMAGED = (
     "서명 키 파일이 손상되었습니다: {path} — 이 파일을 지우면 다음 실행 때 새 키를 만듭니다"
@@ -51,16 +55,18 @@ KEY_FILE_DAMAGED = (
 NO_KEY_PLACE = "사용자 데이터 폴더를 정할 수 없어 서명 키를 만들지 못했습니다 — 보고서는 서명 없음으로 나갑니다"
 ROOTS_FULL = "등록할 수 있는 폴더 수(64)를 넘었습니다 — 프로그램을 종료하고 다시 시작하십시오"
 DIALOG_TIMEOUT_SECONDS = 600
-DIALOG_TIMED_OUT = "폴더 선택 창이 10분 동안 응답이 없어 닫았습니다 — 다시 누르거나 경로를 직접 입력하십시오"
-DIALOG_POLICY = "폴더 선택 창을 열지 못했습니다(이 PC의 보안 정책이 PowerShell을 제한합니다) — 경로를 직접 입력하십시오"
+DIALOG_TIMED_OUT = "폴더 선택 창이 10분 동안 응답이 없어 닫았습니다 — 다시 누르십시오"
+DIALOG_POLICY = f"폴더 선택 창을 열지 못했습니다(이 PC의 보안 정책이 PowerShell을 제한합니다) — {NO_DIALOG_WAY_OUT}"
 FOLDER_TOO_WIDE = (
     "너무 넓은 폴더입니다({what}) — 이 도구의 기록·임시 파일까지 검사 대상이 되어 증거 폴더 원칙이 깨집니다. "
     "증거 파일이 든 폴더를 고르십시오"
 )
+BUNDLE_INSIDE_NOTE = "이 폴더 안에 프로그램 폴더가 있습니다 — 프로그램 파일도 검사 대상이 됩니다(증거만 든 폴더를 고르는 것이 좋습니다)"
 ONEDRIVE_NOTE = (
     "OneDrive 폴더입니다 — 온라인 전용 파일은 내려받으면서 검사되고, OneDrive가 꺼져 있으면 건너뜁니다. "
     "증거는 로컬 폴더로 복사해 검사하는 것이 안전합니다"
 )
+ALREADY_RUNNING_NO_BROWSER_EXIT = 3
 WAKE_GAP_SECONDS = 60.0
 """A loop tick this much later than the last one means the machine slept (3.12's Windows monotonic clock counts sleep)."""
 
@@ -102,7 +108,15 @@ def prepare_signing_key() -> tuple[str, Path | None]:
     path = desktop_key_file()
     if path is None:
         return "none", None
-    if path.exists():
+    return _load_or_create_key(path, attempts=3)
+
+
+def _load_or_create_key(path: Path, *, attempts: int) -> tuple[str, Path | None]:
+    if attempts <= 0:
+        raise ReportKeyError(KEY_FILE_DAMAGED.format(path=path))
+    if os.path.lexists(path) and not path.is_file():
+        raise ReportKeyError(KEY_FILE_DAMAGED.format(path=path))  # a broken link, a directory, a device
+    if path.is_file():
         try:
             content = path.read_text(encoding="utf-8", errors="strict").strip()
         except (OSError, UnicodeDecodeError) as exc:
@@ -124,12 +138,13 @@ def prepare_signing_key() -> tuple[str, Path | None]:
             os.link(temp, path)
         except FileExistsError:
             os.unlink(temp)
-            return prepare_signing_key()  # another instance made it first
+            return _load_or_create_key(path, attempts=attempts - 1)  # another instance made it first
         except OSError:
-            # a file system without hard links: a plain exclusive create of the final name (the content is complete)
-            if path.exists():
+            # a file system without hard links (exFAT): rename into place only when nothing is there yet — a race
+            # between two first starts is then possible but both read back the same file afterwards (B9 residual)
+            if os.path.lexists(path):
                 os.unlink(temp)
-                return prepare_signing_key()
+                return _load_or_create_key(path, attempts=attempts - 1)
             os.replace(temp, path)
         else:
             os.unlink(temp)
@@ -244,7 +259,8 @@ def dialog_result(program: str, returncode: int, stdout: bytes, stderr: bytes) -
         logger.warning("folder dialog helper failed (exit %s): %s", returncode, err)
         raise DialogUnavailable(DIALOG_FAILED)
     if returncode == 0:
-        return Path(text) if text else None
+        raw = os.fsdecode(stdout).lstrip("\ufeff").rstrip("\r\n")  # only the line end: a folder name may end in a space
+        return Path(raw) if raw.strip() else None
     if returncode == 1 and (name != "osascript" or "-128" in err or "canceled" in err.lower() or "cancelled" in err.lower()):
         return None  # a cancel
     logger.warning("folder dialog helper failed (exit %s): %s", returncode, err)
@@ -271,11 +287,15 @@ def folder_too_wide(folder: Path) -> str | None:
         home = None
     if home is not None and chosen == home:
         return "사용자 폴더 전체"
+    from .cli_logging import default_log_dir
+    from .scan_jobs import store_folder
+
     inside: list[tuple[str, Path | None]] = [
         ("이 도구의 기록 폴더", user_data_dir()),
         ("이 도구의 캐시·로그 폴더", tool_cache_base()),
+        ("이 도구의 로그 폴더", default_log_dir()),
+        ("이 도구의 검사 작업 보관 폴더", store_folder()[0]),
         ("임시 폴더", Path(tempfile.gettempdir())),
-        ("프로그램 폴더", Path(sys.prefix)),
     ]
     for what, inner in inside:
         if inner is None:
@@ -290,8 +310,18 @@ def folder_too_wide(folder: Path) -> str | None:
 
 
 def folder_note(folder: Path) -> str | None:
-    """A caution about the chosen folder shown next to the path (OneDrive placeholders)."""
-    return ONEDRIVE_NOTE if "onedrive" in str(folder).lower() else None
+    """A caution about the chosen folder shown next to the path (OneDrive placeholders; the bundle inside it)."""
+    notes = []
+    if "onedrive" in str(folder).lower():
+        notes.append(ONEDRIVE_NOTE)
+    try:
+        prefix = Path(sys.prefix).resolve()
+        chosen = folder.resolve()
+        if prefix == chosen or chosen in prefix.parents:
+            notes.append(BUNDLE_INSIDE_NOTE)
+    except OSError:
+        pass
+    return " ".join(notes) or None
 
 
 # ── server-side state ─────────────────────────────────────────────────────────────────────────────────────────
@@ -351,17 +381,46 @@ def set_exclusive_bind(sock: socket.socket) -> None:
 
 
 def port_is_free(port: int, host: str = "127.0.0.1") -> bool:
+    """A bind probe and a connect probe: on macOS/Linux SO_REUSEADDR lets a loopback bind succeed over another
+    program's wildcard listener (0.0.0.0:port), so something that answers a connect is never "free"."""
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as probe:
         set_exclusive_bind(probe)
         try:
             probe.bind((host, port))
         except OSError:
             return False
-    return True
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as peer:
+        peer.settimeout(0.5)
+        try:
+            peer.connect((host, port))
+        except OSError:
+            return True
+    return False
+
+
+def instance_user() -> str:
+    """A non-secret tag of the account running this process (desktop /api/stats carries it; another user's
+    instance on a shared loopback — an RDP host — is not ours to reuse)."""
+    import getpass
+    import hashlib
+
+    try:
+        name = getpass.getuser()
+    except Exception:  # noqa: BLE001 - no account name: the tag is still stable per process environment
+        name = os.environ.get("USERNAME") or os.environ.get("USER") or ""
+    return hashlib.sha256(name.encode("utf-8", "replace")).hexdigest()[:12]
+
+
+PROBE_TIMEOUT_SECONDS = 5.0
 
 
 def this_tool_listens(port: int, host: str = "127.0.0.1") -> bool:
-    """True when a Deepfake Lens server already answers ``/api/stats`` on the port (the client header is sent)."""
+    """True when this user's Deepfake Lens **desktop** server already answers ``/api/stats`` on the port.
+
+    A plain ``web`` server (no desktop routes) or another user's instance (RDP host: the loopback port space is
+    shared) does not count — the launcher then moves to the next port instead of opening a GUI without the
+    desktop controls or someone else's evidence.
+    """
     import json
     import urllib.error
     import urllib.request
@@ -372,11 +431,14 @@ def this_tool_listens(port: int, host: str = "127.0.0.1") -> bool:
     # No proxy: a corporate HTTP_PROXY / registry proxy must not be asked about 127.0.0.1 (it would answer for it).
     opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
     try:
-        with opener.open(request, timeout=2) as answer:
+        with opener.open(request, timeout=PROBE_TIMEOUT_SECONDS) as answer:
             payload = json.loads(answer.read().decode("utf-8", "replace"))
     except (OSError, ValueError, urllib.error.URLError):
         return False
-    return isinstance(payload, dict) and payload.get("status") == "ok" and "version" in payload
+    return (
+        isinstance(payload, dict) and payload.get("status") == "ok" and "version" in payload
+        and payload.get("desktop") is True and payload.get("instance_user") == instance_user()
+    )
 
 
 def choose_port(start: int = DEFAULT_PORT, tries: int = PORT_TRIES, host: str = "127.0.0.1") -> tuple[int, bool]:
@@ -427,6 +489,8 @@ def prepare_console() -> None:
         handle = kernel32.GetStdHandle(-10)  # STD_INPUT_HANDLE
         mode = ctypes.c_uint()
         if kernel32.GetConsoleMode(handle, ctypes.byref(mode)):
+            global _CONSOLE_MODE_BEFORE
+            _CONSOLE_MODE_BEFORE = mode.value
             kernel32.SetConsoleMode(handle, (mode.value & ~0x40) | 0x80)  # -ENABLE_QUICK_EDIT_MODE +ENABLE_EXTENDED_FLAGS
         handler_type = ctypes.WINFUNCTYPE(ctypes.c_int, ctypes.c_uint)  # type: ignore[attr-defined]
 
@@ -448,6 +512,20 @@ def prepare_console() -> None:
 
 
 _CONSOLE_HANDLER: object | None = None
+_CONSOLE_MODE_BEFORE: int | None = None
+
+
+def restore_console() -> None:
+    """Put QuickEdit back the way it was (a user who started us from their own cmd window keeps their setting)."""
+    if os.name != "nt" or _CONSOLE_MODE_BEFORE is None:
+        return
+    try:
+        import ctypes
+
+        kernel32 = ctypes.windll.kernel32  # type: ignore[attr-defined]
+        kernel32.SetConsoleMode(kernel32.GetStdHandle(-10), _CONSOLE_MODE_BEFORE)
+    except Exception:  # noqa: BLE001
+        pass
 
 
 def run_desktop(
@@ -475,8 +553,12 @@ def run_desktop(
         print(f"Deepfake Lens가 이미 실행 중입니다: {url}", flush=True)
         if not no_browser and not open_browser(url):
             print(f"브라우저를 열지 못했습니다 — 주소창에 붙여 넣으십시오: {url}", flush=True)
+            return ALREADY_RUNNING_NO_BROWSER_EXIT  # the launcher pauses on this code so the address stays readable
         return 0
     prepare_console()
+    from .pdf_backend import pymupdf_available
+
+    pymupdf_available()  # the first /api/stats must answer within the probe timeout of a second instance
     state = DesktopState(idle_exit_minutes=idle_exit_minutes, key_source=key_source, key_file=key_file)
     server = None
     for attempt in range(PORT_TRIES if not port else 1):
@@ -484,9 +566,20 @@ def run_desktop(
             server = build_server(host, chosen, default_folder=folder, models_dir=models_dir, desktop=state)
             break
         except OSError as exc:  # the port was taken between the probe and the bind
+            from .error_text import read_error_ko
+
             logger.info("port %s could not be bound (%s); trying the next", chosen, exc)
+            # A second double-click during a slow first start: the other instance may be ours and still importing
+            # (the first /api/stats answer can take longer than the probe) — ask it again for a while.
+            for _ in range(10):
+                if this_tool_listens(chosen, host):
+                    print(f"Deepfake Lens가 이미 실행 중입니다: {url}", flush=True)
+                    if not no_browser and not open_browser(url):
+                        print(f"브라우저를 열지 못했습니다 — 주소창에 붙여 넣으십시오: {url}", flush=True)
+                    return 0
+                time.sleep(1.0)
             if port or attempt == PORT_TRIES - 1:
-                print(f"오류: 포트 {chosen}을(를) 열 수 없습니다 ({exc}) — 다른 프로그램을 닫거나 --port를 지정하십시오", file=sys.stderr)
+                print(f"오류: 포트 {chosen}을(를) 열 수 없습니다({read_error_ko(exc)}) — 다른 프로그램을 닫거나 --port를 지정하십시오", file=sys.stderr)
                 return 2
             chosen += 1
             url = f"http://{host}:{chosen}/gui"
@@ -498,7 +591,7 @@ def run_desktop(
     lines = [
         "Deepfake Lens 데스크톱 모드",
         f"  화면 주소: {url}",
-        "  이 창을 닫거나 Ctrl-C를 누르면 프로그램이 꺼집니다. 화면의 '종료' 단추로도 끌 수 있습니다.",
+        "  이 창을 닫거나 Ctrl-C를 누르면 프로그램이 꺼집니다. 화면의 '프로그램 종료' 단추로도 끌 수 있습니다.",
     ]
     if folder is not None:
         lines.append(f"  검사할 폴더: {folder}")
@@ -547,5 +640,6 @@ def run_desktop(
             server.server_close()
         except OSError:
             pass
+        restore_console()
     print("Deepfake Lens를 종료했습니다.", flush=True)
     return 0

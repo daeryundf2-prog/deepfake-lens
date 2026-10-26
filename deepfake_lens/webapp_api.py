@@ -563,6 +563,7 @@ def desktop_stats_fields() -> dict[str, object]:
         "roots": [scan_root_text(root) for root in _effective_roots(None)] if _READ_ROOTS else [],
         "signing": signing,
         "idle_exit_minutes": state.idle_exit_minutes if state is not None else None,
+        "instance_user": _desktop.instance_user() if state is not None else None,
     }
 
 
@@ -747,6 +748,12 @@ def _effective_roots(default_folder: Path | None = None) -> list[Path]:
         roots = list(_READ_ROOTS)
     if roots:
         return roots
+    from . import desktop as _desktop
+
+    if _desktop.STATE is not None:
+        # DESK: the desktop server reads nothing until a folder is registered (the launcher's working folder is the
+        # bundle; a terminal's is the home) — the roots shown on screen are the roots that exist.
+        return []
     return [expand_user(default_folder or ".").resolve()]
 
 
