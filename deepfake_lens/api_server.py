@@ -414,6 +414,69 @@ def create_app(
             headers={"X-Content-Type-Options": "nosniff"},
         )
 
+    @app.get("/gui-shell.css")
+    async def gui_shell_css():
+        from fastapi.responses import FileResponse
+        return FileResponse(
+            Path(__file__).resolve().parent / "gui-shell.css",
+            media_type="text/css; charset=utf-8",
+            headers={"X-Content-Type-Options": "nosniff"},
+        )
+
+    @app.get("/gui-settings.css")
+    async def gui_settings_css():
+        from fastapi.responses import FileResponse
+        return FileResponse(
+            Path(__file__).resolve().parent / "gui-settings.css",
+            media_type="text/css; charset=utf-8",
+            headers={"X-Content-Type-Options": "nosniff"},
+        )
+
+    @app.get("/gui-onboarding.css")
+    async def gui_onboarding_css():
+        from fastapi.responses import FileResponse
+        return FileResponse(
+            Path(__file__).resolve().parent / "gui-onboarding.css",
+            media_type="text/css; charset=utf-8",
+            headers={"X-Content-Type-Options": "nosniff"},
+        )
+
+    @app.get("/gui-shell.js")
+    async def gui_shell_js():
+        from fastapi.responses import FileResponse
+        return FileResponse(
+            Path(__file__).resolve().parent / "gui-shell.js",
+            media_type="text/javascript; charset=utf-8",
+            headers={"X-Content-Type-Options": "nosniff"},
+        )
+
+    @app.get("/gui-history.js")
+    async def gui_history_js():
+        from fastapi.responses import FileResponse
+        return FileResponse(
+            Path(__file__).resolve().parent / "gui-history.js",
+            media_type="text/javascript; charset=utf-8",
+            headers={"X-Content-Type-Options": "nosniff"},
+        )
+
+    @app.get("/gui-settings.js")
+    async def gui_settings_js():
+        from fastapi.responses import FileResponse
+        return FileResponse(
+            Path(__file__).resolve().parent / "gui-settings.js",
+            media_type="text/javascript; charset=utf-8",
+            headers={"X-Content-Type-Options": "nosniff"},
+        )
+
+    @app.get("/gui-onboarding.js")
+    async def gui_onboarding_js():
+        from fastapi.responses import FileResponse
+        return FileResponse(
+            Path(__file__).resolve().parent / "gui-onboarding.js",
+            media_type="text/javascript; charset=utf-8",
+            headers={"X-Content-Type-Options": "nosniff"},
+        )
+
     @app.get("/api/health")
     async def health():
         return {"status": "healthy"}

@@ -59,6 +59,13 @@ GUI_SHELL_PATHS = frozenset({"/", "/gui"})
 GUI_STATIC_ASSETS: dict[str, tuple[str, str]] = {
     "/gui.css": ("gui.css", "text/css; charset=utf-8"),
     "/gui.js": ("gui.js", "text/javascript; charset=utf-8"),
+    "/gui-shell.css": ("gui-shell.css", "text/css; charset=utf-8"),
+    "/gui-settings.css": ("gui-settings.css", "text/css; charset=utf-8"),
+    "/gui-onboarding.css": ("gui-onboarding.css", "text/css; charset=utf-8"),
+    "/gui-shell.js": ("gui-shell.js", "text/javascript; charset=utf-8"),
+    "/gui-history.js": ("gui-history.js", "text/javascript; charset=utf-8"),
+    "/gui-settings.js": ("gui-settings.js", "text/javascript; charset=utf-8"),
+    "/gui-onboarding.js": ("gui-onboarding.js", "text/javascript; charset=utf-8"),
 }
 
 LOCAL_HOSTS = {"127.0.0.1", "localhost", "::1"}

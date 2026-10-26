@@ -6,11 +6,28 @@
     <meta name="color-scheme" content="light dark">
     <title>Deepfake Lens</title>
     <link rel="stylesheet" href="/gui.css">
+    <link rel="stylesheet" href="/gui-shell.css">
+    <link rel="stylesheet" href="/gui-settings.css">
+    <link rel="stylesheet" href="/gui-onboarding.css">
 </head>
 <body>
     <a class="skip-link" href="#main">본문으로 건너뛰기</a>
 
+    <aside class="sidebar" id="sidebar" aria-label="검사 기록" hidden>
+        <div class="sb-head">
+            <span class="sb-brand">Deepfake Lens</span>
+            <button id="sb-close" class="btn btn-icon sb-close" type="button" aria-label="기록 닫기">닫기</button>
+        </div>
+        <button id="sb-new" class="btn btn-primary sb-new" type="button" aria-keyshortcuts="Control+N Meta+N">새 검사</button>
+        <h2 class="sb-h" id="sb-history-h">최근 검사</h2>
+        <p class="hint sb-empty" id="sb-history-empty">아직 검사 기록이 없습니다</p>
+        <ul class="sb-history" id="sb-history" aria-labelledby="sb-history-h"></ul>
+        <p class="hint sb-note" id="sb-history-note" hidden></p>
+        <div class="sb-foot"><button id="sb-settings" class="btn sb-settings" type="button" aria-keyshortcuts="Control+Comma Meta+Comma">설정</button></div>
+    </aside>
+
     <header class="topbar">
+        <button id="sb-toggle" class="btn btn-icon sb-toggle" type="button" aria-controls="sidebar" aria-expanded="false" aria-label="검사 기록 열기" hidden>기록</button>
         <div class="brand">
             <span class="brand-name">Deepfake Lens</span>
             <span class="mono muted small" id="ver-chip"></span>
@@ -38,6 +55,17 @@
         <div class="page">
             <div id="error-region" class="error-region" aria-live="assertive"></div>
             <p class="busy-band" id="busy-band" role="status" hidden><span id="busy-band-text"></span> <a href="#/scan" id="busy-band-link">진행 상황 보기</a></p>
+
+            <section id="welcome" class="welcome" aria-labelledby="welcome-h" hidden>
+                <h2 id="welcome-h">Deepfake Lens 시작하기</h2>
+                <ol class="welcome-steps">
+                    <li><b>폴더 고르기</b> <span class="hint">아래 검사할 폴더에 경로를 넣고 검사를 시작합니다.</span></li>
+                    <li><b>결과 확인</b> <span class="hint">검사가 끝나면 사건 대장에서 파일마다 결론과 근거를 봅니다.</span></li>
+                    <li><b>감정서</b> <span class="hint">감정서 만들기에서 사건 정보를 채우고 증거설명서·감정 보고서를 내보냅니다.</span></li>
+                </ol>
+                <button id="welcome-start" class="btn btn-primary btn-lg" type="button">검사할 폴더 고르기</button>
+                <button id="welcome-dismiss" class="btn" type="button">다음부터 보지 않기</button>
+            </section>
 
             <!-- ── 검사: 사건 정보 + 폴더 + 진행 ── -->
             <section id="view-scan" class="view" aria-labelledby="scan-h" hidden>
@@ -368,6 +396,40 @@
         </form>
     </dialog>
 
+    <dialog id="settings-dialog" class="settings" aria-labelledby="settings-h">
+        <h2 id="settings-h">설정</h2>
+        <fieldset class="set-group">
+            <legend>화면 테마</legend>
+            <label class="check"><input type="radio" name="theme" id="set-theme-system" value="system">시스템 설정 따름</label>
+            <label class="check"><input type="radio" name="theme" id="set-theme-light" value="light">밝게</label>
+            <label class="check"><input type="radio" name="theme" id="set-theme-dark" value="dark">어둡게</label>
+        </fieldset>
+        <fieldset class="set-group">
+            <legend>검사 기본값</legend>
+            <fieldset class="set-pixel">
+                <legend>픽셀 분석</legend>
+                <label class="check"><input type="radio" name="default-pixel" id="set-pixel-off" value="off">꺼짐</label>
+                <label class="check"><input type="radio" name="default-pixel" id="set-pixel-fast" value="fast">빠름</label>
+                <label class="check"><input type="radio" name="default-pixel" id="set-pixel-deep" value="deep">정밀</label>
+            </fieldset>
+            <label class="check"><input type="checkbox" id="set-recursive">하위 폴더 포함</label>
+        </fieldset>
+        <label class="check"><input type="checkbox" id="set-shortcuts">단축키 사용 (앱 창에서 Ctrl+N 새 검사, Ctrl+, 설정)</label>
+        <dl class="set-info">
+            <dt>버전</dt><dd id="set-version"></dd>
+            <dt>기록 보관 폴더</dt><dd id="set-store"></dd>
+            <dt>서명 키</dt><dd id="set-key"></dd>
+            <dt>기록 보관 기간</dt><dd id="set-retention"></dd>
+        </dl>
+        <button id="set-onboarding" class="btn" type="button">처음 안내 다시 보기</button>
+        <button id="settings-close" class="btn btn-primary" type="button">닫기</button>
+    </dialog>
+    <dialog id="history-confirm" class="confirm" aria-labelledby="history-confirm-text"><p id="history-confirm-text"></p><button id="history-confirm-no" class="btn" type="button">취소</button><button id="history-confirm-yes" class="btn btn-danger" type="button">지우기</button></dialog>
+
     <script src="/gui.js"></script>
+    <script src="/gui-shell.js"></script>
+    <script src="/gui-history.js"></script>
+    <script src="/gui-settings.js"></script>
+    <script src="/gui-onboarding.js"></script>
 </body>
 </html>
