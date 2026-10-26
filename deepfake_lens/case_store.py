@@ -49,7 +49,7 @@ def _clean_fields(fields: object) -> dict[str, str]:
         if len(text) > MAX_VALUE_CHARS:
             raise CaseInputInvalid(f"「{key}」 값은 {MAX_VALUE_CHARS}자를 넘을 수 없습니다")
         if key == "side" and text not in SIDES:
-            raise CaseInputInvalid(f"「side」 값은 plaintiff, defendant 또는 비워 두어야 합니다: 「{text[:50]}」")
+            raise CaseInputInvalid(f"「{key}」 값은 plaintiff, defendant 또는 비워 두어야 합니다: 「{text[:50]}」")
         if text:
             clean[key] = text
     return clean
