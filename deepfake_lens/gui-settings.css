@@ -1,1 +1,108 @@
-/* OMO-1 app shell: settings dialog and delete-confirm styles. */
+/* OMO-9 settings: theme override tokens, settings dialog, delete-confirm dialog. */
+
+:root[data-theme="dark"] {
+    color-scheme: dark;
+    --bg: #131518;
+    --bar: #181B1F;
+    --panel: #1C1F24;
+    --ink: #ECECE6;
+    --ink-2: #C9CBD0;
+    --ink-3: #DADCE0;
+    --muted: #A4A8AF;
+    --line: #3A3E45;
+    --line-2: #33373D;
+    --line-3: #2C3036;
+    --field: #15181C;
+    --field-line: #80848C;
+    --hover: #23272D;
+    --soft: #23272D;
+    --on-ink: #131518;
+    --manip: #F28B82;
+    --auth: #8AB4F8;
+    --neutral: #B4B8BF;
+    --warn: #F0B072;
+    --focus: #8AB4F8;
+    --track: #2E3238;
+    --code-bg: #0E1013;
+    --code-ink: #E8E8E2;
+}
+
+@media (prefers-color-scheme: dark) {
+    :root[data-theme="light"] {
+        color-scheme: light;
+        --bg: #F3F3EF;
+        --bar: #FBFBF8;
+        --panel: #FFFFFF;
+        --ink: #16181D;
+        --ink-2: #3A3D44;
+        --ink-3: #2A2D33;
+        --muted: #5C6067;
+        --line: #D6D6CE;
+        --line-2: #DCDCD4;
+        --line-3: #E3E3DC;
+        --field: #FFFFFF;
+        --field-line: #85857D;
+        --hover: #ECECE6;
+        --soft: #F3F3EF;
+        --on-ink: #FFFFFF;
+        --manip: #B3261E;
+        --auth: #1F5F8B;
+        --neutral: #4F535A;
+        --warn: #8A4B00;
+        --focus: #1F5F8B;
+        --track: #E1E1DA;
+        --code-bg: #16181D;
+        --code-ink: #E8E8E2;
+    }
+}
+
+dialog.settings,
+dialog.confirm {
+    border: 1px solid var(--line);
+    border-radius: 4px;
+    background: var(--panel);
+    color: var(--ink);
+    padding: 24px;
+    width: min(520px, calc(100vw - 32px));
+    max-height: calc(100vh - 32px);
+    overflow-y: auto;
+}
+dialog.confirm { width: min(420px, calc(100vw - 32px)); }
+dialog.settings::backdrop,
+dialog.confirm::backdrop { background: rgba(0, 0, 0, 0.45); }
+
+dialog.settings[open] { display: flex; flex-direction: column; gap: 12px; }
+dialog.settings h2 { margin: 0; font-size: 20px; }
+dialog.settings .set-group { border: 0; border-top: 1px solid var(--line-2); margin: 0; padding: 8px 0 0; }
+dialog.settings .set-group > legend { padding: 0; font-weight: 600; color: var(--ink-2); }
+dialog.settings .set-pixel { border: 0; margin: 0; padding: 0; }
+dialog.settings .check,
+dialog.confirm .btn,
+dialog.settings .btn { min-height: 44px; }
+dialog.settings .set-info {
+    display: grid;
+    grid-template-columns: max-content 1fr;
+    gap: 6px 16px;
+    margin: 0;
+    padding-top: 8px;
+    border-top: 1px solid var(--line-2);
+}
+dialog.settings .set-info dt { color: var(--muted); }
+dialog.settings .set-info dd { margin: 0; overflow-wrap: anywhere; }
+dialog.settings .btn { align-self: flex-start; }
+
+dialog.confirm[open] { display: flex; flex-wrap: wrap; gap: 12px; }
+dialog.confirm p { flex: 1 1 100%; margin: 0; }
+
+dialog.settings :focus-visible,
+dialog.confirm :focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+
+@media (forced-colors: active) {
+    dialog.settings,
+    dialog.confirm { border: 2px solid CanvasText; background: Canvas; color: CanvasText; }
+    dialog.settings .set-group,
+    dialog.settings .set-info { border-color: CanvasText; }
+    dialog.settings .set-info dt { color: GrayText; }
+    dialog.settings :focus-visible,
+    dialog.confirm :focus-visible { outline-color: Highlight; }
+}
