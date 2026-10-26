@@ -15,7 +15,7 @@ Windows에서는 아직 한 번도 돌리지 않았다 — 이 문서의 "실측
 | A4 | **절전에서 깨면 서버가 바로 꺼짐.** 3.12의 Windows `time.monotonic()`은 GetTickCount64라 절전 시간이 포함된다 → 깨어난 첫 1초 루프에서 `idle ≥ 20분` | 확인(PEP 418, gh-88494) | | 루프 틱 간격이 60초 넘게 뛰면 절전 복귀로 보고 `touch()`; GUI는 `visibilitychange`/`focus`/`pageshow`에 즉시 heartbeat |
 | A5 | **너무 넓은 폴더(사용자 폴더·`C:\`·AppData·꾸러미 폴더)를 고르면** 등록 루트가 도구 폴더(로그·히트맵·작업 보관·키·%TEMP%)를 품게 되어 (a) 검사 작업 보관이 꺼지고 (b) 이미 보관된 작업도 못 읽어 감정서가 404 (c) 검토 저장 409 (d) 증거 폴더 안에 쓰는 원칙 위반 (e) 2000개 상한이 브라우저 캐시로 찬다. `--folder`의 relocate 검사가 대화상자 경로에는 없다 | 확인(코드: `register_user_folder`에 검사 없음, `store_folder`는 모든 루트와 비교) | | `register_user_folder`가 홈·드라이브 루트·사용자 데이터 폴더·도구 캐시·임시 폴더·`sys.prefix`를 품는 폴더를 400으로 거부("너무 넓은 폴더입니다 — 증거 파일이 든 폴더를 고르십시오") |
 | A6 | **.cmd의 `if errorlevel 1`은 음수 종료 코드(네이티브 크래시 0xC0000005·DLL 없음 0xC0000135)를 못 잡아 창이 바로 닫힘**; Ctrl-C(130)는 반대로 "오류로 끝났습니다"로 보임 | 확인(cmd 문서) | | `if not "%errorlevel%"=="0"`로 바꾸고 130은 "사용자가 중단했습니다" |
-| A7 | **첫 실행이 느린데(백신이 .pyd 102개 검사 + .pyc 컴파일) 창이 비어 있어 두 번 누른다**(A2의 방아쇠) | 확인(꾸러미에 `__pycache__` 0개) | | .cmd에 "시작 중… 처음에는 1분" echo; 빌더가 `compileall --invalidation-mode unchecked-hash`로 미리 컴파일 |
+| A7 | **첫 실행이 느린데(백신이 .pyd 102개 검사 + .pyc 컴파일) 창이 비어 있어 두 번 누른다**(A2의 방아쇠) | 확인(꾸러미에 `__pycache__` 0개) | | .cmd에 "시작 중… 처음에는 1분" echo; 빌더가 `compileall`로 미리 컴파일(REV2-D6부터 `checked-hash` — 고친 `.py`가 옛 바이트코드에 가려지지 않음; REV2-D5부터 `-s`/`-p`로 빌드 경로 제거) |
 | A8 | **회사 프록시가 켜진 PC에서 "이미 실행 중" 감지가 프록시로 감** (urllib는 레지스트리 프록시를 읽고 `<local>` 예외는 127.0.0.1에 안 맞음) | 확인(stdlib) | | `ProxyHandler({})` — 0b4c468에서 이미 고침 |
 
 ## B. 오해·데이터 손실·원칙 위반 (Med) — 이번에 고친 것(✔)과 문서·백로그로 보낸 것(→)
@@ -24,18 +24,18 @@ Windows에서는 아직 한 번도 돌리지 않았다 — 이 문서의 "실측
 |---|---|---|---|
 | B1 | 콘솔 창을 닫으면(CTRL_CLOSE_EVENT) Python 시그널 처리기가 돌지 않아 `%TEMP%`의 한글 파일 스테이징 사본이 남고, 진행 중 작업은 보관되지 않는다. P3의 "작업 기록은 남음"은 진행 중 작업에는 틀림 | 확인(bpo msg335056) | ✔ `SetConsoleCtrlHandler`로 동기 정리(`shutdown_session`) · 「읽어보세요」 문구 수정 |
 | B2 | 콘솔 QuickEdit: 창을 클릭하면 선택 모드가 되어 stderr 쓰기가 막힌 스레드가 멈춤 | 확인(microsoft/terminal #34) | ✔ 시작 때 `SetConsoleMode`로 QuickEdit 끄기 + 안내 |
-| B3 | 탭 절전(Edge 2시간, 효율성 모드 5분, 정책 30초)·Chrome 메모리 절약으로 heartbeat가 끊겨 20분 뒤 서버가 꺼짐. 화면 결과는 JS 메모리뿐이라 재시작하면 사라짐 | 확인(Edge 지원 문서) | ✔ GUI: 보이는 순간 즉시 heartbeat · 「읽어보세요」에 Edge 절전 예외 안내 → 결과가 있으면 유휴 종료를 늘리는 것과 "최근 검사 열기"(`/api/jobs`)는 백로그 |
+| B3 | 탭 절전(Edge 2시간, 효율성 모드 5분, 정책 30초)·Chrome 메모리 절약으로 heartbeat가 끊겨 20분 뒤 서버가 꺼짐. 화면 결과는 JS 메모리뿐이라 재시작하면 사라짐 | 확인(Edge 지원 문서) | ✔ GUI: 보이는 순간 즉시 heartbeat · 「읽어보세요」에 Edge 절전 예외·Chrome 「항상 활성 상태로 유지할 사이트」 안내(REV2-D12) → 결과가 있으면 유휴 종료를 늘리는 것과 "최근 검사 열기"(`/api/jobs`)는 백로그 |
 | B4 | 재실행·새 탭이면 결과·사건 정보가 없음(sessionStorage는 탭마다; 포트가 바뀌면 localStorage도). 보관된 작업으로 감정서를 만들려면 같은 폴더를 다시 골라야 하는데 안내가 없음 | 확인(코드) | → 백로그(`/api/jobs` + "최근 검사 열기"), ✔ 403 문구에 "같은 폴더를 다시 고르십시오" |
 | B5 | 폴더 창이 늦게 뜨거나(PowerShell 콜드 스타트 수 초) 브라우저 뒤·다른 모니터에 숨음. 소유 창이 `ShowInTaskbar=false`라 "작업 표시줄을 확인" 안내가 틀림. 10분 넘게 응답 없으면 버튼이 영원히 busy | 개연 | ✔ 문구 "Alt+Tab으로 '폴더 찾아보기' 창을 찾으십시오", `ShowInTaskbar` 기본값, `run_child(timeout=600)` |
-| B6 | PowerShell 5.1의 폴더 창은 구형 트리 창(주소 붙여넣기 칸 없음, 제목 안 바뀜, 150% 배율에서 흐림) | 확인(MS 문서 UseDescriptionForTitle) | → 안내문에 "'폴더 찾아보기' 트리 창이 정상"; 장기: ctypes `IFileOpenDialog` |
-| B7 | 네트워크 드라이브(Z:)를 고르면 `resolve()` 때문에 `\\서버\공유` 경로로 표시·기록됨; 관리자 권한 실행 시 매핑 드라이브가 안 보임 | 확인(CPython #82174) | → 안내문 한 줄; 표시는 그대로(보고서의 경로 일관성이 우선) |
+| B6 | PowerShell 5.1의 폴더 창은 구형 트리 창(주소 붙여넣기 칸 없음, 제목 안 바뀜, 150% 배율에서 흐림) | 확인(MS 문서 UseDescriptionForTitle) | ✔ 「읽어보세요」에 "'폴더 찾아보기' 트리 창입니다. 정상입니다"(REV2-D12); 장기: ctypes `IFileOpenDialog` |
+| B7 | 네트워크 드라이브(Z:)를 고르면 `resolve()` 때문에 `\\서버\공유` 경로로 표시·기록됨; 관리자 권한 실행 시 매핑 드라이브가 안 보임 | 확인(CPython #82174) | ✔ 「읽어보세요」 한 줄(`\\서버\공유` 형태로 표시, REV2-D12); 표시는 그대로(보고서의 경로 일관성이 우선) |
 | B8 | OneDrive 폴더(바탕 화면·문서가 KFM으로 옮겨진 경우)를 고르면 온라인 전용 파일을 내려받으며 검사하거나 362 오류로 건너뜀 | 확인(MS Q&A, elevenforum) | ✔ pick-folder 응답에 OneDrive 경고 문구 · 「읽어보세요」 |
-| B9 | 서명 키가 `%APPDATA%`(Roaming)라 AD 로밍 프로필·폴더 리디렉션이면 다른 PC로 동기화된다 → "이 PC에서만 검증"이 틀림. `0o600`은 Windows에서 무의미하고 ACL은 상속(Administrators 포함). 두 인스턴스 동시 생성 경합이면 빈 파일을 "손상"으로 읽음 | 확인(코드) | ✔ 생성 직후 `windows_acl.make_owner_only`(있을 때), 쓰기 완료 뒤 `os.replace`로 원자적 생성, 문구 "이 키 파일을 가진 계정에서만 검증" → 위치 변경(LOCALAPPDATA)은 R22-3 결정과 얽혀 백로그 |
+| B9 | 서명 키가 `%APPDATA%`(Roaming)라 AD 로밍 프로필·폴더 리디렉션이면 다른 PC로 동기화된다 → "이 PC에서만 검증"이 틀림. `0o600`은 Windows에서 무의미하고 ACL은 상속(Administrators 포함). 두 인스턴스 동시 생성 경합이면 빈 파일을 "손상"으로 읽음 | 확인(코드) | ✔ 생성 직후 `windows_acl.make_owner_only`(있을 때), 끝까지 쓴 임시 파일을 `os.link`로 배타적으로 놓음(하드 링크가 없는 파일 시스템에서만 `os.replace` — 동시 첫 시작 경합 가능, `docs/deepfake-lens-service.md` 「서명 키 파일」), 문구 "이 키 파일을 가진 계정에서만 검증" → 위치 변경(LOCALAPPDATA)은 R22-3 결정과 얽혀 백로그 |
 | B10 | 꾸러미에 opencv·ffmpeg·librosa·rarfile이 없어 동영상·음성·RAR 검사가 제한되는데 화면은 "PDF 가능·서명 자동"만 보이고 안내는 `pip install`을 가리킴(꾸러미엔 pip가 없음) | 확인 | ✔ 꾸러미 실행이면(`._pth` 존재) pip 안내 대신 "꾸러미에 포함되지 않은 기능" 문구 → ffmpeg(LGPL)·opencv-headless 동봉은 백로그(크기·라이선스 검토) |
-| B11 | 폴더 대신 **파일**을 .cmd에 끌어 놓으면 argparse 영어 오류; 실행 중에 끌어 놓으면 조용히 무시; `&`가 든 경로 | 확인(코드) | ✔ 파일이면 `%~dp1`(그 폴더) 사용, 실행 중이면 "화면에서 고르십시오" 안내 |
+| B11 | 폴더 대신 **파일**을 .cmd에 끌어 놓으면 argparse 영어 오류; 실행 중에 끌어 놓으면 조용히 무시; `&`가 든 경로 | 확인(코드) | ✔ 파일이면 `%~dp1`(그 폴더) 사용, 실행 중이면 "화면에서 고르십시오" 안내 · `&`·`,`·`;`·`=`가 있고 공백이 없는 경로는 탐색기가 따옴표 없이 넘겨 cmd가 인수를 쪼개므로 끌어 놓기가 안 된다 — 「읽어보세요」에 "끌어 놓기가 안 되면(경로에 & , ; = 가 있고 공백이 없으면) 화면에서 고르십시오"(REV2-D8) |
 | B12 | 네트워크 공유(UNC)에서 실행하면 `cd /d`가 실패해 "python 폴더가 없습니다"로 잘못 안내 | 확인(cmd) | ✔ `pushd` |
 | B13 | "바탕 화면의 Deepfake Lens를 다시 실행" — 바탕 화면에 바로가기가 없다 | 확인 | ✔ "압축을 푼 폴더의 「Deepfake Lens.cmd」" |
-| B14 | Ctrl-C 종료 순서: serve 스레드 종료 전에 `server_close()` → Windows에서 WinError 10038 영어 traceback 가능 | 개연(실측 필요) | ✔ `shutdown()` → `join()` → `server_close()` 순서, KeyboardInterrupt는 0으로 |
+| B14 | Ctrl-C 종료 순서: serve 스레드 종료 전에 `server_close()` → Windows에서 WinError 10038 영어 traceback 가능 | 개연(실측 필요) | ✔ `shutdown()` → `join()` → `server_close()` 순서. KeyboardInterrupt는 서버를 멈춘 뒤 다시 올려 CLI의 중단 경로로 간다: `중단됨(사용자 요청)`(stderr)과 종료 코드 130(0이 아님 — REV2 F7 정정). 꾸러미 `.cmd`에서는 그 뒤 cmd의 「일괄 작업을 끝내시겠습니까 (Y/N)?」 |
 | B15 | 종료·유휴 종료가 진행 중인 **동기** 요청(PDF 생성, 업로드 분석)을 보지 않음 | 확인 | → 백로그(처리 중 요청 수 계수) |
 | B16 | 64개 루트 상한에서 "다시 시작하십시오" → 메모리 결과 상실 | 확인 | → 백로그(가장 오래된 미사용 루트부터 내보내기) |
 | B17 | 접근성: 「종료」 이름 모호, 취소 때 낭독 없음, `window.confirm`이 "추가 대화상자 차단"이면 종료가 소리 없이 무시 | 확인 | ✔ 「프로그램 종료」, 취소 낭독 → confirm을 `<dialog>`로 바꾸는 것은 백로그 |
@@ -65,7 +65,7 @@ Windows에서는 아직 한 번도 돌리지 않았다 — 이 문서의 "실측
 
 ## D. 문제없음으로 확인한 것
 
-Windows 방화벽은 127.0.0.1 bind에 묻지 않는다 · Chromium은 localhost/127.0.0.1을 프록시 없이 직접 연결 · LNA/PNA·HTTPS 우선·HSTS는 IP 출처에 걸리지 않는다 · 127.0.0.1의 blob 다운로드는 "안전하지 않은 다운로드" 대상이 아님(Edge 127+ 정책 DownloadRestrictions만 예외) · `._pth`와 `-m` 해석·`importlib.metadata` 동작 · zip 한글 이름에 UTF-8 플래그 있음 · 가장 긴 경로 ≈170자 · `.cmd`는 BOM 없는 UTF-8 CRLF이고 `chcp`가 한글 줄보다 앞 · c2pa_c.dll은 시스템 DLL만 import · cryptography는 OpenSSL 정적 링크 · numpy는 자체 msvcp140 동봉 · `-NonInteractive`는 WinForms 창을 막지 않음 · 실행 정책은 `-Command`에 적용 안 됨 · PowerShell 5.1 Console은 UTF8 preamble을 쓰지 않음(referencesource) — 그래도 BOM 제거를 넣음.
+Windows 방화벽은 127.0.0.1 bind에 묻지 않는다 · Chromium은 localhost/127.0.0.1을 프록시 없이 직접 연결 · LNA/PNA·HTTPS 우선·HSTS는 IP 출처에 걸리지 않는다 · 127.0.0.1의 blob 다운로드는 "안전하지 않은 다운로드" 대상이 아님(Edge 127+ 정책 DownloadRestrictions만 예외) · `._pth`와 `-m` 해석·`importlib.metadata` 동작 · zip 한글 이름에 UTF-8 플래그 있음 · 가장 긴 경로 ≈170자 · `.cmd`는 BOM 없는 UTF-8 CRLF이고 `chcp`가 한글 줄보다 앞 · c2pa_c.dll은 시스템 DLL과 `VCRUNTIME140.dll`만 import(REV2-D13 정정 — vcruntime은 `python\`에 있고, REV2-D7부터 msvcp140과 같은 14.51) · cryptography는 OpenSSL 정적 링크 · numpy는 자체 msvcp140 동봉 · `-NonInteractive`는 WinForms 창을 막지 않음 · 실행 정책은 `-Command`에 적용 안 됨 · PowerShell 5.1 Console은 UTF8 preamble을 쓰지 않음(referencesource) — 그래도 BOM 제거를 넣음.
 
 ## E. QA-SYS-4 꾸러미 경로에 추가할 실측 항목
 
