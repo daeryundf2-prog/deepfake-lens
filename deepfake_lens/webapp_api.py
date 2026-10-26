@@ -23,6 +23,7 @@ from typing import Any, Callable, Iterator
 from urllib.parse import parse_qs
 
 from .audio_worker import in_worker_scope
+from .bundle_info import PDF_ENGINE_FAILED, PDF_ENGINE_FAILED_HINT, bundle_text
 from .checks import failure_reason
 from .form_data import MAX_UPLOAD_PARTS as MAX_UPLOAD_PARTS  # round 31: the parts cap, beside the other upload caps
 from .form_data import FormDataError, file_parts as _form_file_parts, is_form_data  # R30-1..R30-3, R30-5, R31-2
@@ -1473,8 +1474,14 @@ def _feedback_payload(body: bytes, evidence: list[Path] | tuple[Path, ...] = ())
 # B8: /api/report?format=pdf without pymupdf answers this body with HTTP 501
 # (both the stdlib web server and the FastAPI server) instead of a PDF.
 # P8: the install command in backticks, as in evidence_statement (an unquoted
-# "pip install" read as English prose).
-PDF_REPORT_UNAVAILABLE_ERROR = "PDF 보고서를 만들려면 pymupdf 패키지가 필요합니다(설치: `pip install pymupdf`)."
+# "pip install" read as English prose). REV2-D4: the bundle ships pymupdf and
+# has no pip — there the text asks for the diagnostics launcher's output.
+PDF_REPORT_UNAVAILABLE_ERROR = bundle_text(
+    "PDF 보고서를 만들려면 pymupdf 패키지가 필요합니다(설치: `pip install pymupdf`).", PDF_ENGINE_FAILED,
+)
+EVIDENCE_PDF_FAILED_HINT = bundle_text(
+    "`pip install 'deepfake-lens[forensic]'` 후 재시도하거나 Markdown 출력을 사용하세요.", PDF_ENGINE_FAILED_HINT,
+)
 PDF_REPORT_UNAVAILABLE_BODY: dict[str, object] = {"error": PDF_REPORT_UNAVAILABLE_ERROR}
 PDF_REPORT_UNAVAILABLE_STATUS = 501
 
@@ -2159,7 +2166,7 @@ def _report_payload(
                 except StatementPdfMissing:
                     return dict(PDF_REPORT_UNAVAILABLE_BODY)  # R22-7: 501 as documented (E31), never a 500
                 except RuntimeError as exc:
-                    return {"error": f"{EVIDENCE_PDF_FAILED_PREFIX}{exc}", "hint": "`pip install 'deepfake-lens[forensic]'` 후 재시도하거나 Markdown 출력을 사용하세요."}
+                    return {"error": f"{EVIDENCE_PDF_FAILED_PREFIX}{exc}", "hint": EVIDENCE_PDF_FAILED_HINT}
             elif req_format == "pdf":
                 from .evidence_statement import PdfDependencyMissing
                 from .reports import write_forensic_pdf_report

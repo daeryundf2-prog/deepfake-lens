@@ -596,6 +596,46 @@ class BundleInfoTest(unittest.TestCase):
             "7z 해제에는 py7zr이 필요합니다 (이 기능은 꾸러미에 포함되어 있지 않습니다 — 담당자에게 요청하십시오(deepfake-lens[archive]))",
         )
 
+    def test_pdf_unavailable_texts(self) -> None:
+        """REV2-D4: the bundle ships pymupdf — a failed import there is a broken install, not a pip command."""
+        from deepfake_lens import webapp_api
+        from deepfake_lens.bundle_info import DOCTOR_LAUNCHER, PDF_ENGINE_FAILED, PDF_ENGINE_FAILED_HINT, bundle_text
+
+        self.assertEqual(DOCTOR_LAUNCHER, bundle.WIN_DOCTOR)
+        outside = "PDF 보고서를 만들려면 pymupdf 패키지가 필요합니다(설치: `pip install pymupdf`)."
+        self.assertEqual(webapp_api.PDF_REPORT_UNAVAILABLE_ERROR, outside)  # byte-identical outside the bundle
+        self.assertEqual(bundle_text(outside, PDF_ENGINE_FAILED, bundle=False), outside)
+        inside = bundle_text(outside, PDF_ENGINE_FAILED, bundle=True)
+        self.assertEqual(inside, "PDF 엔진을 불러오지 못했습니다 — 「문제 확인.cmd」 결과를 보내 주십시오")
+        hint = bundle_text(webapp_api.EVIDENCE_PDF_FAILED_HINT, PDF_ENGINE_FAILED_HINT, bundle=True)
+        self.assertEqual(hint, "Markdown 출력을 사용하거나 「문제 확인.cmd」 결과를 보내 주십시오.")
+        for text in (inside, hint):
+            self.assertNotIn("pip", text)
+        self.assertEqual(webapp_api.EVIDENCE_PDF_FAILED_HINT, "`pip install 'deepfake-lens[forensic]'` 후 재시도하거나 Markdown 출력을 사용하세요.")
+
+    def test_pymupdf_available_is_cached_and_logs_once(self) -> None:
+        """REV2-D4: the ImportError was swallowed (no trace of why PDF failed) and the import retried on every call."""
+        from unittest import mock
+
+        from deepfake_lens import pdf_backend
+
+        calls: list[int] = []
+
+        def missing() -> object:
+            calls.append(1)
+            raise ImportError("DLL load failed while importing _mupdf")
+
+        with mock.patch.object(pdf_backend, "_failure_logged", False), mock.patch.object(pdf_backend, "_availability", None), \
+                mock.patch.object(pdf_backend, "import_pymupdf", missing):
+            with self.assertLogs("deepfake_lens.pdf_backend", level="WARNING") as logs:
+                self.assertFalse(pdf_backend.pymupdf_available())
+                self.assertFalse(pdf_backend.pymupdf_available())
+            self.assertEqual(len(calls), 1)  # cached
+            self.assertEqual(len(logs.records), 1)
+            self.assertIsNotNone(logs.records[0].exc_info)  # the traceback says which DLL
+            with mock.patch.object(pdf_backend, "import_pymupdf", lambda: object()):
+                self.assertTrue(pdf_backend.pymupdf_available())  # a different import function: a fresh answer
+
     def test_bundle_info_writes_nothing(self) -> None:
         source = (REPO_ROOT / "deepfake_lens" / "bundle_info.py").read_text(encoding="utf-8")
         for needle in ("open(", "write_", "mkdir", "unlink", "replace("):

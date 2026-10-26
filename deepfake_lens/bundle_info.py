@@ -45,3 +45,19 @@ def bundle_advice(text: str, *, bundle: bool | None = None) -> str:
     if not in_bundle:
         return text
     return _PIP_ADVICE.sub(lambda match: install_hint(match.group(1), bundle=True), text)
+
+
+DOCTOR_LAUNCHER = "문제 확인.cmd"
+"""The bundle's diagnostics launcher (``scripts/build_desktop_bundle.py`` ``WIN_DOCTOR``; a test keeps them equal)."""
+
+PDF_ENGINE_FAILED = "PDF 엔진을 불러오지 못했습니다 — 「{doctor}」 결과를 보내 주십시오"
+"""REV2-D4: the bundle ships pymupdf, so a PDF engine that does not load there is a broken install (a missing or blocked
+DLL — :func:`deepfake_lens.pdf_backend.pymupdf_available` logs the traceback), not a package to install."""
+PDF_ENGINE_FAILED_HINT = "Markdown 출력을 사용하거나 「{doctor}」 결과를 보내 주십시오."
+"""REV2-D4: the bundle's hint beside a failed evidence-statement PDF (outside the bundle: a pip command)."""
+
+
+def bundle_text(text: str, inside: str, *, bundle: bool | None = None) -> str:
+    """``text`` outside the bundle (byte for byte); ``inside`` with ``{doctor}`` filled in the bundle (REV2-D4)."""
+    in_bundle = running_from_bundle() if bundle is None else bundle
+    return inside.format(doctor=DOCTOR_LAUNCHER) if in_bundle else text

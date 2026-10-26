@@ -14,6 +14,7 @@ from __future__ import annotations
 import contextlib
 import io
 import logging
+import sys
 from typing import Any
 
 logger = logging.getLogger(__name__)
@@ -39,9 +40,31 @@ def import_pymupdf() -> Any:
     return module
 
 
+_availability: tuple[tuple[object, object, object], bool] | None = None
+_failure_logged = False
+
+
 def pymupdf_available() -> bool:
+    """Whether PyMuPDF imports (REV2-D4: the answer is cached, a failure is logged once with its traceback).
+
+    In the bundle pymupdf is always shipped, so a failed import is a broken install (a missing or blocked DLL); the
+    traceback in the log says which. The cache is keyed on :func:`import_pymupdf` and the ``pymupdf``/``fitz``
+    entries of ``sys.modules`` — a test that patches either (to stand in for a missing package) gets a fresh answer,
+    and the answer is recomputed once the patch is undone.
+    """
+    global _availability, _failure_logged
+    key = (import_pymupdf, sys.modules.get("pymupdf"), sys.modules.get("fitz"))
+    cached = _availability
+    if cached is not None and all(a is b for a, b in zip(cached[0], key)):
+        return cached[1]
     try:
         import_pymupdf()
     except ImportError:
-        return False
-    return True
+        if not _failure_logged:
+            _failure_logged = True
+            logger.warning("PyMuPDF could not be imported; PDF output is unavailable", exc_info=True)
+        available = False
+    else:
+        available = True
+    _availability = ((import_pymupdf, sys.modules.get("pymupdf"), sys.modules.get("fitz")), available)
+    return available
