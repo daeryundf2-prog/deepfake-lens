@@ -1389,9 +1389,13 @@
         function rememberJob(job) { try { sessionStorage.setItem(JOB_STORE, JSON.stringify(job)); } catch (e) { /* non-fatal */ } }
         function forgetJob() { try { sessionStorage.removeItem(JOB_STORE); } catch (e) { /* non-fatal */ } }
 
-        async function runScanJob(jobId, folderPath, options) {
+        // OMO-5: quiet (DFL.loadJob) loads a finished job into the ledger without the progress panel, the success and
+        // partial-result toasts, the move to the results and the dfl:scan-* events; the error toasts still show.
+        async function runScanJob(jobId, folderPath, options, quiet) {
             currentJobId = jobId;
+            if (!quiet) dflEmit('dfl:scan-started', { jobId, folder: folderPath || '' });
             retireErrors();
+            if (!quiet)
             progressStart('검사 중', true);
             setBusy(true);
             let state = null;
@@ -1409,14 +1413,18 @@
                     }
                     if (!res.ok) throw new Error(await apiError(res));
                     state = await res.json();
+                    if (!quiet)
                     progressUpdate(state);
+                    if (!quiet) dflEmit('dfl:scan-progress', { jobId, done: prog.done, total: prog.total });
                     if (state.status !== 'running') break;
                     await sleep(1200);
                 }
                 const data = state.result;
                 if (state.status === 'error' || !data || data.error) {
                     toast('검사 실패: ' + ((data && (data.detail || data.error)) || '검사 결과 없음'), true, '', 'scan');
+                    if (!quiet)
                     progressFinish('error');
+                    if (!quiet) dflEmit('dfl:scan-finished', { jobId, status: 'error' });
                     return;
                 }
                 // P1: the server's resolved scan folder — /api/report resolves
@@ -1431,23 +1439,31 @@
                 if (lastScanJobNote) toast(lastScanJobNote, true, '주의', 'scan');
                 processResults(data);
                 // R18-3: "분석 완료" was shown for a cancelled scan too.
+                if (!quiet)
                 if (partialResultNote(data.summary)) toast(`검사 취소 — 부분 결과 ${(data.items || []).length}개 행, 분석하지 않은 파일 ${data.summary.files_cancelled || 0}개`, true, '주의', 'scan');
                 else toast(`분석 완료 — ${(data.items || []).length}개 파일`);
                 if (state.status === 'cancelled' || partialResultNote(data.summary)) {
+                    if (!quiet)
                     progressFinish('cancelled', data);
                     setBusy(false);
                     // G-6/J-5: on the 검사 screen focus goes to "부분 결과 보기"; elsewhere the
                     // examiner keeps the focus and the band says the scan was cancelled.
+                    if (!quiet)
                     if (currentView === 'scan') focusSafely($('view-results-btn'));
                     else showResultsWhenDone('cancelled');
                 } else {
+                    if (!quiet)
                     progressFinish('done', data);
                     setBusy(false);
+                    if (!quiet)
                     showResultsWhenDone();
                 }
+                if (!quiet) dflEmit('dfl:scan-finished', { jobId, status: state.status === 'cancelled' || partialResultNote(data.summary) ? 'cancelled' : 'done' });
             } catch (error) {
                 toast('검사 중 오류: ' + error.message + deniedFolderHint(error.message, defaultFolder, readRoots, desktopMode, true), true, '', 'scan');
+                if (!quiet)
                 progressFinish('error');
+                if (!quiet) dflEmit('dfl:scan-finished', { jobId, status: 'error' });
             } finally {
                 currentJobId = null;
                 forgetJob();
@@ -3418,6 +3434,8 @@
                 }
                 if (typeof d.pdf_available === 'boolean') pdfAvailable = d.pdf_available;
                 if (d.signing && typeof d.signing === 'object') signingInfo = d.signing;
+                lastStats = d;
+                dflEmit('dfl:stats', { stats: d });
                 renderStatusChips();
                 renderRoots();
                 if (currentView === 'report') renderReport();
@@ -3678,6 +3696,77 @@
             $('scan-form').requestSubmit();
         });
 
+        /* ── OMO-5: the bridge for the gui-*.js scripts (window.DFL) and the dfl:* events ── */
+        // The last /api/stats answer (DFL.stats) and whether dfl:ready has been dispatched (DFL.isReady).
+        let lastStats = null;
+        let dflReady = false;
+        function dflEmit(name, detail) {
+            document.dispatchEvent(new CustomEvent(name, { detail: detail || {} }));
+        }
+        function dflSetSide(side) {
+            const value = side === 'plaintiff' || side === 'defendant' ? side : '';
+            document.querySelectorAll('input[name="submitter-side"]').forEach(el => { el.checked = el.value === value; });
+        }
+        window.DFL = Object.freeze({
+            isReady: () => dflReady,
+            caseConfirmed: () => !caseUnconfirmed(),
+            toast: (message, isError) => toast(message, isError),
+            // A job the history deleted is no longer the source of any export.
+            detachJob: () => { lastScanJob = ''; },
+            loadJob: async (jobId, finishedAt) => {
+                if (scanBusy || typeof jobId !== 'string' || !jobId) return false;
+                const shown = results;
+                await runScanJob(jobId, '', {}, true);
+                if (results === shown || lastScanJob !== jobId) return false;  // the error toast already said why
+                if (typeof finishedAt === 'number') {
+                    lastScanAt = new Date(finishedAt * 1000);
+                    updateCaseLine();
+                }
+                dflEmit('dfl:job-loaded', { jobId });
+                navigate('ledger');
+                return true;
+            },
+            newScan: () => {
+                const pick = desktopMode && !appShutDown && !$('pick-row').hidden;
+                navigate('scan', pick ? $('pick-folder-btn') : $('folder-path'));
+            },
+            navigate: view => { if (VIEWS.includes(view)) navigate(view); },
+            currentJob: () => lastScanJob,
+            hasResults: () => results.length > 0,
+            getCase: () => {
+                const out = {};
+                Object.entries(CASE_FIELDS).forEach(([id, key]) => { out[key] = $(id).value; });
+                out.side = submitterSide();
+                return out;
+            },
+            setCase: fields => {
+                const given = fields && typeof fields === 'object' ? fields : {};
+                Object.entries(CASE_FIELDS).forEach(([id, key]) => { $(id).value = typeof given[key] === 'string' ? given[key] : ''; });
+                dflSetSide(given.side);
+                caseFolder = caseScope();
+                saveCase();
+                updateCaseLine();
+                if (currentView === 'report') renderReport();
+            },
+            isDesktop: () => desktopMode,
+            pickFolder: () => { if (!$('pick-row').hidden && !$('pick-folder-btn').disabled) $('pick-folder-btn').click(); },
+            applyScanDefaults: defaults => {
+                if (scanBusy || !defaults || typeof defaults !== 'object') return;
+                const radio = document.querySelector(`input[name="pixel-mode"][value="${['off', 'fast', 'deep'].includes(defaults.pixel) ? defaults.pixel : ''}"]`);
+                if (radio) radio.checked = true;
+                if (typeof defaults.recursive === 'boolean') $('opt-recursive').checked = defaults.recursive;
+            },
+            stats: () => lastStats,
+            apiFetch: (path, options) => apiFetch(path, options),
+            isScanning: () => scanBusy,
+        });
+        function dflAnnounceReady() {
+            dflReady = true;
+            dflEmit('dfl:ready', {});
+        }
+        if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', dflAnnounceReady, { once: true });
+        else setTimeout(dflAnnounceReady, 0);
+
         /* ── initialization ───────────────────────── */
         updateCaseLine();
         showView(viewFromHash() || 'scan', null, true);
@@ -3691,6 +3780,8 @@
             }
             if (typeof d.pdf_available === 'boolean') pdfAvailable = d.pdf_available;
             applyDesktopStats(d);
+            lastStats = d;
+            dflEmit('dfl:stats', { stats: d });
             if (currentView === 'report') renderReport();
         }).catch(() => {});
         resumeJob();
