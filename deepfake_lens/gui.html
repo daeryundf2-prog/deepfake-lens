@@ -46,6 +46,13 @@
                     <li><span class="guide-n mono" aria-hidden="true">2</span><span><b>결과 확인</b> <span class="hint">검사가 끝나면 사건 대장에서 파일마다 결론과 근거를 봅니다.</span></span></li>
                     <li><span class="guide-n mono" aria-hidden="true">3</span><span><b>감정서</b> <span class="hint">감정서 만들기에서 사건 정보를 채우고 증거설명서·감정 보고서를 내보냅니다.</span></span></li>
                 </ol>
+                <!-- REV2-D1: the desktop mode's way in stands at the top of the screen (visible without scrolling at
+                     1366×768 and 1280×720), before the case fields in the tab order; applyDesktopStats moves the list
+                     of folders that can be scanned (#folder-roots) in here. -->
+                <div class="pick-row" id="pick-row" hidden>
+                    <button class="btn btn-primary btn-lg" id="pick-folder-btn" type="button" aria-describedby="pick-note">검사할 폴더 고르기</button>
+                    <p class="hint pick-note" id="pick-note" role="status"></p>
+                </div>
                 <div class="scan-grid">
                     <div class="scan-left">
                         <div>
@@ -83,10 +90,6 @@
 
                         <form id="scan-form" class="block" novalidate>
                             <h2 class="block-h"><span class="step mono">2 / 2</span>검사할 폴더</h2>
-                            <div class="pick-row" id="pick-row" hidden>
-                                <button class="btn btn-primary btn-lg" id="pick-folder-btn" type="button" aria-describedby="pick-note">검사할 폴더 고르기</button>
-                                <p class="hint pick-note" id="pick-note" role="status"></p>
-                            </div>
                             <label class="lbl" for="folder-path" id="folder-label">폴더 경로</label>
                             <div class="field-row">
                                 <input class="field mono" id="folder-path" type="text" autocomplete="off" spellcheck="false" aria-describedby="pick-note folder-hint folder-roots">

@@ -75,7 +75,8 @@ class Desk2TopBarAndShutdownTest(unittest.TestCase):
         self.assertIn("document.querySelectorAll('*').forEach(el => { if (FORM_CONTROLS.some(type => el instanceof type)) el.disabled = true; });", page)
         self.assertIn("const FORM_CONTROLS = [HTMLButtonElement, HTMLInputElement, HTMLSelectElement, HTMLTextAreaElement];", _source())
         self.assertIn("el.inert = true;", page)
-        self.assertIn("head.textContent = '종료되었습니다. 이 탭을 닫으십시오.';", page)
+        # REV2-D2: the same page says "이미 종료되었습니다" when the server could not be reached at all
+        self.assertIn("head.textContent = already ? ALREADY_SHUT_DOWN : '종료되었습니다. 이 탭을 닫으십시오.';", page)
         self.assertIn("next.textContent = `다시 쓰려면 ${LAUNCHER}를 다시 실행하십시오.`;", page)  # RISK B13
         # the product name is the top bar's (gui.js literals hold no two-word English name — test_korean_output)
         self.assertIn("const PRODUCT = document.querySelector('.brand-name').textContent.trim();", _source())
@@ -96,7 +97,9 @@ class Desk3FolderPickerTest(unittest.TestCase):
         self.assertIn('aria-describedby="pick-note"', button)
         self.assertIn('<p class="hint pick-note" id="pick-note" role="status"></p>', html)
         self.assertLess(html.index('id="pick-row"'), html.index('id="folder-path"'))
-        self.assertLess(html.index('<form id="scan-form"'), html.index('id="pick-row"'))
+        # REV2-D1 (was: inside the scan form, under the case fields — off-screen at 1366×768): the row is above
+        # the case fields; see Rev2D1PickRowOnTopTest
+        self.assertLess(html.index('id="pick-row"'), html.index('<form id="scan-form"'))
         describedby = re.search(r'aria-describedby="([^"]+)"', _element(html, "folder-path"))
         assert describedby is not None
         self.assertEqual(describedby.group(1).split(), ["pick-note", "folder-hint", "folder-roots"])
@@ -465,6 +468,107 @@ class Desk7EmptyStateTest(unittest.TestCase):
         self.assertIn("$('scan-guide').hidden = has;", _function("renderResults"))
         helper = _function("applyDesktopStats")
         self.assertLess(helper.index("if (!desktopMode) return;"), helper.index("$('guide-step1').textContent"))
+
+
+def _run_node_async(body: str) -> str:
+    """Run ``body`` in node; it ends with a promise ``done`` whose value is printed (JXA has no event loop)."""
+    import subprocess
+    import tempfile
+    from pathlib import Path
+
+    with tempfile.TemporaryDirectory() as tmp:
+        path = Path(tmp) / "rev2.js"
+        path.write_text(body + "\ndone.then(v => console.log(v), e => { console.error(e); process.exit(1); });", encoding="utf-8")
+        run = subprocess.run(["node", str(path)], capture_output=True, text=True, timeout=60)
+    if run.returncode != 0:
+        raise AssertionError(run.stderr)
+    return run.stdout.strip()
+
+
+def _has_node() -> bool:
+    import shutil
+
+    return shutil.which("node") is not None
+
+
+class Rev2D1PickRowOnTopTest(unittest.TestCase):
+    """REV2-D1 (High, second hands-on review): 「검사할 폴더 고르기」 stood under the whole case-information block (y≈827
+    at 1366×768 — off-screen). It now stands under the first-use steps, before the case fields (DOM and tab order);
+    the list of folders that can be scanned is moved next to it in the desktop mode (applyDesktopStats). The browser
+    check of "visible without scrolling" at 1366×768 and 1280×720 is in scripts/gui_smoke.py."""
+
+    def test_the_row_precedes_the_case_fields(self) -> None:
+        html = _html()
+        row = html.index('id="pick-row"')
+        self.assertLess(html.index('id="scan-guide"'), row)
+        self.assertLess(row, html.index('id="case-slot-scan"'))
+        self.assertLess(row, html.index('id="scan-h"'))
+        self.assertLess(html.index('id="pick-folder-btn"'), html.index('id="case-no"'))  # tab order: the button first
+        self.assertLess(row, html.index('<div class="scan-grid">'))
+        # the path box stays in the scan form, under the case fields
+        self.assertLess(html.index('id="case-slot-scan"'), html.index('id="folder-path"'))
+        self.assertIn("hidden", _element(html, "pick-row"))
+        self.assertNotIn("tabindex", _element(html, "pick-folder-btn"))
+
+    def test_the_roots_list_goes_with_it_in_the_desktop_mode(self) -> None:
+        helper = _function("applyDesktopStats")
+        self.assertLess(helper.index("if (!desktopMode) return;"), helper.index("$('pick-row').appendChild($('folder-roots'));"))
+        self.assertLess(helper.index("$('pick-row').hidden = false;"), helper.index("$('pick-row').appendChild($('folder-roots'));"))
+        self.assertIn(".pick-row { display: flex; flex-direction: column; align-items: flex-start; gap: 6px; margin: 0 0 24px; }", _css())
+
+
+class Rev2D2ConnectionLostAtOnceTest(unittest.TestCase):
+    """REV2-D2 (High): after the server died every button said 「deepfake-lens web 프로세스가 실행 중인지 확인하세요」
+    and 「프로그램 종료」 said 「종료하지 못했습니다」. In the desktop mode a request that cannot reach the server puts
+    the lost-connection box up at once and says CONNECTION_LOST; 프로그램 종료 then shows "이미 종료되었습니다"."""
+
+    def test_source(self) -> None:
+        fetch = _async_function("apiFetch")
+        self.assertIn("if (desktopMode && !(e && e.name === 'AbortError')) {", fetch)
+        self.assertIn("markConnectionLost();", fetch)
+        self.assertIn("const lost = new Error(CONNECTION_LOST);", fetch)
+        self.assertIn("lost.connectionLost = true;", fetch)
+        # the plain web server keeps its text
+        self.assertIn("throw new Error('서버에 연결할 수 없습니다 — deepfake-lens web 프로세스가 실행 중인지 확인하세요');", fetch)
+        mark = _function("markConnectionLost")
+        self.assertIn("heartbeatFailures = Math.max(heartbeatFailures, 2);", mark)
+        self.assertIn("showConnectionLost(true);", mark)
+        self.assertIn("if (appShutDown) return;", mark)
+        handler = _handler(_source(), "$('shutdown-btn').addEventListener('click', async e => {")
+        self.assertIn("if (e && e.connectionLost) { showShutdownPage(true); return; }", handler)
+        self.assertIn("const ALREADY_SHUT_DOWN = '이미 종료되었습니다 — 이 탭을 닫으십시오.';", _source())
+
+    @unittest.skipUnless(_has_node(), "node is needed for the async run")
+    def test_a_failed_request_in_each_mode(self) -> None:
+        body = (
+            "var CONNECTION_LOST = '서버와 연결이 끊겼습니다 — 다시 실행하십시오';\n"
+            "var marked = 0, beats = 0, heartbeatFailures = 0, desktopMode = true;\n"
+            "function markConnectionLost() { marked += 1; heartbeatFailures = 2; }\n"
+            "function connectionLost(n) { return n >= 2; }\n"
+            "function sendHeartbeat() { beats += 1; }\n"
+            "var sessionStorage = { getItem: () => '' };\n"
+            "var answer = 'down';\n"
+            "async function fetch() { if (answer === 'down') throw new TypeError('Failed to fetch');"
+            " if (answer === 'abort') { const e = new Error('aborted'); e.name = 'AbortError'; throw e; } return { status: 200, ok: true }; }\n"
+            + _async_function("apiFetch") +
+            "async function tryIt() { try { await apiFetch('/api/pick-folder'); return 'ok'; } catch (e) { return [e.message, e.connectionLost === true]; } }\n"
+            "var done = (async () => {\n"
+            "  const seen = [];\n"
+            "  seen.push(await tryIt(), marked);\n"
+            "  answer = 'abort'; seen.push(await tryIt(), marked);\n"
+            "  answer = 'up'; seen.push(await tryIt(), beats);\n"  # an answer while the box is up: the heartbeat checks
+            "  desktopMode = false; answer = 'down'; seen.push(await tryIt(), marked);\n"
+            "  return JSON.stringify(seen);\n"
+            "})();"
+        )
+        seen = json.loads(_run_node_async(body))
+        self.assertEqual(seen[0], ["서버와 연결이 끊겼습니다 — 다시 실행하십시오", True])
+        self.assertEqual(seen[1], 1)
+        self.assertEqual(seen[2][1], False)  # an abort is not a lost connection
+        self.assertEqual(seen[3], 1)
+        self.assertEqual(seen[4], "ok")
+        self.assertEqual(seen[6], ["서버에 연결할 수 없습니다 — deepfake-lens web 프로세스가 실행 중인지 확인하세요", False])
+        self.assertEqual(seen[7], 1)
 
 
 class DeskMarkupRulesTest(unittest.TestCase):

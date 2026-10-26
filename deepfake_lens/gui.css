@@ -579,8 +579,9 @@ select.field { padding-right: 8px; }
     .desk-dot { forced-color-adjust: none; background: CanvasText; }
 }
 
-/* DESK-3: the folder dialog button above the folder box and the list of folders that can be scanned. */
-.pick-row { display: flex; flex-direction: column; align-items: flex-start; gap: 6px; }
+/* DESK-3: the folder dialog button and the list of folders that can be scanned.
+   REV2-D1: at the top of the scan screen, between the first-use steps and the case fields. */
+.pick-row { display: flex; flex-direction: column; align-items: flex-start; gap: 6px; margin: 0 0 24px; }
 .btn-lg { min-height: 52px; padding: 0 24px; font-size: 17px; }
 .pick-note { margin: 0; }
 .pick-note.pick-err { color: var(--manip); font-weight: 600; }

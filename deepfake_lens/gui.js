@@ -249,6 +249,15 @@
             } catch (e) {
                 // TypeError: Failed to fetch → 서버 다운/네트워크 단절을
                 // 사용자가 이해할 수 있는 한국어로 바꾼다.
+                // REV2-D2: in the desktop mode the server is this PC's program — a request that cannot reach it puts
+                // the lost-connection box up at once (not after two missed heartbeats) and says what to do in the
+                // same words. An abort (the heartbeat's own timeout) is not a lost connection.
+                if (desktopMode && !(e && e.name === 'AbortError')) {
+                    markConnectionLost();
+                    const lost = new Error(CONNECTION_LOST);
+                    lost.connectionLost = true;
+                    throw lost;
+                }
                 throw new Error('서버에 연결할 수 없습니다 — deepfake-lens web 프로세스가 실행 중인지 확인하세요');
             }
             if (response.status === 401) {
@@ -3269,6 +3278,8 @@
         // RISK B13: there is no desktop shortcut — the program is started from the folder the zip was extracted to.
         const LAUNCHER = `압축을 푼 폴더의 '${PRODUCT}.cmd'(macOS: '${PRODUCT}.command')`;
         const CONNECTION_LOST = `서버와 연결이 끊겼습니다 — ${LAUNCHER}를 다시 실행하십시오`;
+        // REV2-D2: 프로그램 종료 when the server is already gone.
+        const ALREADY_SHUT_DOWN = '이미 종료되었습니다 — 이 탭을 닫으십시오.';
         const HEARTBEAT_MS = 30000;
         const HEARTBEAT_TIMEOUT_MS = 10000;
         const SHUTDOWN_QUESTION = `${PRODUCT}를 종료할까요? 종료하면 이 화면은 더 쓸 수 없습니다 — 다시 쓰려면 ${LAUNCHER}를 다시 실행하십시오.`;
@@ -3288,6 +3299,9 @@
             if (!desktopMode) return;
             $('desk-bar').hidden = false;
             $('pick-row').hidden = false;
+            // REV2-D1: the list of folders that can be scanned goes with the button to the top of the screen (in
+            // the plain web server it stays under the path box).
+            $('pick-row').appendChild($('folder-roots'));
             $('folder-label').textContent = '또는 폴더 경로 직접 입력';
             $('guide-step1').textContent = '"검사할 폴더 고르기"를 누르고 폴더를 고르면 바로 검사가 시작됩니다.';
             // DESK-4: uploads are the exception here (unsigned, never an exhibit) — folded, unless files are waiting.
@@ -3325,6 +3339,12 @@
             text.append(head, body);
             box.append(text);
             $('error-region').prepend(box);
+        }
+        // REV2-D2: a request that could not reach the server at all — the box goes up now, as after two misses.
+        function markConnectionLost() {
+            if (appShutDown) return;
+            heartbeatFailures = Math.max(heartbeatFailures, 2);
+            showConnectionLost(true);
         }
         async function sendHeartbeat() {
             if (heartbeatInFlight || appShutDown) return;
@@ -3391,12 +3411,14 @@
                 if (res.ok) { showShutdownPage(); return; }
                 showError(await apiError(res), '종료하지 못했습니다');
             } catch (e) {
+                // REV2-D2: the server cannot be reached — it has already stopped; the page says so instead of a failure.
+                if (e && e.connectionLost) { showShutdownPage(true); return; }
                 showError(e.message, '종료하지 못했습니다');
             } finally {
                 if (!appShutDown) setBusyButton(btn, false);
             }
         });
-        function showShutdownPage() {
+        function showShutdownPage(already) {
             appShutDown = true;
             stopHeartbeat();
             clearTimeout(a4Timer);
@@ -3409,7 +3431,7 @@
             const head = document.createElement('h1');
             head.className = 'view-h';
             head.tabIndex = -1;
-            head.textContent = '종료되었습니다. 이 탭을 닫으십시오.';
+            head.textContent = already ? ALREADY_SHUT_DOWN : '종료되었습니다. 이 탭을 닫으십시오.';
             const next = document.createElement('p');
             next.textContent = `다시 쓰려면 ${LAUNCHER}를 다시 실행하십시오.`;
             $('shutdown-page').hidden = false;

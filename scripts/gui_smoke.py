@@ -101,6 +101,17 @@ def desktop_smoke(browser: object, port: int, folder: str) -> None:
         assert page.locator("#scan-guide").is_visible(), "the first-use steps are missing without results"
         assert page.evaluate("heartbeatTimer !== null"), "the heartbeat is not running"
 
+        # REV2-D1: the button stands above the case fields — seen without scrolling at 1366×768 and 1280×720, and
+        # before the case fields in the tab order
+        for width, height in ((1366, 768), (1280, 720)):
+            page.set_viewport_size({"width": width, "height": height})
+            page.evaluate("window.scrollTo(0, 0)")
+            box = page.evaluate("(() => { const r = document.getElementById('pick-folder-btn').getBoundingClientRect(); return [r.top, r.bottom, innerHeight]; })()")
+            assert 0 <= box[0] and box[1] <= box[2], f"the folder dialog button is off-screen at {width}x{height}: {box}"
+        assert page.evaluate("!!(document.getElementById('pick-folder-btn').compareDocumentPosition(document.getElementById('case-no')) & Node.DOCUMENT_POSITION_FOLLOWING)")
+        assert page.evaluate("document.getElementById('folder-roots').parentElement.id") == "pick-row", "the roots list did not move with the button"
+        page.set_viewport_size({"width": 1366, "height": 768})
+
         # RISK B17: the top-bar button says what ends
         assert page.locator("#shutdown-btn").inner_text() == "프로그램 종료" and page.get_attribute("#shutdown-btn", "aria-label") == "프로그램 종료"
 
