@@ -67,7 +67,8 @@ class Desk2TopBarAndShutdownTest(unittest.TestCase):
 
     def test_the_shutdown_page_is_an_alert_and_disables_everything(self) -> None:
         html = _html()
-        self.assertIn('<div class="shutdown-page" id="shutdown-page" hidden>', html)
+        # REV2-D6: the page is the main landmark once the program has stopped (axe landmark-one-main)
+        self.assertIn('<div class="shutdown-page" id="shutdown-page" role="main" hidden>', html)
         self.assertIn('<div id="shutdown-alert" role="alert"></div>', html)
         self.assertLess(html.index("</main>"), html.index('id="shutdown-page"'))
         page = _function("showShutdownPage")
@@ -346,17 +347,18 @@ class RiskB4B5B13B17Test(unittest.TestCase):
         self.assertLess(html.index('id="folder-path"'), html.index('id="folder-note"'))
         self.assertLess(html.index('id="folder-note"'), html.index('id="folder-hint"'))
         handler = _handler(_source(), "$('pick-folder-btn').addEventListener('click', async () => {")
-        self.assertLess(handler.index("setPickNote(PICK_WAIT, false);"), handler.index("setFolderNote('', false, null);"))
+        # REV2-D8 (was: the note cleared when the dialog opened — a cancelled pick lost it): the next answer replaces it
+        self.assertNotIn("setFolderNote('', false, null);", handler)
         self.assertIn("setFolderNote(outcome.text, true, $('folder-path').value);", handler)
         self.assertIn("if (outcome.status === 400) btn.focus();", handler)
         # REV2-D5 (was: setPickNote(outcome.note, false) — the same sentence twice): the status line points to the note
         self.assertIn("setPickNote(outcome.note ? PICK_NOTED : '', false);", handler)
         self.assertLess(handler.index("$('folder-path').value = outcome.folder;"), handler.index("setFolderNote(outcome.note, false, outcome.folder);"))
-        note = _function("setFolderNote")
-        self.assertIn("note.textContent = text;", note)  # never innerHTML
-        self.assertIn("note.hidden = !text;", note)
-        # it goes when the box names another folder
-        self.assertIn("if (!$('folder-note').hidden && $('folder-path').value.trim() !== folderNoteFor) setFolderNote('', false, null);", _source())
+        shown = _function("showFolderNote")
+        self.assertIn("if (note.textContent !== text) note.textContent = text;", shown)  # never innerHTML
+        self.assertIn("note.hidden = !shown;", shown)
+        # REV2-D8: hidden while the box names another folder, back when it names that folder again
+        self.assertIn("$('folder-path').addEventListener('input', showFolderNote);", _source())
 
     def test_no_desktop_shortcut_is_named(self) -> None:
         source = _source()
@@ -600,6 +602,7 @@ class Rev2D3RefreshAfterRestartTest(unittest.TestCase):
         self.assertIn("const step = heartbeatStep(heartbeatFailures, ok);", beat)
         self.assertIn("if (step.back) serverIsBack(step.said);", beat)
         back = _async_function("serverIsBack")
+        self.assertIn("if (said) toast(RECONNECTED);", back)
         self.assertIn("if ($('pick-note').textContent === CONNECTION_LOST) setPickNote('', false);", back)
         self.assertIn("apiJson('/api/stats')", back)
         self.assertLess(back.index("readRoots = d.roots.filter(root => typeof root === 'string');"), back.index("renderRoots();"))
@@ -641,7 +644,7 @@ class Rev2D4ScanStartFailureSeenTest(unittest.TestCase):
         self.assertIn("if (job.error) { scanStartFailed(", submit)
         self.assertNotIn("toast('검사를 시작하지 못했습니다: '", submit)
         # a refusal said before goes once a scan starts; a OneDrive caution (not an error) stays
-        self.assertIn("if ($('folder-note').classList.contains('pick-err')) setFolderNote('', false, null);", submit)
+        self.assertIn("if (folderNote.isError) setFolderNote('', false, '');", submit)
 
     @unittest.skipUnless(_js_engine(), "no JavaScript engine (node or osascript)")
     def test_box_in_view(self) -> None:
@@ -664,6 +667,58 @@ class Rev2D5OneLastingNoteTest(unittest.TestCase):
         self.assertEqual(handler.count("setPickNote(outcome.text, true);"), 1)
         self.assertIn("if (outcome.status === 0) { setPickNote(outcome.text, true); return; }", handler)
         self.assertNotIn("setPickNote(outcome.note, false);", handler)
+
+
+class Rev2D6ShutdownPageTest(unittest.TestCase):
+    """REV2-D6 (Low): the shutdown page names itself in the tab and is the main landmark."""
+
+    def test_title_and_role(self) -> None:
+        self.assertIn("const SHUT_DOWN_TITLE = `종료됨 — ${PRODUCT}`;", _source())
+        page = _function("showShutdownPage")
+        self.assertLess(page.index("$('shutdown-alert').replaceChildren(head, next);"), page.index("document.title = SHUT_DOWN_TITLE;"))
+        self.assertIn('role="main"', _element(_html(), "shutdown-page"))
+        self.assertEqual(_html().count("<main"), 1)
+
+
+class Rev2D7RefusalAndReconnectTest(unittest.TestCase):
+    """REV2-D7 (Low): the 409 「검사가 진행 중입니다」 box of 프로그램 종료 goes when the scan ends; the recovery is
+    announced in #toasts."""
+
+    def test_source(self) -> None:
+        handler = _handler(_source(), "$('shutdown-btn').addEventListener('click', async e => {")
+        self.assertIn("const refusal = showError(await apiError(res), '종료하지 못했습니다');", handler)
+        self.assertIn("if (res.status === 409) refusal.id = 'shutdown-refused';", handler)
+        self.assertIn("dropShutdownRefusal();", handler)  # a second try replaces it
+        busy = _function("setBusy")
+        self.assertIn("if (!busy) dropShutdownRefusal();", busy)
+        drop = _function("dropShutdownRefusal")
+        self.assertIn("const box = $('shutdown-refused');", drop)
+        self.assertIn("if (hadFocus) $('main').focus();", drop)
+        self.assertIn("const RECONNECTED = '서버와 다시 연결되었습니다';", _source())
+        self.assertIn('<div id="toasts" role="status" aria-live="polite"></div>', _html())
+
+
+class Rev2D8NoteFollowsTheBoxTest(unittest.TestCase):
+    """REV2-D8 (Low): the OneDrive note went on any input event and a cancelled pick lost it. It is hidden only while
+    the box names another folder and comes back when the box names that folder again."""
+
+    @unittest.skipUnless(_js_engine(), "no JavaScript engine (node or osascript)")
+    def test_shown_for_its_folder_only(self) -> None:
+        body = _function("folderNoteShown") + (
+            "var note = {text: 'OneDrive 폴더입니다', isError: false, folder: '/u/OneDrive/증거'};\n"
+            "var out = JSON.stringify([folderNoteShown(note, '/u/OneDrive/증거'), folderNoteShown(note, '/u/OneDrive/증'),"
+            " folderNoteShown(note, ' /u/OneDrive/증거 '), folderNoteShown({text: '', isError: false, folder: '/a'}, '/a'),"
+            " folderNoteShown({text: '폴더 경로를 입력하세요', isError: true, folder: ''}, '')]);"
+        )
+        self.assertEqual(json.loads(_run_js(body)), [True, False, True, False, True])
+
+    def test_a_cancel_keeps_it(self) -> None:
+        handler = _handler(_source(), "$('pick-folder-btn').addEventListener('click', async () => {")
+        cancel = handler[handler.index("if (outcome.kind === 'cancel')"):]
+        cancel = cancel[:cancel.index("\n")]
+        self.assertNotIn("setFolderNote", cancel)
+        self.assertNotIn("setFolderNote", handler[:handler.index("apiFetch('/api/pick-folder'")])
+        self.assertIn("folderNote = { text: text || '', isError: Boolean(isError), folder: typeof folder === 'string' ? folder.trim() : '' };", _function("setFolderNote"))
 
 
 class DeskMarkupRulesTest(unittest.TestCase):

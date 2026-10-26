@@ -1236,6 +1236,7 @@
             SCAN_INPUTS.forEach(id => { const el = $(id); if (el) el.disabled = busy; });
             document.querySelectorAll('input[name="pixel-mode"]').forEach(el => { el.disabled = busy; });
             updateBusyBand();
+            if (!busy) dropShutdownRefusal();  // REV2-D7
             if (currentView === 'report') renderReport();
         }
         // GUI-REV G-5/G-6: while a scan runs, every other screen says so — the
@@ -1550,7 +1551,7 @@
                 const job = await apiJson('/api/scan?' + params.toString());
                 if (job.error) { scanStartFailed('오류: ' + job.error, '검사를 시작하지 못했습니다: ' + job.error, folderPath); return; }
                 // REV2-D4: a refusal said for this folder before no longer holds; a OneDrive caution stays.
-                if ($('folder-note').classList.contains('pick-err')) setFolderNote('', false, null);
+                if (folderNote.isError) setFolderNote('', false, '');
                 rememberJob({ job: job.job_id, folder: folderPath, options: scanOptions });
                 await runScanJob(job.job_id, folderPath, scanOptions);
             } catch (error) {
@@ -3319,11 +3320,14 @@
         // RISK B13: there is no desktop shortcut — the program is started from the folder the zip was extracted to.
         const LAUNCHER = `압축을 푼 폴더의 '${PRODUCT}.cmd'(macOS: '${PRODUCT}.command')`;
         const CONNECTION_LOST = `서버와 연결이 끊겼습니다 — ${LAUNCHER}를 다시 실행하십시오`;
+        const RECONNECTED = '서버와 다시 연결되었습니다';  // REV2-D7
         // REV2-D5: the status line under the button stays short; the lasting text is the one under the path box.
         const PICK_REFUSED = '폴더를 쓸 수 없습니다 — 아래 안내를 보십시오';
         const PICK_NOTED = '폴더를 골랐습니다 — 아래 안내를 보십시오';
         // REV2-D2: 프로그램 종료 when the server is already gone.
         const ALREADY_SHUT_DOWN = '이미 종료되었습니다 — 이 탭을 닫으십시오.';
+        // REV2-D6: the tab's title once the program has stopped.
+        const SHUT_DOWN_TITLE = `종료됨 — ${PRODUCT}`;
         // REV2-D3: every folder this page has seen registered — a refusal for one of them after a restart says to
         // pick the same folder again.
         const seenRoots = new Set();
@@ -3402,8 +3406,9 @@
             return { failures, back: ok && previous > 0, said: ok && connectionLost(previous) };
         }
         // REV2-D3: a server started again on the same port knows only the folders of its start-up arguments — the
-        // list on the page, the chips and the signing line are read again from /api/stats.
+        // list on the page, the chips and the signing line are read again from /api/stats. REV2-D7: said once.
         async function serverIsBack(said) {
+            if (said) toast(RECONNECTED);
             if ($('pick-note').textContent === CONNECTION_LOST) setPickNote('', false);  // REV2-D2's line no longer holds
             try {
                 const d = await apiJson('/api/stats');
@@ -3480,10 +3485,13 @@
                 return;
             }
             setBusyButton(btn, true);
+            dropShutdownRefusal();
             try {
                 const res = await apiFetch('/api/shutdown', { method: 'POST' });
                 if (res.ok) { showShutdownPage(); return; }
-                showError(await apiError(res), '종료하지 못했습니다');
+                const refusal = showError(await apiError(res), '종료하지 못했습니다');
+                // REV2-D7: 409 (a scan is running) goes when the scan ends (setBusy(false)).
+                if (res.status === 409) refusal.id = 'shutdown-refused';
             } catch (e) {
                 // REV2-D2: the server cannot be reached — it has already stopped; the page says so instead of a failure.
                 if (e && e.connectionLost) { showShutdownPage(true); return; }
@@ -3492,6 +3500,14 @@
                 if (!appShutDown) setBusyButton(btn, false);
             }
         });
+        // REV2-D7: the 409 refusal of 프로그램 종료 no longer holds once the scan has ended.
+        function dropShutdownRefusal() {
+            const box = $('shutdown-refused');
+            if (!box) return;
+            const hadFocus = box.contains(document.activeElement);
+            box.remove();
+            if (hadFocus) $('main').focus();
+        }
         function showShutdownPage(already) {
             appShutDown = true;
             stopHeartbeat();
@@ -3510,6 +3526,7 @@
             next.textContent = `다시 쓰려면 ${LAUNCHER}를 다시 실행하십시오.`;
             $('shutdown-page').hidden = false;
             $('shutdown-alert').replaceChildren(head, next);
+            document.title = SHUT_DOWN_TITLE;  // REV2-D6
             head.focus();
         }
 
@@ -3596,26 +3613,33 @@
             if (note.textContent !== text) note.textContent = text;
             note.classList.toggle('pick-err', Boolean(isError));
         }
-        // RISK B5: the same text kept under the path box (a lasting hint, not only the passing status line) — the
-        // OneDrive caution for the folder chosen, or the reason a pick was refused. It goes when the box is changed to
-        // another folder or at the next pick.
-        let folderNoteFor = null;
+        // RISK B5: a lasting hint under the path box — the OneDrive caution for the folder chosen, or the reason a pick
+        // was refused. REV2-D5: the only place of that text (the status line under the button says only where to look).
+        // REV2-D8: the note belongs to the box's value when it was said (the folder chosen, or what the box held when a
+        // pick was refused or a scan did not start); it is hidden while the box says something else and comes back when
+        // the box says it again. It is replaced by the next pick's answer (a cancelled pick keeps it).
+        let folderNote = { text: '', isError: false, folder: '' };
         function setFolderNote(text, isError, folder) {
-            const note = $('folder-note');
-            note.textContent = text;
-            note.hidden = !text;
-            note.classList.toggle('pick-err', Boolean(isError));
-            folderNoteFor = text && folder ? folder : null;
+            folderNote = { text: text || '', isError: Boolean(isError), folder: typeof folder === 'string' ? folder.trim() : '' };
+            showFolderNote();
         }
-        $('folder-path').addEventListener('input', () => {
-            if (!$('folder-note').hidden && $('folder-path').value.trim() !== folderNoteFor) setFolderNote('', false, null);
-        });
+        function folderNoteShown(note, value) {
+            return Boolean(note.text) && String(value).trim() === note.folder;
+        }
+        function showFolderNote() {
+            const note = $('folder-note');
+            const shown = folderNoteShown(folderNote, $('folder-path').value);
+            const text = shown ? folderNote.text : '';
+            if (note.textContent !== text) note.textContent = text;
+            note.hidden = !shown;
+            note.classList.toggle('pick-err', folderNote.isError);
+        }
+        $('folder-path').addEventListener('input', showFolderNote);
         $('pick-folder-btn').addEventListener('click', async () => {
             const btn = $('pick-folder-btn');
             if (!desktopMode || appShutDown || scanBusy || isBusyButton(btn) || isBusyButton($('analyze-btn'))) return;
             setBusyButton(btn, true);
             setPickNote(PICK_WAIT, false);
-            setFolderNote('', false, null);
             let outcome;
             try {
                 const res = await apiFetch('/api/pick-folder', { method: 'POST' });

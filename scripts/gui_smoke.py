@@ -142,6 +142,8 @@ def desktop_smoke(browser: object, port: int, folder: str) -> None:
         # RISK B17: the cancel is said in the status line
         page.wait_for_function("() => document.getElementById('pick-note').textContent === '폴더 선택을 취소했습니다'", timeout=10_000)
         assert page.input_value("#folder-path") == before and page.evaluate("scanBusy") is False, "a cancelled dialog changed the page"
+        # REV2-D8: a cancelled pick keeps the note said before
+        assert page.locator("#folder-note").is_visible() and page.locator("#folder-note").inner_text() == unavailable
         page.unroute("**/api/pick-folder")
 
         # DESK-3: the (stubbed) dialog fills the box and starts the scan; the folder joins the list
@@ -217,6 +219,10 @@ def desktop_smoke(browser: object, port: int, folder: str) -> None:
         page.wait_for_selector("#error-region .err-item:not(#confirm-blocked):has-text('종료하지 못했습니다')", timeout=10_000)
         assert busy in page.locator("#error-region").inner_text()
         page.unroute("**/api/shutdown")
+        # REV2-D7: the refusal goes when the scan ends (setBusy(false) is where every scan ends)
+        assert page.locator("#shutdown-refused").count() == 1
+        page.evaluate("() => { setBusy(true); setBusy(false); }")
+        assert page.locator("#shutdown-refused").count() == 0, "the 409 refusal outlived the scan"
         page.once("dialog", lambda d: d.accept())
         page.click("#shutdown-btn")
         page.wait_for_selector("#shutdown-page:not([hidden])", timeout=10_000)
@@ -226,6 +232,8 @@ def desktop_smoke(browser: object, port: int, folder: str) -> None:
         assert "종료되었습니다. 이 탭을 닫으십시오." in page.locator("#shutdown-alert").inner_text()
         assert page.evaluate("Array.from(document.querySelectorAll('button, input, select, textarea')).filter(el => !el.disabled).length") == 0
         assert page.evaluate("heartbeatTimer === null"), "the heartbeat kept running after the shutdown"
+        assert page.evaluate("document.title") == "종료됨 — Deepfake Lens", page.evaluate("document.title")  # REV2-D6
+        assert page.get_attribute("#shutdown-page", "role") == "main"
         proc.wait(timeout=15)
         expected = ("status of 403", "status of 409", "status of 501", "status of 503")
         unexpected = [e for e in errors if not any(code in e for code in expected) and "favicon" not in e
@@ -258,9 +266,63 @@ def desktop_smoke(browser: object, port: int, folder: str) -> None:
         note = page.locator("#folder-note")
         assert note.is_visible() and note.inner_text().startswith("OneDrive 폴더입니다"), note.inner_text()
         assert page.locator("#pick-note").inner_text() == "폴더를 골랐습니다 — 아래 안내를 보십시오"  # REV2-D5
+        # REV2-D8: hidden while the box names another folder (typing), back when it names the chosen folder again
+        chosen = page.input_value("#folder-path")
+        page.focus("#folder-path")
+        page.keyboard.press("End")
+        page.keyboard.type("x")
+        assert note.is_hidden(), "the OneDrive note stayed for another folder"
+        page.keyboard.press("Backspace")
+        assert page.input_value("#folder-path") == chosen and note.is_visible(), "the OneDrive note did not come back"
         page.close()
-        print("gui_smoke: desktop mode — folder dialog (waiting text, 501, cancel said, chosen, too wide, OneDrive note) -> scan -> roots list, "
-              "refusal, lost-connection box, 프로그램 종료 checked")
+
+        # REV2-D2/D3/D7: the server dies — the next click puts the lost-connection box up at once; started again on
+        # the same port, the heartbeat says "다시 연결" and the list of folders is read again (the chosen folder is
+        # gone); a scan of that folder then says to pick it again; 프로그램 종료 on a dead server says "이미 종료".
+        down_port = port + 5
+        down = start_desktop(down_port, picked)
+        others.append(down)
+        page = browser.new_page(viewport={"width": 1366, "height": 768})  # type: ignore[attr-defined]
+        page.goto(f"http://127.0.0.1:{down_port}/gui", wait_until="networkidle")
+        page.wait_for_selector("#desk-bar:not([hidden])", timeout=10_000)
+        page.click("#pick-folder-btn")
+        page.wait_for_selector("#results-section:not([hidden])", timeout=180_000)
+        page.evaluate("location.hash = '#/scan'")
+        page.wait_for_function("() => document.getElementById('roots-list').children.length === 2", timeout=10_000)
+        chosen = page.input_value("#folder-path")  # the folder as the server named it (a resolved path)
+        down.kill()
+        down.wait(timeout=15)
+        assert page.evaluate("heartbeatFailures") == 0
+        page.click("#pick-folder-btn")
+        page.wait_for_selector("#error-region #conn-lost", timeout=5_000)
+        assert "서버와 연결이 끊겼습니다" in page.locator("#conn-lost").inner_text()
+        assert page.locator("#pick-note").inner_text().startswith("서버와 연결이 끊겼습니다"), page.locator("#pick-note").inner_text()
+        assert "deepfake-lens web" not in page.locator("body").inner_text()
+        again = start_desktop(down_port, picked)
+        others.append(again)
+        page.evaluate("async () => { await sendHeartbeat(); }")
+        page.wait_for_selector("#toasts .toast:has-text('서버와 다시 연결되었습니다')", timeout=10_000)
+        assert page.locator("#conn-lost").count() == 0
+        page.wait_for_function("() => document.getElementById('roots-list').children.length === 1", timeout=10_000)
+        assert page.locator("#pick-note").inner_text() == "", "the lost-connection line stayed after the server came back"
+        assert "골라 온 폴더" not in page.locator("#roots-list").inner_text()
+        page.fill("#folder-path", chosen)
+        page.keyboard.press("Enter")
+        try:
+            page.wait_for_selector("#error-region .err-item[data-scan]:has-text('다시 고르십시오')", timeout=10_000)
+        except Exception:
+            raise SystemExit(f"no pick-again hint: {page.locator('#error-region').inner_text()!r}") from None
+        assert "같은 폴더를 '검사할 폴더 고르기'로 다시 고르십시오" in page.locator("#error-region").inner_text()
+        again.kill()
+        again.wait(timeout=15)
+        page.once("dialog", lambda d: d.accept())
+        page.click("#shutdown-btn")
+        page.wait_for_selector("#shutdown-page:not([hidden])", timeout=10_000)
+        assert "이미 종료되었습니다 — 이 탭을 닫으십시오." in page.locator("#shutdown-alert").inner_text()
+        page.close()
+        print("gui_smoke: desktop mode — folder dialog on top at 1366x768/1280x720, (waiting text, 501, cancel said, chosen, too wide, "
+              "OneDrive note following the box) -> scan -> roots list, refusal in view, lost-connection box, 프로그램 종료 (409 gone with "
+              "the scan, title), server killed -> box at once -> restarted -> 다시 연결 + roots refreshed -> pick-again hint -> 이미 종료 checked")
     finally:
         for started in [proc, *others]:
             if started.poll() is None:
