@@ -623,6 +623,7 @@ def build_parser() -> tuple[argparse.ArgumentParser, dict[str, argparse.Argument
     desktop_parser.add_argument("--no-browser", action="store_true", help="브라우저를 자동으로 열지 않음")
     desktop_parser.add_argument("--idle-exit-minutes", type=int, default=20, metavar="<분>", help="화면 신호와 검사가 모두 없을 때 스스로 꺼지기까지의 시간(기본 20; 0이면 끄지 않음)")
     desktop_parser.add_argument("--models-dir", type=Path, help="vendor-weights --install로 준비한 모델 폴더")
+    desktop_parser.add_argument("--browser-tab", action="store_true", help="앱 창 대신 기본 브라우저의 새 탭으로 엽니다")
 
     doctor_parser = subparsers.add_parser("doctor", help="모델 가중치·가속기·의존성 진단")
     doctor_parser.add_argument("--format", choices=["table", "json"], default="table", help="표준 출력 형식")

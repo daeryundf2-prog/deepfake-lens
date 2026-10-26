@@ -1280,7 +1280,7 @@ def _run_command(args: argparse.Namespace, parser: argparse.ArgumentParser, cmd_
         return run_desktop(
             folder=args.folder, port=args.port, no_browser=args.no_browser, idle_exit_minutes=args.idle_exit_minutes,
             models_dir=getattr(args, "models_dir", None), key_source=args.desktop_key[0], key_file=args.desktop_key[1],
-            log_path=getattr(args, "log_path", None),
+            log_path=getattr(args, "log_path", None), browser_tab=args.browser_tab,
         )
     if args.command == "doctor":
         from .doctor import format_report, run_diagnostics
