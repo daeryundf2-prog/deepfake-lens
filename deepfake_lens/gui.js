@@ -260,6 +260,8 @@
                 }
                 throw new Error('서버에 연결할 수 없습니다 — deepfake-lens web 프로세스가 실행 중인지 확인하세요');
             }
+            // REV2-D3: any answer while the box is up means the server is back — the heartbeat says so and refreshes.
+            if (desktopMode && url !== '/api/heartbeat' && connectionLost(heartbeatFailures)) sendHeartbeat();
             if (response.status === 401) {
                 const entered = await requestToken();
                 if (entered) {
@@ -1497,7 +1499,12 @@
             // a second job whose poll overwrote the progress panel.
             if (scanBusy || isBusyButton($('analyze-btn'))) return;
             const folderPath = $('folder-path').value.trim();
-            if (!folderPath) { toast('폴더 경로를 입력하세요', true, '', 'scan'); $('folder-path').focus(); return; }
+            if (!folderPath) {
+                toast('폴더 경로를 입력하세요', true, '', 'scan');
+                setFolderNote('폴더 경로를 입력하세요', true, '');  // REV2-D4: said next to the box too
+                $('folder-path').focus();
+                return;
+            }
             const maxFilesNote = maxFilesProblem($('max-files').value);
             showMaxFilesProblem(maxFilesNote);
             if (maxFilesNote) {
@@ -1541,17 +1548,51 @@
             setBusyButton($('analyze-btn'), true);
             try {
                 const job = await apiJson('/api/scan?' + params.toString());
-                if (job.error) { toast('오류: ' + job.error, true, '', 'scan'); return; }
+                if (job.error) { scanStartFailed('오류: ' + job.error, '검사를 시작하지 못했습니다: ' + job.error, folderPath); return; }
+                // REV2-D4: a refusal said for this folder before no longer holds; a OneDrive caution stays.
+                if ($('folder-note').classList.contains('pick-err')) setFolderNote('', false, null);
                 rememberJob({ job: job.job_id, folder: folderPath, options: scanOptions });
                 await runScanJob(job.job_id, folderPath, scanOptions);
             } catch (error) {
                 // U-8: an out-of-root folder says which folders can be scanned.
+                // REV2-D3: in the desktop mode the list is read again first (the server may have been started again),
+                // and a folder this page saw registered before is "pick it again" (RISK B4's text), not "pick another".
+                let earlier = false;
+                if (desktopMode && /허용되지 않은 경로/.test(error.message)) {
+                    await refreshRoots();
+                    earlier = folderUnderRoots(folderPath, Array.from(seenRoots)) && !folderUnderRoots(folderPath, readRoots);
+                }
                 const hint = deniedFolderHint(error.message, defaultFolder, readRoots, desktopMode);
-                toast('검사를 시작하지 못했습니다: ' + error.message + hint, true, '', 'scan');
+                const said = earlier ? deniedFolderHint(error.message, defaultFolder, readRoots, desktopMode, true) : hint;
+                scanStartFailed('검사를 시작하지 못했습니다: ' + error.message + said, '검사를 시작하지 못했습니다: ' + error.message, folderPath);
             } finally {
                 setBusyButton($('analyze-btn'), false);
             }
         });
+
+        // REV2-D4: a scan that did not start is said in the error region (the box scrolled into view when it is
+        // off-screen — the region is at the top of the page) and in one line under the path box.
+        function scanStartFailed(text, summary, folder) {
+            const box = showError(text, '', true);
+            setFolderNote(summary, true, folder);
+            if (!boxInView(box.getBoundingClientRect(), window.innerHeight)) box.scrollIntoView({ block: 'nearest' });
+        }
+        function boxInView(rect, height) {
+            return rect.top >= 0 && rect.bottom <= height;
+        }
+        // REV2-D3: the folder is one of the folders, or inside one (a Windows path compared without case).
+        function folderUnderRoots(folder, roots) {
+            const norm = path => {
+                let text = String(path).replace(/\\/g, '/');
+                while (text.length > 1 && text.endsWith('/') && !/^[A-Za-z]:\/$/.test(text)) text = text.slice(0, -1);
+                return /^[A-Za-z]:\//.test(text) || text.startsWith('//') ? text.toLowerCase() : text;
+            };
+            const own = norm(folder);
+            return roots.some(root => {
+                const base = norm(root);
+                return own === base || own.startsWith(base.endsWith('/') ? base : base + '/');
+            });
+        }
 
         $('max-files').addEventListener('input', () => { if (!$('max-files-err').hidden) showMaxFilesProblem(maxFilesProblem($('max-files').value)); });
 
@@ -3278,8 +3319,15 @@
         // RISK B13: there is no desktop shortcut — the program is started from the folder the zip was extracted to.
         const LAUNCHER = `압축을 푼 폴더의 '${PRODUCT}.cmd'(macOS: '${PRODUCT}.command')`;
         const CONNECTION_LOST = `서버와 연결이 끊겼습니다 — ${LAUNCHER}를 다시 실행하십시오`;
+        // REV2-D5: the status line under the button stays short; the lasting text is the one under the path box.
+        const PICK_REFUSED = '폴더를 쓸 수 없습니다 — 아래 안내를 보십시오';
+        const PICK_NOTED = '폴더를 골랐습니다 — 아래 안내를 보십시오';
         // REV2-D2: 프로그램 종료 when the server is already gone.
         const ALREADY_SHUT_DOWN = '이미 종료되었습니다 — 이 탭을 닫으십시오.';
+        // REV2-D3: every folder this page has seen registered — a refusal for one of them after a restart says to
+        // pick the same folder again.
+        const seenRoots = new Set();
+        function rememberRoots(roots) { roots.forEach(root => seenRoots.add(root)); }
         const HEARTBEAT_MS = 30000;
         const HEARTBEAT_TIMEOUT_MS = 10000;
         const SHUTDOWN_QUESTION = `${PRODUCT}를 종료할까요? 종료하면 이 화면은 더 쓸 수 없습니다 — 다시 쓰려면 ${LAUNCHER}를 다시 실행하십시오.`;
@@ -3293,6 +3341,7 @@
         function applyDesktopStats(d) {
             desktopMode = d.desktop === true;
             readRoots = Array.isArray(d.roots) ? d.roots.filter(root => typeof root === 'string') : [];
+            rememberRoots(readRoots);
             signingInfo = d.signing && typeof d.signing === 'object' ? d.signing : null;
             renderStatusChips();
             renderRoots();
@@ -3346,6 +3395,29 @@
             heartbeatFailures = Math.max(heartbeatFailures, 2);
             showConnectionLost(true);
         }
+        // REV2-D3: what the heartbeat does with its answer — the failures counted, and whether the server has just come
+        // back after failures (`back`: refresh what a restarted server may have changed) and after the box (`said`).
+        function heartbeatStep(previous, ok) {
+            const failures = heartbeatFailuresAfter(previous, ok);
+            return { failures, back: ok && previous > 0, said: ok && connectionLost(previous) };
+        }
+        // REV2-D3: a server started again on the same port knows only the folders of its start-up arguments — the
+        // list on the page, the chips and the signing line are read again from /api/stats.
+        async function serverIsBack(said) {
+            if ($('pick-note').textContent === CONNECTION_LOST) setPickNote('', false);  // REV2-D2's line no longer holds
+            try {
+                const d = await apiJson('/api/stats');
+                if (Array.isArray(d.roots)) {
+                    readRoots = d.roots.filter(root => typeof root === 'string');
+                    rememberRoots(readRoots);
+                }
+                if (typeof d.pdf_available === 'boolean') pdfAvailable = d.pdf_available;
+                if (d.signing && typeof d.signing === 'object') signingInfo = d.signing;
+                renderStatusChips();
+                renderRoots();
+                if (currentView === 'report') renderReport();
+            } catch (e) { /* the list stays as it was; a refusal refreshes it again */ }
+        }
         async function sendHeartbeat() {
             if (heartbeatInFlight || appShutDown) return;
             heartbeatInFlight = true;
@@ -3362,8 +3434,10 @@
                 heartbeatInFlight = false;
             }
             if (appShutDown) return;
-            heartbeatFailures = heartbeatFailuresAfter(heartbeatFailures, ok);
+            const step = heartbeatStep(heartbeatFailures, ok);
+            heartbeatFailures = step.failures;
             showConnectionLost(connectionLost(heartbeatFailures));
+            if (step.back) serverIsBack(step.said);
         }
         function startHeartbeat() {
             if (heartbeatTimer || appShutDown) return;
@@ -3499,6 +3573,7 @@
                 const data = await apiJson('/api/roots');
                 if (Array.isArray(data.roots)) {
                     readRoots = data.roots.map(root => root && root.path).filter(path => typeof path === 'string');
+                    rememberRoots(readRoots);
                     renderRoots();
                 }
             } catch (e) { /* the list stays as it was; the next pick asks again */ }
@@ -3557,8 +3632,11 @@
             if (outcome.kind === 'cancel') { setPickNote(PICK_CANCELLED, false); return; }
             if (outcome.kind === 'error') {
                 // Said in the folder box's own hint (aria-describedby of the box and of this button), not only in passing.
-                setPickNote(outcome.text, true);
-                setFolderNote(outcome.text, true, null);
+                // REV2-D5: once — the status line points to it. REV2-D2: a server that cannot be reached is said by the
+                // lost-connection box; the status line says the same words and the note under the box is kept.
+                if (outcome.status === 0) { setPickNote(outcome.text, true); return; }
+                setPickNote(PICK_REFUSED, true);
+                setFolderNote(outcome.text, true, $('folder-path').value);
                 if (outcome.status === 501) $('folder-path').focus();
                 // RISK B5: 400 — too wide (home, drive root, …) or not a folder: pick another one.
                 if (outcome.status === 400) btn.focus();
@@ -3569,7 +3647,7 @@
                 setPickNote(`검사가 진행 중이라 고른 폴더로 시작하지 않았습니다 — 끝난 뒤 다시 고르십시오. 고른 폴더: ${displayName(outcome.folder)}`, true);
                 return;
             }
-            setPickNote(outcome.note, false);
+            setPickNote(outcome.note ? PICK_NOTED : '', false);
             pickedFolder = { folder: outcome.folder, b64: outcome.b64 };
             $('folder-path').value = outcome.folder;
             setFolderNote(outcome.note, false, outcome.folder);

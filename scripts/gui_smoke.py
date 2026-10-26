@@ -130,7 +130,10 @@ def desktop_smoke(browser: object, port: int, folder: str) -> None:
             page.wait_for_timeout(100)
         held[0].fulfill(status=501, content_type="application/json", body=_json.dumps({"error": unavailable}))  # type: ignore[attr-defined]
         page.wait_for_function("() => document.getElementById('pick-note').classList.contains('pick-err')", timeout=10_000)
-        assert page.locator("#pick-note").inner_text() == unavailable
+        # REV2-D5: the server's text once, under the path box; the status line points to it
+        assert page.locator("#pick-note").inner_text() == "폴더를 쓸 수 없습니다 — 아래 안내를 보십시오", page.locator("#pick-note").inner_text()
+        assert page.locator("#folder-note").inner_text() == unavailable
+        assert "folder-note" in (page.get_attribute("#folder-path", "aria-describedby") or "").split()
         assert page.evaluate("document.activeElement.id") == "folder-path"
         assert "pick-note" in (page.get_attribute("#folder-path", "aria-describedby") or "").split()
         page.unroute("**/api/pick-folder")
@@ -151,10 +154,16 @@ def desktop_smoke(browser: object, port: int, folder: str) -> None:
         assert "골라 온 폴더" in roots_text, roots_text
         assert page.locator("#scan-guide").is_hidden(), "the first-use steps outlived the results"
         page.fill("#folder-path", "/")
+        page.evaluate("window.scrollTo(0, document.body.scrollHeight)")  # REV2-D4: the region at the top is off-screen
         page.keyboard.press("Enter")
         page.wait_for_selector("#error-region .err-item[data-scan]", timeout=10_000)
         refusal = page.locator("#error-region .err-item[data-scan]").last.inner_text()
         assert "지금 검사할 수 있는 폴더" in refusal and "골라 온 폴더" in refusal, refusal
+        # REV2-D4: the new box is scrolled into view and a one-line summary stands under the path box
+        page.wait_for_timeout(300)
+        seen = page.evaluate("(() => { const r = Array.from(document.querySelectorAll('#error-region .err-item[data-scan]')).pop().getBoundingClientRect(); return r.top >= 0 && r.bottom <= innerHeight; })()")
+        assert seen, "the scan-start refusal is off-screen"
+        assert page.locator("#folder-note").inner_text().startswith("검사를 시작하지 못했습니다: "), page.locator("#folder-note").inner_text()
 
         # DESK-6: the checklist names the key file of this PC
         page.evaluate("location.hash = '#/report'")
@@ -232,9 +241,10 @@ def desktop_smoke(browser: object, port: int, folder: str) -> None:
         page.wait_for_selector("#desk-bar:not([hidden])", timeout=10_000)
         page.click("#pick-folder-btn")
         page.wait_for_function("() => document.getElementById('pick-note').classList.contains('pick-err')", timeout=10_000)
-        wide = page.locator("#pick-note").inner_text()
+        wide = page.locator("#folder-note").inner_text()
         assert wide.startswith("너무 넓은 폴더입니다(사용자 폴더 전체)"), wide
-        assert page.locator("#folder-note").is_visible() and page.locator("#folder-note").inner_text() == wide
+        assert page.locator("#folder-note").is_visible()
+        assert page.locator("#pick-note").inner_text() == "폴더를 쓸 수 없습니다 — 아래 안내를 보십시오"  # REV2-D5
         assert page.evaluate("document.activeElement.id") == "pick-folder-btn"
         assert page.evaluate("scanBusy") is False
         page.close()
@@ -247,7 +257,7 @@ def desktop_smoke(browser: object, port: int, folder: str) -> None:
         page.evaluate("location.hash = '#/scan'")
         note = page.locator("#folder-note")
         assert note.is_visible() and note.inner_text().startswith("OneDrive 폴더입니다"), note.inner_text()
-        assert page.locator("#pick-note").inner_text() == note.inner_text()
+        assert page.locator("#pick-note").inner_text() == "폴더를 골랐습니다 — 아래 안내를 보십시오"  # REV2-D5
         page.close()
         print("gui_smoke: desktop mode — folder dialog (waiting text, 501, cancel said, chosen, too wide, OneDrive note) -> scan -> roots list, "
               "refusal, lost-connection box, 프로그램 종료 checked")

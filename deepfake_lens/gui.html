@@ -50,7 +50,7 @@
                      1366×768 and 1280×720), before the case fields in the tab order; applyDesktopStats moves the list
                      of folders that can be scanned (#folder-roots) in here. -->
                 <div class="pick-row" id="pick-row" hidden>
-                    <button class="btn btn-primary btn-lg" id="pick-folder-btn" type="button" aria-describedby="pick-note">검사할 폴더 고르기</button>
+                    <button class="btn btn-primary btn-lg" id="pick-folder-btn" type="button" aria-describedby="pick-note folder-note">검사할 폴더 고르기</button>
                     <p class="hint pick-note" id="pick-note" role="status"></p>
                 </div>
                 <div class="scan-grid">
@@ -92,7 +92,7 @@
                             <h2 class="block-h"><span class="step mono">2 / 2</span>검사할 폴더</h2>
                             <label class="lbl" for="folder-path" id="folder-label">폴더 경로</label>
                             <div class="field-row">
-                                <input class="field mono" id="folder-path" type="text" autocomplete="off" spellcheck="false" aria-describedby="pick-note folder-hint folder-roots">
+                                <input class="field mono" id="folder-path" type="text" autocomplete="off" spellcheck="false" aria-describedby="pick-note folder-note folder-hint folder-roots">
                                 <button class="btn btn-primary" id="analyze-btn" type="submit">검사 시작</button>
                             </div>
                             <p class="hint pick-note" id="folder-note" hidden></p>

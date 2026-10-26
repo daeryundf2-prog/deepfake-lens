@@ -94,7 +94,8 @@ class Desk3FolderPickerTest(unittest.TestCase):
         self.assertIn("hidden", _element(html, "pick-row"))
         button = _element(html, "pick-folder-btn")
         self.assertIn('class="btn btn-primary btn-lg"', button)
-        self.assertIn('aria-describedby="pick-note"', button)
+        # REV2-D5: the button and the box are described by the lasting note under the box too
+        self.assertIn('aria-describedby="pick-note folder-note"', button)
         self.assertIn('<p class="hint pick-note" id="pick-note" role="status"></p>', html)
         self.assertLess(html.index('id="pick-row"'), html.index('id="folder-path"'))
         # REV2-D1 (was: inside the scan form, under the case fields — off-screen at 1366×768): the row is above
@@ -102,7 +103,7 @@ class Desk3FolderPickerTest(unittest.TestCase):
         self.assertLess(html.index('id="pick-row"'), html.index('<form id="scan-form"'))
         describedby = re.search(r'aria-describedby="([^"]+)"', _element(html, "folder-path"))
         assert describedby is not None
-        self.assertEqual(describedby.group(1).split(), ["pick-note", "folder-hint", "folder-roots"])
+        self.assertEqual(describedby.group(1).split(), ["pick-note", "folder-note", "folder-hint", "folder-roots"])
         self.assertIn("'pick-folder-btn'", _source()[_source().index("const SCAN_INPUTS = ["):][:200])
 
     def test_the_click_waits_fills_and_submits(self) -> None:
@@ -117,13 +118,17 @@ class Desk3FolderPickerTest(unittest.TestCase):
         self.assertIn("if (outcome.kind === 'cancel') { setPickNote(PICK_CANCELLED, false); return; }", handler)
         self.assertIn("const PICK_CANCELLED = '폴더 선택을 취소했습니다';", _source())
         # 501/409/400: the server's text in the box's hint, the box focused for 501 (type the path instead)
-        self.assertIn("setPickNote(outcome.text, true);", handler)
+        # REV2-D5: the status line only points to it (the server's text is said once, under the box)
+        self.assertIn("setPickNote(PICK_REFUSED, true);", handler)
+        self.assertIn("setFolderNote(outcome.text, true, $('folder-path').value);", handler)
         self.assertIn("if (outcome.status === 501) $('folder-path').focus();", handler)
         # the chosen folder is sent by its bytes
         submit = _handler(_source(), "$('scan-form').addEventListener('submit', async e => {")
         self.assertIn("} else if (pickedFolder && pickedFolder.b64 && folderPath === pickedFolder.folder) {", submit)
         self.assertIn("params.set('folder_b64', pickedFolder.b64);", submit)
         self.assertIn("const hint = deniedFolderHint(error.message, defaultFolder, readRoots, desktopMode);", submit)
+        # REV2-D3: a folder seen registered before (a restarted server) gets the "pick it again" text
+        self.assertIn("const said = earlier ? deniedFolderHint(error.message, defaultFolder, readRoots, desktopMode, true) : hint;", submit)
 
     @unittest.skipUnless(_js_engine(), "no JavaScript engine (node or osascript)")
     def test_pick_outcomes(self) -> None:
@@ -342,9 +347,10 @@ class RiskB4B5B13B17Test(unittest.TestCase):
         self.assertLess(html.index('id="folder-note"'), html.index('id="folder-hint"'))
         handler = _handler(_source(), "$('pick-folder-btn').addEventListener('click', async () => {")
         self.assertLess(handler.index("setPickNote(PICK_WAIT, false);"), handler.index("setFolderNote('', false, null);"))
-        self.assertIn("setFolderNote(outcome.text, true, null);", handler)
+        self.assertIn("setFolderNote(outcome.text, true, $('folder-path').value);", handler)
         self.assertIn("if (outcome.status === 400) btn.focus();", handler)
-        self.assertIn("setPickNote(outcome.note, false);", handler)
+        # REV2-D5 (was: setPickNote(outcome.note, false) — the same sentence twice): the status line points to the note
+        self.assertIn("setPickNote(outcome.note ? PICK_NOTED : '', false);", handler)
         self.assertLess(handler.index("$('folder-path').value = outcome.folder;"), handler.index("setFolderNote(outcome.note, false, outcome.folder);"))
         note = _function("setFolderNote")
         self.assertIn("note.textContent = text;", note)  # never innerHTML
@@ -566,9 +572,98 @@ class Rev2D2ConnectionLostAtOnceTest(unittest.TestCase):
         self.assertEqual(seen[1], 1)
         self.assertEqual(seen[2][1], False)  # an abort is not a lost connection
         self.assertEqual(seen[3], 1)
-        self.assertEqual(seen[4], "ok")
+        self.assertEqual(seen[4:6], ["ok", 1])
         self.assertEqual(seen[6], ["서버에 연결할 수 없습니다 — deepfake-lens web 프로세스가 실행 중인지 확인하세요", False])
         self.assertEqual(seen[7], 1)
+
+
+class Rev2D3RefreshAfterRestartTest(unittest.TestCase):
+    """REV2-D3 (Med): after a restart on the same port the list of folders was stale and the 403 named the old folder
+    without "같은 폴더를 다시 고르십시오". The heartbeat's recovery reads /api/stats again; a scan-start 403 in the
+    desktop mode reads the list again and says "pick it again" for a folder this page saw registered."""
+
+    @unittest.skipUnless(_js_engine(), "no JavaScript engine (node or osascript)")
+    def test_the_heartbeat_step(self) -> None:
+        body = _function("heartbeatFailuresAfter") + _function("connectionLost") + _function("heartbeatStep") + (
+            "var out = JSON.stringify([heartbeatStep(0, true), heartbeatStep(1, true), heartbeatStep(2, true), heartbeatStep(3, false), heartbeatStep(0, false)]);"
+        )
+        self.assertEqual(json.loads(_run_js(body)), [
+            {"failures": 0, "back": False, "said": False},
+            {"failures": 0, "back": True, "said": False},
+            {"failures": 0, "back": True, "said": True},
+            {"failures": 4, "back": False, "said": False},
+            {"failures": 1, "back": False, "said": False},
+        ])
+
+    def test_recovery_reads_the_stats_again(self) -> None:
+        beat = _async_function("sendHeartbeat")
+        self.assertIn("const step = heartbeatStep(heartbeatFailures, ok);", beat)
+        self.assertIn("if (step.back) serverIsBack(step.said);", beat)
+        back = _async_function("serverIsBack")
+        self.assertIn("if ($('pick-note').textContent === CONNECTION_LOST) setPickNote('', false);", back)
+        self.assertIn("apiJson('/api/stats')", back)
+        self.assertLess(back.index("readRoots = d.roots.filter(root => typeof root === 'string');"), back.index("renderRoots();"))
+        self.assertIn("renderStatusChips();", back)
+
+    @unittest.skipUnless(_js_engine(), "no JavaScript engine (node or osascript)")
+    def test_folder_under_roots(self) -> None:
+        body = _function("folderUnderRoots") + (
+            "var out = JSON.stringify(["
+            "folderUnderRoots('/srv/사건', ['/srv/사건']), folderUnderRoots('/srv/사건/a', ['/srv/사건/']),"
+            "folderUnderRoots('/srv/사건2', ['/srv/사건']), folderUnderRoots('C:\\\\Evidence\\\\x', ['c:\\\\evidence']),"
+            "folderUnderRoots('/', ['/']), folderUnderRoots('/a', ['/']), folderUnderRoots('/a', [])]);"
+        )
+        self.assertEqual(json.loads(_run_js(body)), [True, True, False, True, True, True, False])
+
+    def test_a_scan_start_refusal_reads_the_list_first(self) -> None:
+        submit = _handler(_source(), "$('scan-form').addEventListener('submit', async e => {")
+        catch = submit[submit.index("} catch (error) {"):]
+        self.assertIn("if (desktopMode && /허용되지 않은 경로/.test(error.message)) {", catch)
+        self.assertLess(catch.index("await refreshRoots();"), catch.index("const hint = deniedFolderHint("))
+        self.assertIn("earlier = folderUnderRoots(folderPath, Array.from(seenRoots)) && !folderUnderRoots(folderPath, readRoots);", catch)
+        # every list the page reads is remembered
+        self.assertIn("rememberRoots(readRoots);", _function("applyDesktopStats"))
+        self.assertIn("rememberRoots(readRoots);", _async_function("refreshRoots"))
+        self.assertIn("rememberRoots(readRoots);", _async_function("serverIsBack"))
+
+
+class Rev2D4ScanStartFailureSeenTest(unittest.TestCase):
+    """REV2-D4 (Med): a failed 「검사 시작」 only added a box in the error region at the top (off-screen). The box is
+    scrolled into view when it is outside the viewport and a one-line summary is written under the path box."""
+
+    def test_source(self) -> None:
+        helper = _function("scanStartFailed")
+        self.assertIn("const box = showError(text, '', true);", helper)
+        self.assertIn("setFolderNote(summary, true, folder);", helper)
+        self.assertIn("if (!boxInView(box.getBoundingClientRect(), window.innerHeight)) box.scrollIntoView({ block: 'nearest' });", helper)
+        submit = _handler(_source(), "$('scan-form').addEventListener('submit', async e => {")
+        self.assertIn("scanStartFailed('검사를 시작하지 못했습니다: ' + error.message + said, '검사를 시작하지 못했습니다: ' + error.message, folderPath);", submit)
+        self.assertIn("if (job.error) { scanStartFailed(", submit)
+        self.assertNotIn("toast('검사를 시작하지 못했습니다: '", submit)
+        # a refusal said before goes once a scan starts; a OneDrive caution (not an error) stays
+        self.assertIn("if ($('folder-note').classList.contains('pick-err')) setFolderNote('', false, null);", submit)
+
+    @unittest.skipUnless(_js_engine(), "no JavaScript engine (node or osascript)")
+    def test_box_in_view(self) -> None:
+        body = _function("boxInView") + (
+            "var out = JSON.stringify([boxInView({top: 10, bottom: 60}, 768), boxInView({top: -40, bottom: 10}, 768), boxInView({top: 700, bottom: 800}, 768)]);"
+        )
+        self.assertEqual(json.loads(_run_js(body)), [True, False, False])
+
+
+class Rev2D5OneLastingNoteTest(unittest.TestCase):
+    """REV2-D5 (Low/Med): the same sentence stood in #pick-note and #folder-note. The lasting text is in #folder-note
+    only; #pick-note is a short status."""
+
+    def test_the_status_line_is_short(self) -> None:
+        source = _source()
+        self.assertIn("const PICK_REFUSED = '폴더를 쓸 수 없습니다 — 아래 안내를 보십시오';", source)
+        self.assertIn("const PICK_NOTED = '폴더를 골랐습니다 — 아래 안내를 보십시오';", source)
+        handler = _handler(source, "$('pick-folder-btn').addEventListener('click', async () => {")
+        # the server's text reaches the status line only when there is no server (the lost-connection words)
+        self.assertEqual(handler.count("setPickNote(outcome.text, true);"), 1)
+        self.assertIn("if (outcome.status === 0) { setPickNote(outcome.text, true); return; }", handler)
+        self.assertNotIn("setPickNote(outcome.note, false);", handler)
 
 
 class DeskMarkupRulesTest(unittest.TestCase):
