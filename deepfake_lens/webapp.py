@@ -66,6 +66,7 @@ GUI_STATIC_ASSETS: dict[str, tuple[str, str]] = {
     "/gui-history.js": ("gui-history.js", "text/javascript; charset=utf-8"),
     "/gui-settings.js": ("gui-settings.js", "text/javascript; charset=utf-8"),
     "/gui-onboarding.js": ("gui-onboarding.js", "text/javascript; charset=utf-8"),
+    "/fonts/PretendardVariable.woff2": ("fonts/PretendardVariable.woff2", "font/woff2"),
 }
 
 LOCAL_HOSTS = {"127.0.0.1", "localhost", "::1"}

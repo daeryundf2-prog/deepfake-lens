@@ -477,6 +477,15 @@ def create_app(
             headers={"X-Content-Type-Options": "nosniff"},
         )
 
+    @app.get("/fonts/PretendardVariable.woff2")
+    async def gui_font_pretendard():
+        from fastapi.responses import FileResponse
+        return FileResponse(
+            Path(__file__).resolve().parent / "fonts" / "PretendardVariable.woff2",
+            media_type="font/woff2",
+            headers={"X-Content-Type-Options": "nosniff"},
+        )
+
     @app.get("/api/health")
     async def health():
         return {"status": "healthy"}
