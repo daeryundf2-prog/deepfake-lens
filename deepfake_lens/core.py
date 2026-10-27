@@ -1783,7 +1783,7 @@ def _analyze_image_file(
     # P0R-22: the GB 45438 AIGC label in the image's PNG text chunks / XMP (container_metadata check).
     aigc = image_aigc_layers(
         metadata, metadata_read.image_format if metadata_read is not None else None, read_error,
-        metadata_read.partial if metadata_read is not None else None,
+        metadata_read.partial if metadata_read is not None else None, path=file_path,
     )
     marks = _marking("image", c2pa_validation, c2pa_entry, _with_container(image_mark_layers(file_path, c2pa_validation), aigc))
     coverage.extend(marks.coverage)

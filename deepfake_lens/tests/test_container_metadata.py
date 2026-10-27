@@ -536,8 +536,9 @@ class ScanWiringTest(_Tmp):
 
     def test_registry_is_in_the_scan_cache_key(self) -> None:
         tokens = cm.registry_cache_tokens()
-        self.assertEqual(len(tokens), 1)
+        self.assertEqual(len(tokens), 2)
         self.assertTrue(tokens[0].startswith("container-registry:2026-10-17.1:"))
+        self.assertTrue(tokens[1].startswith("encoder-fingerprints:2026-10-27.1:"))
 
 
 @unittest.skipUnless(shutil.which("ffmpeg"), "ffmpeg 없음")

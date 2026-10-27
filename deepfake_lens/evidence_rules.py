@@ -63,6 +63,7 @@ from .result_types import (
 
 if TYPE_CHECKING:  # P0R-22: container_metadata imports checks/result_types only — no cycle at run time either
     from .container_metadata import ContainerFacts, Registry as ContainerRegistry
+    from .encoder_fingerprints import IjgComparison, Table as EncoderTable
 
 # P0R-22: the phrase every self-declared synthetic item carries in its detail
 # (EvidenceItem.self_declared) — an unsigned statement the file makes about
@@ -1107,4 +1108,82 @@ def container_metadata_evidence(facts: "ContainerFacts", registry: "ContainerReg
                 "근거로 쓰지 않고 사실로만 기록합니다.",
                 EvidenceKind.DETERMINISTIC, EvidenceDirection.NEUTRAL, EvidenceStrength.WEAK, LAYER,
             ))
+    return items
+
+
+# Encoder fingerprints (models/encoder-fingerprints.json): which encoder table / re-encode format the bytes equal — facts only.
+JPEG_IJG_TITLE = "JPEG 양자화표: IJG 표준 표와 일치"
+JPEG_NON_IJG_TITLE = "JPEG 양자화표: IJG 표준 표와 다름"
+JPEG_RESAVE_CUE_TITLE = "카메라 제조사 기록과 IJG 표준 양자화표가 함께 있음(재저장 확인 단서)"
+MESSENGER_VIDEO_TITLE = "메신저 재전송 흔적: 영상 형식이 등록된 전송본 형식과 일치"
+ENCODER_FACT_CAVEAT = (
+    "같은 프로그램·설정이면 누구나 같은 값을 만들 수 있어 경로나 기기를 확정하지 않으며, 조작·생성 또는 원본성 어느 쪽의 근거도 아닙니다."
+)
+
+
+def _quality_text(qualities: tuple[int, ...]) -> str:
+    if len(qualities) == 1:
+        return str(qualities[0])
+    if list(qualities) == list(range(qualities[0], qualities[-1] + 1)):
+        return f"{qualities[0]}–{qualities[-1]}"
+    return ", ".join(str(q) for q in qualities)
+
+
+def jpeg_table_evidence(comparison: "IjgComparison", metadata: Mapping[str, str], table_label: str) -> list[EvidenceItem]:
+    """The last encoder's quantization table as a neutral fact, and the EXIF-make re-save cue (never a conclusion)."""
+    from .container_metadata import LAYER
+
+    compared = "광도·색차 표 128개 값" if comparison.compared == 128 else "광도 표 64개 값(흑백 이미지)"
+    if not comparison.matched:
+        return [EvidenceItem(
+            JPEG_NON_IJG_TITLE,
+            f"JPEG {compared}이 IJG 표준 표(ITU-T T.81 부록 K)에 어떤 품질 값(1–100)의 배율을 적용해도 같아지지 않습니다"
+            f"(가장 가까운 품질 {comparison.nearest}: {comparison.differing}개 값 다름). 카메라 제조사 고유 표, 다른 인코더"
+            "(포토샵·애플 이미지 저장·mozjpeg 등), 메신저 재압축 표일 수 있으며 이 검사는 어느 쪽인지 식별하지 않습니다"
+            f"(등록된 플랫폼 표 대조는 플랫폼 재압축 양자화표 대조 검사). {ENCODER_FACT_CAVEAT} 기준: {table_label}.",
+            EvidenceKind.DETERMINISTIC, EvidenceDirection.NEUTRAL, EvidenceStrength.WEAK, LAYER,
+        )]
+    quality = _quality_text(comparison.qualities)
+    items = [EvidenceItem(
+        JPEG_IJG_TITLE,
+        f"JPEG {compared}이 IJG 표준 표(ITU-T T.81 부록 K)에 품질 값 {quality}의 배율을 적용한 표와 모두 같습니다. 이 파일을 마지막으로 "
+        "저장한 인코더가 IJG 표준 표를 쓰는 소프트웨어(libjpeg·libjpeg-turbo 계열 — 많은 편집기·변환기·브라우저·서버와 일부 카메라)라는 "
+        f"사실입니다. {ENCODER_FACT_CAVEAT} 기준: {table_label}.",
+        EvidenceKind.DETERMINISTIC, EvidenceDirection.NEUTRAL, EvidenceStrength.WEAK, LAYER,
+    )]
+    camera = f"{metadata.get('exif.Make', '').strip()} {metadata.get('exif.Model', '').strip()}".strip()
+    if camera:
+        items.append(EvidenceItem(
+            JPEG_RESAVE_CUE_TITLE,
+            f"EXIF 기종은 「{_shown(camera)}」인데 양자화표는 IJG 표준 표 품질 {quality}입니다. 편집·변환 프로그램은 다시 저장할 때 흔히 "
+            "IJG 표준 표를 쓰면서 EXIF를 그대로 복사하므로 재저장 여부를 확인할 단서입니다. 이 기종의 카메라가 원래 어떤 표를 쓰는지는 "
+            "등록 표에 없어 모순을 확정하지 않습니다 — 같은 기종으로 촬영한 기준 사진의 양자화표와 비교하거나 원본 파일 제출을 요청하십시오. "
+            "조작·생성 또는 원본성 어느 쪽의 근거도 아닙니다.",
+            EvidenceKind.DETERMINISTIC, EvidenceDirection.NEUTRAL, EvidenceStrength.WEAK, LAYER,
+        ))
+    return items
+
+
+def messenger_video_evidence(facts: "ContainerFacts", table: "EncoderTable") -> list[EvidenceItem]:
+    """A video whose codec, profile, coded size and encoder field equal a registered messenger re-encode (path fact)."""
+    from .container_metadata import KIND_TOOL, LAYER
+    from .encoder_fingerprints import messenger_video_matches
+
+    video = facts.video
+    if video is None:
+        return []
+    encoders = [(f"{f.source} {f.key}", f.value.strip()) for f in facts.fields if f.kind == KIND_TOOL]
+    matches = messenger_video_matches(video.codec, video.profile, video.width, video.height, [v for _, v in encoders], table)
+    items: list[EvidenceItem] = []
+    for entry in matches:
+        where, value = next((w, v) for w, v in encoders if v == entry.get("encoder"))
+        items.append(EvidenceItem(
+            MESSENGER_VIDEO_TITLE,
+            f"영상 트랙 {video.codec} {video.profile} 프로필(레벨 {video.level}), 부호화 크기 {video.width}x{video.height}, "
+            f"인코더 필드 {where}=「{_shown(value)}」이(가) 「{entry.get('platform')}」 형식과 모두 같습니다(출처는 인코더 지문 표의 해당 항목, "
+            f"신뢰 수준: {entry.get('confidence')}, 확인 {entry.get('checked')}). 메신저는 전송할 때 영상을 다시 인코딩하므로 원본의 해상도·화질과 "
+            "촬영 메타데이터(기기·시각·C2PA·워터마크)가 사라졌을 가능성이 큽니다 — 이 파일은 전송 사본일 수 있으니 촬영 기기의 원본 파일 또는 "
+            f"원본 화질 전송본 제출을 요청하십시오. {ENCODER_FACT_CAVEAT} 기준: {table.label}.",
+            EvidenceKind.DETERMINISTIC, EvidenceDirection.NEUTRAL, EvidenceStrength.WEAK, LAYER,
+        ))
     return items
