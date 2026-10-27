@@ -4,7 +4,7 @@
   "generated_by": "scripts/build_traceability_commits.py",
   "range": {
     "base": "84dcb09533463b5b9ae0cf79fa7c70232b0d7fa8",
-    "head": "8abad843832efa8334c1d4571d4475d78ef3ce9d",
+    "head": "0e15c774ca3133a0650c4c211643f74850502886",
     "note": "range.base..range.head(병합 커밋 제외). range.head는 이 표를 재생성한 커밋의 부모 — 그 커밋 자신의 해시는 표에 없다."
   },
   "notes": [
@@ -18527,6 +18527,48 @@
       "short": "8abad84",
       "round": "31",
       "subject": "refactor(evidence): OMO-20 `measure` checks the unchanged gate without a temp file — measurement_gate.check_profile reads the file and profile_problems checks an already-read profile (same rules), and --scores-out is written whole through output_files (test_every_tempfile_call_uses_the_session_folder, test_no_other_module_writes_a_file) (OMO-20; Gaps: 신규)",
+      "pre_rewrite_subject": null,
+      "ids": [],
+      "gaps_named_in_subject": [],
+      "gaps": [],
+      "new": true,
+      "new_reasons": [],
+      "gaps_line": "Gaps: 신규(스펙 외)",
+      "gaps_source": "subject"
+    },
+    {
+      "sha": "23482976a241fd51980d14f031594788fe716567",
+      "short": "2348297",
+      "round": "31",
+      "subject": "docs(qa): OMO commit traceability regenerated on 8abad84 — narrow-domain measurement and likelihood ratios (OMO-20) in the table (OMO; Gaps: 신규)",
+      "pre_rewrite_subject": null,
+      "ids": [],
+      "gaps_named_in_subject": [],
+      "gaps": [],
+      "new": true,
+      "new_reasons": [],
+      "gaps_line": "Gaps: 신규(스펙 외)",
+      "gaps_source": "subject"
+    },
+    {
+      "sha": "e9757f31c802d29aa16e9a4156f9b0f0c79b774e",
+      "short": "e9757f3",
+      "round": "31",
+      "subject": "fix(evidence): OMO-20 a damaged LR profile can no longer fail an analysis — the table must be 101 finite log10 values within ±12, scope and validation must be objects, list fields of the wrong type read as empty, and an lr_profile name outside the models folder is ignored, so a bad file next to a model profile leaves only the raw-score reference row (gate review blocker, test_a_damaged_lr_profile_leaves_the_raw_score_row_alone); `measure` exits 2 on unreadable or non-JSON input instead of a traceback; the docstring and the procedure describe the tail-ratio bound (OMO-20; Gaps: 신규)",
+      "pre_rewrite_subject": null,
+      "ids": [],
+      "gaps_named_in_subject": [],
+      "gaps": [],
+      "new": true,
+      "new_reasons": [],
+      "gaps_line": "Gaps: 신규(스펙 외)",
+      "gaps_source": "subject"
+    },
+    {
+      "sha": "0e15c774ca3133a0650c4c211643f74850502886",
+      "short": "0e15c77",
+      "round": "31",
+      "subject": "fix(evidence): OMO-20 LR profile numbers must be JSON numbers within range — strings, booleans, over-large integers and non-finite values are refused, and an unreadable LR or model profile (bad UTF-8, bad JSON, a 5000-digit literal, deep nesting) leaves only the raw-score reference row (gate re-review blockers; test_an_unreadable_lr_file_leaves_the_raw_score_row_alone) (OMO-20; Gaps: 신규)",
       "pre_rewrite_subject": null,
       "ids": [],
       "gaps_named_in_subject": [],
