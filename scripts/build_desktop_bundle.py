@@ -515,7 +515,7 @@ def verify_windows_bundle(folder: Path) -> list[str]:
             if need not in lines:
                 problems.append(f"{PTH_NAME}에 {need!r} 줄이 없음")
     site = python / "Lib" / "site-packages"
-    for need in ("deepfake_lens/gui.js", "deepfake_lens/gui.html", "deepfake_lens/__main__.py", "pymupdf/__init__.py", "fitz/__init__.py", "numpy/__init__.py", "PIL/__init__.py", "c2pa/__init__.py", "py7zr/__init__.py", "olefile/__init__.py"):
+    for need in ("deepfake_lens/gui.js", "deepfake_lens/gui.html", "deepfake_lens/gui-shell.js", "deepfake_lens/gui-history.js", "deepfake_lens/gui-settings.js", "deepfake_lens/gui-onboarding.js", "deepfake_lens/gui-shell.css", "deepfake_lens/__main__.py", "pymupdf/__init__.py", "fitz/__init__.py", "numpy/__init__.py", "PIL/__init__.py", "c2pa/__init__.py", "py7zr/__init__.py", "olefile/__init__.py"):
         if not (site / need).is_file():
             problems.append(f"site-packages/{need} 없음")
     for need in (WIN_LAUNCHER, WIN_DOCTOR, WIN_README, "VERSION.txt"):
