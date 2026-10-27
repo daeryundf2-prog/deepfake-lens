@@ -11,6 +11,9 @@
     if (!panel || !startBtn || !dismissBtn || !window.DFL) return;
 
     let historyCount = 0;   // the last dfl:history count; 0 until the history says otherwise
+    // OMO-10: decide only once the history answered (or did not within 1.5 s), so a returning examiner never sees
+    // the panel flash before the list arrives.
+    let historyKnown = false;
 
     function readSettings() {
         try {
@@ -37,7 +40,7 @@
     }
 
     function evaluate() {
-        const shown = !readSettings().welcomeDismissed && historyCount === 0
+        const shown = historyKnown && !readSettings().welcomeDismissed && historyCount === 0
             && !window.DFL.hasResults() && !window.DFL.isScanning();
         if (shown) startLabel();
         setShown(shown);
@@ -61,6 +64,7 @@
     document.addEventListener('dfl:history', event => {
         const count = event.detail && typeof event.detail.count === 'number' ? event.detail.count : 0;
         historyCount = count;
+        historyKnown = true;
         if (count > 0) setShown(false);
         else evaluate();
     });
@@ -71,4 +75,5 @@
 
     // gui.js starts before this script loads: read the state now instead of waiting for a past event.
     if (window.DFL.isReady()) evaluate();
+    setTimeout(() => { if (!historyKnown) { historyKnown = true; evaluate(); } }, 1500);
 })();
