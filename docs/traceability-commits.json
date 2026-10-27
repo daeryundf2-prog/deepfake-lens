@@ -4,7 +4,7 @@
   "generated_by": "scripts/build_traceability_commits.py",
   "range": {
     "base": "84dcb09533463b5b9ae0cf79fa7c70232b0d7fa8",
-    "head": "1259b3c790af25b424381d8654079de6d1e0dbc1",
+    "head": "da712f8d6cdd776a15f0987708a996a8249a847d",
     "note": "range.base..range.head(병합 커밋 제외). range.head는 이 표를 재생성한 커밋의 부모 — 그 커밋 자신의 해시는 표에 없다."
   },
   "notes": [
@@ -18429,6 +18429,34 @@
       "short": "1259b3c",
       "round": "31",
       "subject": "feat(bundle): OMO-19 the Windows bundle ships the Community Forensics ViT-S/384 reference-signal checkpoint (exported by scripts/fetch_community_forensics.py into <cache>/exported, checked against the profile's pin.sha256, verified in the bundle check) so 참고 신호 runs on the examiner's PC with the bundled onnxruntime; AASIST stays out (needs torch) (OMO-19; Gaps: 신규)",
+      "pre_rewrite_subject": null,
+      "ids": [],
+      "gaps_named_in_subject": [],
+      "gaps": [],
+      "new": true,
+      "new_reasons": [],
+      "gaps_line": "Gaps: 신규(스펙 외)",
+      "gaps_source": "subject"
+    },
+    {
+      "sha": "0147e49ec928ff943e749fb1b5bd122002ea9e33",
+      "short": "0147e49",
+      "round": "31",
+      "subject": "docs(qa): OMO commit traceability regenerated on 1259b3c — the review fixes (OMO-14), external-check guidance (OMO-15), ITL and generator records (OMO-16), bundled watermark detectors (OMO-17), JPEG/messenger facts (OMO-18) and reference signals (OMO-19) in the table (OMO; Gaps: 신규)",
+      "pre_rewrite_subject": null,
+      "ids": [],
+      "gaps_named_in_subject": [],
+      "gaps": [],
+      "new": true,
+      "new_reasons": [],
+      "gaps_line": "Gaps: 신규(스펙 외)",
+      "gaps_source": "subject"
+    },
+    {
+      "sha": "da712f8d6cdd776a15f0987708a996a8249a847d",
+      "short": "da712f8",
+      "round": "31",
+      "subject": "docs(qa): OMO-17 the skip-reason table follows the cv2-free watermark tests — 'numpy and Pillow required' and 'opencv required for the reference conversion' are listed, the retired 'numpy, opencv and Pillow required' row is gone (QA-SYS-10 test_every_skip_reason_is_documented) (OMO-17; Gaps: 신규)",
       "pre_rewrite_subject": null,
       "ids": [],
       "gaps_named_in_subject": [],
