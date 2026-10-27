@@ -673,12 +673,20 @@ class GuiAccessibilitySourceTest(unittest.TestCase):
         self.assertIn("modal.showModal();", self.source)
 
     def test_nothing_is_fetched_from_the_network(self) -> None:
-        # The tool runs offline: no web fonts, no CDN.
+        # The tool runs offline: no CDN, no remote web font. The one UI font ships in the package
+        # and is served by the same local server under /fonts/.
         for name, text in (("gui.html", self.html), ("gui.css", self.css), ("gui.js", self.source)):
             with self.subTest(file=name):
                 self.assertNotRegex(text, r"https?://")
                 self.assertNotIn("@import", text)
+        for name, text in (("gui.html", self.html), ("gui.js", self.source)):
+            with self.subTest(file=name):
                 self.assertNotIn("@font-face", text)
+        urls = re.findall(r"url\(\s*['\"]?([^'\")]+)", self.css)
+        self.assertTrue(urls)
+        for url in urls:
+            self.assertTrue(url.startswith("/fonts/"), url)
+            self.assertTrue((Path(__file__).resolve().parent.parent / url.lstrip("/")).is_file(), url)
 
     def test_verdict_marks_are_shapes_and_undetermined_is_neutral(self) -> None:
         # A11Y-1: 판단 불가 is a neutral hollow ring, never orange.

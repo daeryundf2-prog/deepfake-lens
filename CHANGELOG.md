@@ -23,6 +23,12 @@ grouped by work pass rather than release.
   (`DEEPFAKE_LENS_CASES` overrides), never inside an examined folder (OMO-3).
 - Routes on both servers: `GET /api/history`, `POST /api/history-delete`,
   `GET /api/job-case`, `POST /api/job-case` (OMO-4).
+- GUI redesign: bundled UI font Pretendard Variable (OFL-1.1,
+  `deepfake_lens/fonts/`, served at `/fonts/PretendardVariable.woff2` by both
+  servers, no network request), zinc neutrals with one indigo accent,
+  translucent sticky top bar, segmented view tabs, verdict summary cards,
+  rounded ledger, refined sidebar, dialogs and welcome card; light/dark theme
+  tokens defined once in `gui.css` (OMO-13).
 
 ### Changed
 - The long caveat explanations fold behind 「자세한 설명」; every warning
