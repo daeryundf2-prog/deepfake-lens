@@ -7,6 +7,7 @@ The download/install steps (``fetch_embed``, ``build_repo_wheel``, ``download_wh
 from __future__ import annotations
 
 import importlib.util
+import os
 import sys
 import tempfile
 import unittest
@@ -290,10 +291,47 @@ class DependencyCheckTest(unittest.TestCase):
 
     def test_pinned_set_names_every_top_level_package(self) -> None:
         names = {bundle.canonical(r.split("==")[0]) for r in bundle.WINDOWS_WHEELS}
-        for need in ("pymupdf", "numpy", "pillow", "c2pa-python", "py7zr", "syhwp", "olefile"):
+        for need in ("pymupdf", "numpy", "pillow", "c2pa-python", "py7zr", "syhwp", "olefile", "onnxruntime"):
             self.assertIn(need, names)
+        for absent in ("opencv-python", "opencv-python-headless", "torch"):  # SDXL check is numpy-only; torch not shipped
+            self.assertNotIn(absent, names)
         self.assertTrue(all("==" in r for r in bundle.WINDOWS_WHEELS))
         self.assertEqual(len(names), len(bundle.WINDOWS_WHEELS))
+
+    def test_bundled_weights_are_pinned_trustmark_decoders(self) -> None:
+        from deepfake_lens.model_assets import expected_sha256
+        from deepfake_lens.wm_trustmark import VARIANTS
+
+        self.assertEqual(set(bundle.BUNDLED_WEIGHTS), {asset for asset, _size, _square in VARIANTS.values()})
+        for name, url in bundle.BUNDLED_WEIGHTS.items():
+            self.assertRegex(bundle.pinned_sha256(name), r"^[0-9a-f]{64}$")
+            self.assertEqual(bundle.pinned_sha256(name), expected_sha256(name))  # the loader's own pin
+            self.assertTrue(url.startswith("https://"), url)
+
+    def test_unpinned_weight_is_refused(self) -> None:
+        for name in ("face_landmarker.task", "no-such-asset.onnx"):  # empty sha256 / not listed
+            with self.assertRaises(bundle.BuildError):
+                bundle.pinned_sha256(name)
+
+    def test_weight_problems(self) -> None:
+        import hashlib
+        import json
+
+        with tempfile.TemporaryDirectory() as tmp:
+            models, assets = Path(tmp) / "models", Path(tmp) / "assets.json"
+            models.mkdir()
+            good = b"weights"
+            assets.write_text(json.dumps({"assets": [
+                {"name": "a.onnx", "sha256": hashlib.sha256(good).hexdigest()}, {"name": "b.onnx", "sha256": ""},
+            ]}), encoding="utf-8")
+            problems = bundle.weight_problems(models, ["a.onnx", "b.onnx"], assets)
+            self.assertEqual(len(problems), 2)
+            self.assertIn("models/a.onnx 없음", problems[0])
+            self.assertIn("b.onnx", problems[1])
+            (models / "a.onnx").write_bytes(b"other bytes")
+            self.assertIn("sha256", bundle.weight_problems(models, ["a.onnx"], assets)[0])
+            (models / "a.onnx").write_bytes(good)
+            self.assertEqual(bundle.weight_problems(models, ["a.onnx"], assets), [])
 
 
 class ZipAndVerifyTest(unittest.TestCase):
@@ -325,7 +363,8 @@ class ZipAndVerifyTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             problems = bundle.verify_windows_bundle(Path(tmp))
             joined = "\n".join(problems)
-            for needle in ("python/python.exe", "python312._pth", "deepfake_lens/gui.js", "pymupdf/__init__.py", "Deepfake Lens.cmd"):
+            for needle in ("python/python.exe", "python312._pth", "deepfake_lens/gui.js", "pymupdf/__init__.py", "Deepfake Lens.cmd",
+                           "onnxruntime/__init__.py", "deepfake_lens/models/trustmark-decoder_Q.onnx"):
                 self.assertIn(needle, joined)
 
     def test_verify_checks_pth_lines(self) -> None:
@@ -546,7 +585,8 @@ class PEImportTableTest(unittest.TestCase):
             self.assertFalse(bundle.is_system_dll(name), name)
 
 
-HANDOVER = Path.home() / "Desktop" / "deepfake-lens-windows-handover" / "desktop" / bundle.WIN_DIR
+# DEEPFAKE_LENS_WIN_BUNDLE: check another built bundle folder (e.g. a fresh `--out` build) instead of the handover copy.
+HANDOVER = Path(os.environ.get("DEEPFAKE_LENS_WIN_BUNDLE") or Path.home() / "Desktop" / "deepfake-lens-windows-handover" / "desktop" / bundle.WIN_DIR)
 
 
 @unittest.skipUnless((HANDOVER / "python" / "python.exe").is_file(), "no built Windows bundle on this machine")

@@ -19,8 +19,9 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
-HAVE_IMAGING = all(importlib.util.find_spec(name) is not None for name in ("numpy", "cv2", "PIL"))
-HAVE_LIBRARY = HAVE_IMAGING and all(importlib.util.find_spec(name) is not None for name in ("imwatermark", "pywt"))
+HAVE_IMAGING = all(importlib.util.find_spec(name) is not None for name in ("numpy", "PIL"))
+HAVE_CV2 = HAVE_IMAGING and importlib.util.find_spec("cv2") is not None
+HAVE_LIBRARY = HAVE_CV2 and all(importlib.util.find_spec(name) is not None for name in ("imwatermark", "pywt"))
 SDXL_BITS = "101100111110110010010000011110111011000110011110"
 
 
@@ -38,7 +39,7 @@ def _save_png(array, path: Path) -> Path:
     return path
 
 
-@unittest.skipUnless(HAVE_IMAGING, "numpy, opencv and Pillow required")
+@unittest.skipUnless(HAVE_IMAGING, "numpy and Pillow required")
 class SdxlWatermarkTest(unittest.TestCase):
     def setUp(self) -> None:
         self.tmp = tempfile.TemporaryDirectory()
@@ -110,9 +111,41 @@ class SdxlWatermarkTest(unittest.TestCase):
         from deepfake_lens.result_types import CoverageStatus
 
         layers = MarkLayers()
-        with mock.patch.dict(sys.modules, {"cv2": None}):
+        with mock.patch.dict(sys.modules, {"numpy": None}):
             _sdxl_layer(self.root / "x.png", layers)
-        self.assertEqual((layers.coverage[0].status, layers.coverage[0].reason), (CoverageStatus.SKIPPED, "의존성 부재: cv2"))
+        self.assertEqual((layers.coverage[0].status, layers.coverage[0].reason), (CoverageStatus.SKIPPED, "의존성 부재: numpy"))
+
+    def test_check_runs_without_opencv(self) -> None:
+        """The Windows bundle has no cv2: the check decodes with numpy alone."""
+        from deepfake_lens.media_marks import sdxl_check
+        from deepfake_lens.wm_imwatermark import encode_array_for_tests
+
+        path = _save_png(encode_array_for_tests(_noise(), SDXL_BITS), self.root / "nocv2.png")
+        with mock.patch.dict(sys.modules, {"cv2": None}):
+            self.assertEqual(sdxl_check(path).matched, "BGR")
+
+    @unittest.skipUnless(HAVE_CV2, "opencv required for the reference conversion")
+    def test_yuv_matches_opencv_for_every_colour(self) -> None:
+        import cv2
+        import numpy as np
+
+        from deepfake_lens.wm_imwatermark import bgr_to_yuv_u8
+
+        every = np.arange(1 << 24, dtype=np.uint32)
+        bgr = np.stack([(every >> 16) & 255, (every >> 8) & 255, every & 255], axis=-1).astype(np.uint8).reshape(4096, 4096, 3)
+        self.assertTrue(np.array_equal(bgr_to_yuv_u8(bgr), cv2.cvtColor(bgr, cv2.COLOR_BGR2YUV)))
+
+    @unittest.skipUnless(HAVE_CV2, "opencv required for the reference conversion")
+    def test_fixture_encoder_matches_opencv_round_trip(self) -> None:
+        import cv2
+        import numpy as np
+
+        from deepfake_lens.wm_imwatermark import _bgr_to_yuv_f32, _yuv_to_bgr_f32
+
+        bgr = np.random.RandomState(3).uniform(0, 255, (256, 256, 3)).astype(np.float32)
+        yuv = cv2.cvtColor(bgr, cv2.COLOR_BGR2YUV)
+        np.testing.assert_allclose(_bgr_to_yuv_f32(bgr), yuv, rtol=0, atol=1e-3)
+        np.testing.assert_allclose(_yuv_to_bgr_f32(yuv), cv2.cvtColor(yuv, cv2.COLOR_YUV2BGR), rtol=0, atol=1e-3)
 
     def test_decoder_error_is_a_failed_check(self) -> None:
         from deepfake_lens.media_marks import MarkLayers, _sdxl_layer
