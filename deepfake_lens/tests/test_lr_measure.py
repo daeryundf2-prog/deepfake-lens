@@ -101,6 +101,22 @@ class LikelihoodRatioTest(unittest.TestCase):
         llr = pav_llrs(flat)
         self.assertAlmostEqual(cllr([v for v, p in llr if p], [v for v, p in llr if not p]), 1.0)
 
+    def test_pav_pools_whole_tie_groups(self) -> None:
+        pairs = [(0.0, False), (1.0, False), (1.0, True), (1.0, True)]
+        llr = pav_llrs(pairs)
+        self.assertEqual(llr[0][0], -math.inf)
+        self.assertAlmostEqual(llr[1][0], math.log(2.0) - math.log(2 / 2))
+
+    def test_pav_cost_is_never_above_a_monotone_calibration_on_tie_heavy_scores(self) -> None:
+        rng = random.Random(11)
+        pairs = [(float(min(100, int(rng.expovariate(1 / 6)))), True) for _ in range(400)] + [(float(min(100, int(rng.expovariate(1 / 1.5)))), False) for _ in range(400)]
+        rng.shuffle(pairs)
+        calibration = LrCalibration.fit(pairs)
+        pav = pav_llrs(pairs)
+        minimum = cllr([v for v, p in pav if p], [v for v, p in pav if not p])
+        actual = cllr([calibration.llr(s) for s, p in pairs if p], [calibration.llr(s) for s, p in pairs if not p])
+        self.assertLessEqual(minimum, actual + 1e-12)
+
     def test_enfsi_verbal_bands_follow_the_lr_direction(self) -> None:
         self.assertEqual(verbal(1.0), "어느 쪽도 지지하지 않음")
         self.assertEqual(verbal(5.0), f"{HP}을(를) 약하게 지지")
@@ -110,11 +126,27 @@ class LikelihoodRatioTest(unittest.TestCase):
         with self.assertRaises(MeasureError):
             verbal(0.0)
 
-    def test_lr_is_bounded_by_the_calibration_sample_sizes(self) -> None:
+    def test_lr_never_exceeds_the_val_tail_ratio_and_never_falls_with_the_score(self) -> None:
         separated = [(float(s), True) for s in range(80, 100)] + [(float(s), False) for s in range(0, 40)]
         calibration = LrCalibration.fit(separated)
-        self.assertAlmostEqual(calibration.lr(100.0), 41.0)
-        self.assertAlmostEqual(calibration.lr(0.0), 1 / 21)
+        self.assertAlmostEqual(calibration.lr(90.0), (11 / 21) / (1 / 41))
+        self.assertAlmostEqual(calibration.lr(100.0), calibration.lr(90.0))
+        self.assertAlmostEqual(calibration.lr(0.0), (1 / 21) / (11 / 41))
+        self.assertTrue(calibration.at_bound(90.0))
+        values = [calibration.lr(float(s)) for s in range(101)]
+        self.assertEqual(values, sorted(values))
+
+    def test_one_real_photo_in_the_top_tail_lowers_the_cap(self) -> None:
+        base = [(float(s), True) for s in range(60, 100)] + [(float(s), False) for s in range(0, 60)]
+        clean = LrCalibration.fit(base).lr(98.0)
+        tainted = LrCalibration.fit([*base, (99.0, False)]).lr(98.0)
+        self.assertLess(tainted, clean / 1.5)
+
+    def test_the_table_survives_json(self) -> None:
+        calibration = LrCalibration.fit(_pairs(200, 70, 30, seed=2))
+        again = LrCalibration.from_json(calibration.to_json())
+        for score in (0.0, 37.0, 63.0, 100.0):
+            self.assertAlmostEqual(again.llr(score), calibration.llr(score), places=5)
 
 
 class MeasureTest(unittest.TestCase):
@@ -148,6 +180,36 @@ class MeasureTest(unittest.TestCase):
                 measure(manifest, load_scores(scores), variants=["telegram"], resamples=50)
 
 
+class ScoreWithProfileTest(unittest.TestCase):
+    def test_items_are_read_from_the_corpus_root_not_the_manifest_folder(self) -> None:
+        from unittest import mock
+
+        from deepfake_lens import lr_measure
+
+        with tempfile.TemporaryDirectory() as tmp:
+            corpus, elsewhere = Path(tmp) / "corpus", Path(tmp) / "out"
+            (corpus / "real/cam/original").mkdir(parents=True)
+            elsewhere.mkdir()
+            (corpus / "real/cam/original/a.jpg").write_bytes(b"x")
+            items = [{"id": "a", "relpath": "real/cam/original/a.jpg"}]
+            manifest = elsewhere / "m.json"
+            manifest.write_text(json.dumps({"schema": SCHEMA, "root_hint": str(corpus), "items": items}), encoding="utf-8")
+            profile = elsewhere / "p-runtime.json"
+            profile.write_text("{}", encoding="utf-8")
+            seen: list[Path] = []
+
+            def fake(_profile: object, media: Path, *, base_dir: Path) -> ExternalModelAnalysis:
+                seen.append(media)
+                return ExternalModelAnalysis(available=True, score=42, confidence="low", model="m", detail="")
+
+            with mock.patch("deepfake_lens.model_adapter._score_from_runtime_profile", fake):
+                scores = lr_measure.score_items_with_profile(manifest, items, profile)
+                self.assertEqual(scores, {"a": 42.0})
+                self.assertEqual(seen, [corpus / "real/cam/original/a.jpg"])
+                with self.assertRaises(MeasureError):
+                    lr_measure.score_items_with_profile(manifest, [{"id": "b", "relpath": "../out/m.json"}], profile)
+
+
 class ReferenceSignalLrTest(unittest.TestCase):
     def _signals(self, lr_profile: dict[str, object]) -> list[str]:
         with tempfile.TemporaryDirectory() as tmp:
@@ -168,6 +230,20 @@ class ReferenceSignalLrTest(unittest.TestCase):
         self.assertIn("증거 강도(우도비)", detail)
         self.assertIn(HP, detail)
         self.assertIn("결론이 아닌 증거 강도", detail)
+
+    def test_a_single_profile_analysis_finds_its_lr_profile_through_the_model_path(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            manifest, scores = _write_corpus(Path(tmp), {"val": 220, "test": 220}, 75, 25)
+            lr = measure(manifest, load_scores(scores), variants=["kakao"], resamples=100)["lr_profile"]
+            models = Path(tmp) / "models"
+            models.mkdir()
+            (models / "m-runtime.json").write_text(json.dumps({"modality": "image", "lr_profile": "lr.json"}), encoding="utf-8")
+            (models / "lr.json").write_text(json.dumps(lr), encoding="utf-8")
+            single = ExternalModelAnalysis(available=False, score=90, confidence=REFERENCE_CONFIDENCE, model="m", detail="")
+            (detail,) = [signal.detail for signal in model_reference_signals(single, models)]
+            (bare,) = [signal.detail for signal in model_reference_signals(single)]
+        self.assertIn("증거 강도(우도비)", detail)
+        self.assertNotIn("우도비", bare)
 
     def test_an_unvalidated_lr_profile_adds_nothing(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

@@ -324,7 +324,12 @@ def _reference_run(profile: dict[str, object], media_path: Path, *, base_dir: Pa
 REFERENCE_SIGNAL_TITLE = "미측정 모델 원점수(참고 신호)"
 
 
-def model_reference_signals(model: ExternalModelAnalysis | None) -> list[EvidenceSignal]:
+def model_reference_signals(
+    model: ExternalModelAnalysis | None,
+    model_path: Path | str | list[Path | str] | tuple[Path | str, ...] | None = None,
+    *,
+    modality: str = "image",
+) -> list[EvidenceSignal]:
     """Reference-only rows for gated-off profiles that ran for a raw score.
 
     Never evidence: the caller adds these to ``reference_signals`` only.
@@ -338,7 +343,7 @@ def model_reference_signals(model: ExternalModelAnalysis | None) -> list[Evidenc
             if member.get("confidence") == REFERENCE_CONFIDENCE
         ]
     else:
-        scored = [(model.label, model.score, None)] if model.confidence == REFERENCE_CONFIDENCE else []
+        scored = [(model.label, model.score, _single_source(model_path, modality))] if model.confidence == REFERENCE_CONFIDENCE else []
     return [
         EvidenceSignal(
             REFERENCE_SIGNAL_TITLE,
@@ -350,6 +355,14 @@ def model_reference_signals(model: ExternalModelAnalysis | None) -> list[Evidenc
         for label, score, profile_path in scored
         if isinstance(score, (int, float)) and not isinstance(score, bool)
     ]
+
+
+def _single_source(model_path: Path | str | list[Path | str] | tuple[Path | str, ...] | None, modality: str) -> Path | None:
+    """The one profile a single-profile analysis ran (same selection as analyze_external_model)."""
+    if model_path is None:
+        return None
+    sources = [source for source in _model_sources(model_path) if _profile_matches_modality(source, modality)]
+    return sources[0] if len(sources) == 1 else None
 
 
 def _lr_suffix(profile_path: object, score: float) -> str:

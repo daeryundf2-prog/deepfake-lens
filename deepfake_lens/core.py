@@ -1826,7 +1826,7 @@ def _analyze_image_file(
         c2pa_unknown=c2pa_unknown,
         image_format=image_format,
         jpeg_quality=jpeg_quality,
-        extra_reference=[*deep.reference, *model_reference_signals(model_analysis)],
+        extra_reference=[*deep.reference, *model_reference_signals(model_analysis, model_path)],
         # G8: rule 4's thresholds are the loaded profiles' (calibration id -> threshold/100).
         probability_thresholds=profile_probability_thresholds(model_path),
         marking_context=marks.marking_context,

@@ -395,6 +395,7 @@ def build_parser() -> tuple[argparse.ArgumentParser, dict[str, argparse.Argument
     measure_parser.add_argument("--bootstrap", type=int, default=2000, help="원본 묶음 부트스트랩 반복 수")
     measure_parser.add_argument("--seed", type=int, default=0, help="부트스트랩 난수 시드(같은 시드는 같은 구간)")
     measure_parser.add_argument("--json-out", type=Path, help="측정 결과 JSON 저장")
+    measure_parser.add_argument("--scores-out", type=Path, help="측정에 쓴 항목별 점수를 JSONL로 저장(--scores로 같은 측정을 다시 할 수 있음)")
     measure_parser.add_argument("--lr-out", type=Path, help="우도비 보정 프로필 JSON 저장(검증 통과 여부 포함)")
 
     feedback_parser = subparsers.add_parser("feedback", help="감정인 라벨과 검사 점수를 비교해 융합 가중치 제안")

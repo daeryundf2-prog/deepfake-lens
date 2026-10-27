@@ -50,7 +50,7 @@ OUTPUT_DESTS = frozenset({
     "out", "output", "output_dir", "frame_root", "heatmap_dir", "to", "bundle_to", "cache", "hash_db",
     "json_out", "csv_out", "html_out", "pdf_out", "md_out", "forensic_pdf_out", "evidence_statement_out",
     "evidence_statement_pdf_out", "manifest_out", "audit_out", "split_out", "robustness_out", "profile_out",
-    "false_positive_out", "false_negative_out", "mapping_out", "lr_out",
+    "false_positive_out", "false_negative_out", "mapping_out", "lr_out", "scores_out",
 })
 # --key-file is checked by its own rule (N8: missing/empty key file -> exit 2).
 SEPARATELY_CHECKED_DESTS = frozenset({"key_file"})

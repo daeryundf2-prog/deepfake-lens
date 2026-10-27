@@ -42,7 +42,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from .corpus_manifest import _refs, load_manifest, manifest_sha256, origin_key
+from .corpus_manifest import _refs, _resolve_root, load_manifest, manifest_sha256, origin_key, relpath_outside_corpus
 from .measurement_gate import MEASURED_ON_KEYS, MIN_AUROC_CI_LOW, MIN_PER_CLASS, check_profile
 
 LR_PROFILE_TYPE = "deepfake-lens-lr-profile-v1"
@@ -212,17 +212,18 @@ def pav_llrs(pairs: Sequence[tuple[float, bool]]) -> list[tuple[float, bool]]:
     """Pool-adjacent-violators LRs (natural log) for each pair, in input order."""
     n_pos = sum(1 for _, positive in pairs if positive)
     n_neg = len(pairs) - n_pos
-    order = sorted(range(len(pairs)), key=lambda i: pairs[i][0])
-    # blocks of [sum_pos, count, members]; tied scores start in one block
+    # One block per distinct score, built before any pooling: pooling while a
+    # tie group is still arriving glues later members of that score to a
+    # lower block. Blocks are [sum_pos, count, members].
+    by_score: dict[float, list[Any]] = {}
+    for i, (score, positive) in enumerate(pairs):
+        block = by_score.setdefault(score, [0, 0, []])
+        block[0] += 1 if positive else 0
+        block[1] += 1
+        block[2].append(i)
     blocks: list[list[Any]] = []
-    for i in order:
-        score, positive = pairs[i]
-        if blocks and pairs[blocks[-1][2][-1]][0] == score:
-            blocks[-1][0] += 1 if positive else 0
-            blocks[-1][1] += 1
-            blocks[-1][2].append(i)
-        else:
-            blocks.append([1 if positive else 0, 1, [i]])
+    for score in sorted(by_score):
+        blocks.append(by_score[score])
         while len(blocks) > 1 and blocks[-2][0] / blocks[-2][1] >= blocks[-1][0] / blocks[-1][1]:
             last = blocks.pop()
             blocks[-1][0] += last[0]
@@ -257,44 +258,85 @@ def verbal(lr: float) -> str:
     return f"{hypothesis}을(를) {VERBAL_SCALE[-1][1]}"
 
 
-class LrCalibration:
-    """Score → bounded LR, from a fitted logistic model."""
+SCORE_GRID = range(101)
+MIN_TAIL = 10
 
-    def __init__(self, a: float, b: float, prior_log_odds: float, lower: float, upper: float) -> None:
-        self.a, self.b, self.prior_log_odds, self.lower, self.upper = a, b, prior_log_odds, lower, upper
+
+class LrCalibration:
+    """Score (0-100) → LR, as a fixed table built on val.
+
+    Each entry is the logistic LR clipped into a tail-ratio interval of the val
+    data. If the LR rises with the score (monotone likelihood ratio),
+    ``T(t) = P(S ≥ t | Hp) / P(S ≥ t | Hd)`` bounds LR(t) from above, and
+    LR(s) ≤ LR(t) for t ≥ s, so the upper bound at s is the smallest T(t) over
+    t ≥ s; the lower bound mirrors it with ``P(S ≤ t | ·)`` over t ≤ s. Tails are
+    estimated with one added sample per class and used only where they hold
+    at least ``MIN_TAIL`` samples of the class in the numerator (resp.
+    denominator), so one or two extreme samples cannot set the bound. Both
+    bounds are non-decreasing in s, so the clipped logistic table is too: a
+    higher score never reads as weaker evidence.
+    """
+
+    def __init__(self, a: float, b: float, prior_log_odds: float, table: Sequence[float], clipped: Sequence[bool]) -> None:
+        self.a, self.b, self.prior_log_odds = a, b, prior_log_odds
+        self.table, self.clipped = list(table), list(clipped)
 
     @classmethod
     def fit(cls, pairs: Sequence[tuple[float, bool]]) -> "LrCalibration":
-        n_pos = sum(1 for _, positive in pairs if positive)
-        n_neg = len(pairs) - n_pos
-        if n_pos == 0 or n_neg == 0:
+        pos = [score for score, positive in pairs if positive]
+        neg = [score for score, positive in pairs if not positive]
+        if not pos or not neg:
             raise MeasureError("우도비 보정에는 검증(val) 분할에 두 클래스가 모두 필요합니다.")
         a, b = fit_logistic(pairs)
-        # With n real samples the data cannot support P(s | 실제) below about
-        # 1/(n+1), so the LR is capped at n_neg + 1 (and floored at 1/(n_pos+1)).
-        return cls(a, b, math.log(n_pos / n_neg), 1.0 / (n_pos + 1), float(n_neg + 1))
+        prior = math.log(len(pos) / len(neg))
+
+        def ratio(selected_pos: int, selected_neg: int) -> float:
+            return math.log((selected_pos + 1) / (len(pos) + 1)) - math.log((selected_neg + 1) / (len(neg) + 1))
+
+        upper_tail = {t: ratio(sum(1 for v in pos if v >= t), sum(1 for v in neg if v >= t)) for t in SCORE_GRID if sum(1 for v in pos if v >= t) >= MIN_TAIL}
+        lower_tail = {t: ratio(sum(1 for v in pos if v <= t), sum(1 for v in neg if v <= t)) for t in SCORE_GRID if sum(1 for v in neg if v <= t) >= MIN_TAIL}
+        top = max(upper_tail, default=None)
+        bottom = min(lower_tail, default=None)
+        table: list[float] = []
+        clipped: list[bool] = []
+        for s in SCORE_GRID:
+            ups = [value for t, value in upper_tail.items() if t >= s] or ([upper_tail[top]] if top is not None else [math.log(len(neg) + 1)])
+            lows = [value for t, value in lower_tail.items() if t <= s] or ([lower_tail[bottom]] if bottom is not None else [-math.log(len(pos) + 1)])
+            upper = min(ups)
+            lower = min(upper, max(lows))
+            raw = a * s / 100.0 + b - prior
+            value = max(lower, min(upper, raw))
+            clipped.append(value != raw)
+            table.append(value)
+        return cls(a, b, prior, table, clipped)
 
     def llr(self, score: float) -> float:
-        raw = self.a * score / 100.0 + self.b - self.prior_log_odds
-        return max(math.log(self.lower), min(math.log(self.upper), raw))
+        return self.table[max(0, min(100, int(round(score))))]
 
     def lr(self, score: float) -> float:
         return math.exp(self.llr(score))
 
+    def at_bound(self, score: float) -> bool:
+        return self.clipped[max(0, min(100, int(round(score))))]
+
     def to_json(self) -> dict[str, object]:
         return {
-            "method": "logistic (Newton/IRLS, L2 1e-3) on val; LR = posterior odds / val prior odds",
+            "method": f"logistic (Newton/IRLS, L2 1e-3) on val, clipped to monotone val tail-ratio bounds (+1 per class, tails with >= {MIN_TAIL} samples)",
             "a": self.a,
             "b": self.b,
             "prior_log_odds": self.prior_log_odds,
-            "bounds": [self.lower, self.upper],
-            "bounds_method": "표본 크기 한계: 1/(검증 AI 표본 수+1) ≤ LR ≤ 검증 실제 표본 수+1",
+            "log10_lr_table": [round(v / math.log(10), 6) for v in self.table],
+            "clipped": self.clipped,
+            "bounds_method": f"꼬리 비율 한계: s 이상 점수들에서 '그 점수 이상인 AI 비율 ÷ 실제 비율'의 최솟값이 상한, s 이하 점수들에서 아래쪽 꼬리 비율의 최댓값이 하한(클래스마다 1개를 더해 추정, 표본 {MIN_TAIL}개 이상인 꼬리만 사용)",
         }
 
     @classmethod
     def from_json(cls, data: dict[str, Any]) -> "LrCalibration":
-        lower, upper = data["bounds"]
-        return cls(float(data["a"]), float(data["b"]), float(data["prior_log_odds"]), float(lower), float(upper))
+        table = [float(v) * math.log(10) for v in data["log10_lr_table"]]
+        clipped = [bool(v) for v in data["clipped"]]
+        if len(table) != len(SCORE_GRID) or len(clipped) != len(SCORE_GRID):
+            raise ValueError("log10_lr_table과 clipped는 점수 0~100의 101개 항목이어야 합니다.")
+        return cls(float(data["a"]), float(data["b"]), float(data["prior_log_odds"]), table, clipped)
 
 
 def tippett(llr_pos: Sequence[float], llr_neg: Sequence[float]) -> list[dict[str, float]]:
@@ -335,10 +377,13 @@ def score_items_with_profile(manifest_path: Path, items: list[dict[str, Any]], p
     from .model_adapter import _score_from_runtime_profile
 
     profile = json.loads(profile_path.read_text(encoding="utf-8"))
-    root = manifest_path.parent
+    root = _resolve_root(load_manifest(manifest_path), manifest_path, None)
     scores: dict[str, float] = {}
     for item in items:
-        result = _score_from_runtime_profile(profile, root / str(item["relpath"]), base_dir=profile_path.parent)
+        relpath = str(item.get("relpath") or "")
+        if relpath_outside_corpus(relpath, root):
+            raise MeasureError(f"매니페스트 항목 {item.get('id')}의 경로가 코퍼스 밖을 가리킵니다: {relpath}")
+        result = _score_from_runtime_profile(profile, root / relpath, base_dir=profile_path.parent)
         if result is not None and result.available:
             scores[str(item["id"])] = float(result.score)
     return scores
@@ -509,8 +554,7 @@ def lr_statement(profile: dict[str, Any], score: float) -> str | None:
     validation = profile.get("validation") or {}
     variants = ", ".join(str(v) for v in scope.get("variants") or []) or "전체"
     shown = f"{lr:.3g}" if lr >= 1 else f"1/{1 / lr:.3g}"
-    at_bound = math.isclose(lr, calibration.lower, rel_tol=1e-9) or math.isclose(lr, calibration.upper, rel_tol=1e-9)
-    capped = " (표본 크기 한계에 걸린 값)" if at_bound else ""
+    capped = " (검증 자료의 꼬리 비율 한계에 걸린 값)" if calibration.at_bound(score) else ""
     return (
         f"증거 강도(우도비) {shown}{capped}: {verbal(lr)}. 측정 범위는 코퍼스 {scope.get('corpus_id')}의 "
         f"{variants} 변형(생성기 {', '.join(str(g) for g in scope.get('generators') or []) or '-'})이고, "

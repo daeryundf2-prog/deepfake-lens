@@ -924,8 +924,8 @@ def _run_command(args: argparse.Namespace, parser: argparse.ArgumentParser, cmd_
                 scores = load_scores(args.scores)
                 model_name = args.scores.name
             else:
-                items = load_manifest(args.manifest)["items"]
-                scores = score_items_with_profile(args.manifest.resolve(), items, args.model_path)
+                manifest_items = [item for item in load_manifest(args.manifest)["items"] if not args.variant or item.get("variant") in args.variant]
+                scores = score_items_with_profile(args.manifest.resolve(), manifest_items, args.model_path)
                 model_name = args.model_path.name
             payload = measure(args.manifest, scores, variants=args.variant, target_fpr=args.target_fpr, resamples=args.bootstrap, seed=args.seed, model=model_name)
         except (MeasureError, ManifestError, OSError) as exc:
@@ -935,6 +935,8 @@ def _run_command(args: argparse.Namespace, parser: argparse.ArgumentParser, cmd_
             write_json_report(args.json_out, payload)
         if args.lr_out:
             write_json_report(args.lr_out, payload["lr_profile"])
+        if args.scores_out:
+            args.scores_out.write_text("".join(json_dumps({"id": key, "score": value}, ensure_ascii=False) + "\n" for key, value in sorted(scores.items())), encoding="utf-8")
         print(json_dumps(payload, ensure_ascii=False, indent=2))
         return 0
     if args.command == "feedback":
