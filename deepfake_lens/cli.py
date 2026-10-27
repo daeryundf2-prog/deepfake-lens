@@ -914,8 +914,8 @@ def _run_command(args: argparse.Namespace, parser: argparse.ArgumentParser, cmd_
         print(json_dumps(payload, ensure_ascii=False, indent=2))
         return 0
     if args.command == "measure":
-        from .lr_measure import MeasureError, load_scores, measure, score_items_with_profile
-        from .corpus_manifest import ManifestError, load_manifest
+        from .lr_measure import load_scores, measure, score_items_with_profile
+        from .corpus_manifest import load_manifest
 
         if (args.scores is None) == (args.model_path is None):
             cmd_parsers["measure"].error("--scores와 --model-path 중 정확히 하나를 지정하십시오")
@@ -928,7 +928,7 @@ def _run_command(args: argparse.Namespace, parser: argparse.ArgumentParser, cmd_
                 scores = score_items_with_profile(args.manifest.resolve(), manifest_items, args.model_path)
                 model_name = args.model_path.name
             payload = measure(args.manifest, scores, variants=args.variant, target_fpr=args.target_fpr, resamples=args.bootstrap, seed=args.seed, model=model_name)
-        except (MeasureError, ManifestError, OSError) as exc:
+        except (ValueError, OSError) as exc:  # MeasureError, ManifestError, bad JSON and bad encodings are ValueErrors
             print(f"측정할 수 없습니다: {exc}", file=sys.stderr)
             return 2
         if args.json_out:

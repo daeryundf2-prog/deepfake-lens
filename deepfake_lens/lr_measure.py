@@ -15,9 +15,8 @@ Two things the measurement gate needs but the repo did not have:
 2. Likelihood ratios — the ENFSI Guideline for Evaluative Reporting (2015)
    asks for conclusions as a likelihood ratio and its verbal scale. A score
    becomes ``LR = P(score | AI 생성) / P(score | 실제 촬영)`` by logistic
-   calibration fitted on ``val``; the LR is bounded by the sample sizes it was
-   fitted on (with ``n`` real samples none of which looked like this, the
-   data cannot support an LR above ``n + 1``). On ``test`` it is validated
+   calibration fitted on ``val``, clipped to monotone tail-ratio bounds of the
+   val data (see :class:`LrCalibration`) and stored as a 0-100 table. On ``test`` it is validated
    with Cllr (log-likelihood-ratio cost; 1 bit = uninformative), Cllr_min
    (pool-adjacent-violators, the best any calibration of these scores could
    do) and Tippett data. An LR profile counts as validated only with at least
@@ -259,6 +258,7 @@ def verbal(lr: float) -> str:
 
 SCORE_GRID = range(101)
 MIN_TAIL = 10
+MAX_ABS_LOG10_LR = 12
 
 
 class LrCalibration:
@@ -335,6 +335,8 @@ class LrCalibration:
         clipped = [bool(v) for v in data["clipped"]]
         if len(table) != len(SCORE_GRID) or len(clipped) != len(SCORE_GRID):
             raise ValueError("log10_lr_table과 clipped는 점수 0~100의 101개 항목이어야 합니다.")
+        if not all(math.isfinite(v) and abs(v) <= MAX_ABS_LOG10_LR * math.log(10) for v in table):
+            raise ValueError(f"log10_lr_table 값은 절댓값 {MAX_ABS_LOG10_LR} 이하의 유한한 수여야 합니다.")
         return cls(float(data["a"]), float(data["b"]), float(data["prior_log_odds"]), table, clipped)
 
 
@@ -538,6 +540,10 @@ def load_lr_profile(path: Path) -> dict[str, Any] | None:
     return data
 
 
+def _names(value: object) -> list[str]:
+    return [str(v) for v in value] if isinstance(value, list) else []
+
+
 def lr_statement(profile: dict[str, Any], score: float) -> str | None:
     """Korean "증거 강도(우도비)" sentence for one raw score; None unless validated."""
     if profile.get("validated") is not True:
@@ -546,15 +552,17 @@ def lr_statement(profile: dict[str, Any], score: float) -> str | None:
         calibration = LrCalibration.from_json(profile["calibration"])
     except (KeyError, TypeError, ValueError):
         return None
+    scope = profile.get("scope")
+    validation = profile.get("validation")
+    if not isinstance(scope, dict) or not isinstance(validation, dict):
+        return None
     lr = calibration.lr(score)
-    scope = profile.get("scope") or {}
-    validation = profile.get("validation") or {}
-    variants = ", ".join(str(v) for v in scope.get("variants") or []) or "전체"
+    variants = ", ".join(_names(scope.get("variants"))) or "전체"
     shown = f"{lr:.3g}" if lr >= 1 else f"1/{1 / lr:.3g}"
     capped = " (검증 자료의 꼬리 비율 한계에 걸린 값)" if calibration.at_bound(score) else ""
     return (
         f"증거 강도(우도비) {shown}{capped}: {verbal(lr)}. 측정 범위는 코퍼스 {scope.get('corpus_id')}의 "
-        f"{variants} 변형(생성기 {', '.join(str(g) for g in scope.get('generators') or []) or '-'})이고, "
+        f"{variants} 변형(생성기 {', '.join(_names(scope.get('generators'))) or '-'})이고, "
         f"검증 test 분할 AI {validation.get('n_pos')}·실제 {validation.get('n_neg')}개에서 Cllr {validation.get('cllr')}"
         f"(최솟값 {validation.get('cllr_min')})입니다. 이 범위 밖의 파일에는 적용되지 않으며, 결론이 아닌 증거 강도입니다."
     )

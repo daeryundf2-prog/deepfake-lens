@@ -369,6 +369,7 @@ def _lr_suffix(profile_path: object, score: float) -> str:
     """The validated "증거 강도(우도비)" sentence a profile's ``lr_profile`` names (OMO-20)."""
     if not profile_path:
         return ""
+    from .corpus_manifest import relpath_outside_corpus
     from .lr_measure import load_lr_profile, lr_statement
 
     source = Path(str(profile_path))
@@ -377,7 +378,7 @@ def _lr_suffix(profile_path: object, score: float) -> str:
     except (OSError, json.JSONDecodeError):
         return ""
     name = profile.get("lr_profile") if isinstance(profile, dict) else None
-    if not isinstance(name, str) or not name:
+    if not isinstance(name, str) or relpath_outside_corpus(name, source.parent):
         return ""
     lr = load_lr_profile(source.parent / name)
     statement = lr_statement(lr, score) if lr else None

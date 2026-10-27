@@ -245,6 +245,45 @@ class ReferenceSignalLrTest(unittest.TestCase):
         self.assertIn("증거 강도(우도비)", detail)
         self.assertNotIn("우도비", bare)
 
+    def _good_lr(self) -> dict[str, object]:
+        with tempfile.TemporaryDirectory() as tmp:
+            manifest, scores = _write_corpus(Path(tmp), {"val": 220, "test": 220}, 75, 25)
+            return measure(manifest, load_scores(scores), variants=["kakao"], resamples=50)["lr_profile"]
+
+    def test_a_damaged_lr_profile_leaves_the_raw_score_row_alone(self) -> None:
+        good = self._good_lr()
+        for change in (
+            lambda p: p["calibration"].__setitem__("log10_lr_table", [-400.0] * 101),
+            lambda p: p["calibration"].__setitem__("log10_lr_table", [float("nan")] * 101),
+            lambda p: p.__setitem__("scope", ["kakao"]),
+            lambda p: p.__setitem__("calibration", "broken"),
+        ):
+            profile = json.loads(json.dumps(good))
+            change(profile)
+            (detail,) = self._signals(profile)
+            self.assertIn("원점수 90/100", detail)
+            self.assertNotIn("우도비", detail)
+
+    def test_a_scope_list_of_the_wrong_type_is_shown_as_the_whole_corpus(self) -> None:
+        profile = json.loads(json.dumps(self._good_lr()))
+        profile["scope"]["variants"] = 5
+        (detail,) = self._signals(profile)
+        self.assertIn("증거 강도(우도비)", detail)
+        self.assertIn("전체 변형", detail)
+
+    def test_an_lr_profile_name_outside_the_models_folder_is_ignored(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            manifest, scores = _write_corpus(Path(tmp), {"val": 220, "test": 220}, 75, 25)
+            lr = measure(manifest, load_scores(scores), variants=["kakao"], resamples=50)["lr_profile"]
+            models = Path(tmp) / "models"
+            models.mkdir()
+            (Path(tmp) / "lr.json").write_text(json.dumps(lr), encoding="utf-8")
+            (models / "m-runtime.json").write_text(json.dumps({"lr_profile": "../lr.json"}), encoding="utf-8")
+            model = ExternalModelAnalysis(available=False, score=0, confidence="gated", model="zoo", detail="",
+                                          models=[{"profile": str(models / "m-runtime.json"), "model": "m", "display_name": "M", "available": False, "score": 90, "confidence": REFERENCE_CONFIDENCE}])
+            (detail,) = [signal.detail for signal in model_reference_signals(model)]
+        self.assertNotIn("우도비", detail)
+
     def test_an_unvalidated_lr_profile_adds_nothing(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             manifest, scores = _write_corpus(Path(tmp), {"val": 60, "test": 60}, 52, 48)
