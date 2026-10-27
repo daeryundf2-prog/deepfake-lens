@@ -876,6 +876,15 @@ h1[tabindex="-1"]:focus, h2[tabindex="-1"]:focus, h1[tabindex="-1"]:focus-visibl
     #toasts { bottom: 12px; }
 }
 
+
+/* D: how to check further when a file is 판단 불가 (never a conclusion) */
+.ext-check { margin-top: 6px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--panel); padding: 0 14px; font-size: 13.5px; }
+.ext-check > summary { cursor: pointer; min-height: 44px; display: flex; align-items: center; font-weight: 600; color: var(--ink-2); list-style: none; }
+.ext-check > summary::-webkit-details-marker { display: none; }
+.ext-check > summary::after { content: "+"; margin-left: auto; color: var(--muted); font-family: var(--mono); }
+.ext-check[open] > summary::after { content: "−"; }
+.ext-check ul { margin: 0 0 12px; padding-left: 18px; display: flex; flex-direction: column; gap: 6px; color: var(--ink-2); line-height: 1.6; }
+
 @media (max-width: 1180px) {
     .strip { grid-template-columns: repeat(2, minmax(0, 1fr)); }
     .detail { top: auto; }
