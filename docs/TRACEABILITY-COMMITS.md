@@ -4,7 +4,7 @@
 
 Y13/P12: 검증 결함 ID(라운드 1–11)를 0단계 스펙의 갭 ID(G1–G34) 또는 신규(스펙 외) 사유에 매핑하고, 현재 phase0 히스토리의 커밋마다 제목의 ID와 'Gaps:' 줄을 적는다. 라운드 3과 라운드 6의 N은 서로 다른 집합이므로 N3-x / N6-x로, 라운드 5의 G1–G16은 스펙의 G1–G34와 충돌하므로 V5-G1…V5-G16으로 표기한다. 매핑(ids[], wp_gaps, unused_ids, notes)은 손으로 관리하는 데이터이고, commits[]와 ids[].commits는 scripts/build_traceability_commits.py가 git 히스토리에서 다시 만든다(제목으로 이전 항목과 매칭).
 
-범위: `84dcb09..4ec5f54`(병합 커밋 제외, 커밋 754개). 이 표는 **표를 재생성한 커밋의 부모까지**를 덮는다 — 재생성 커밋 자신의 해시는 표에 없다(자기 해시를 담을 수 없음). CI(`python scripts/build_traceability_commits.py --check`)가 같은 범위를 히스토리에서 다시 만들어 커밋된 표와 비교한다.
+범위: `84dcb09..408637b`(병합 커밋 제외, 커밋 758개). 이 표는 **표를 재생성한 커밋의 부모까지**를 덮는다 — 재생성 커밋 자신의 해시는 표에 없다(자기 해시를 담을 수 없음). CI(`python scripts/build_traceability_commits.py --check`)가 같은 범위를 히스토리에서 다시 만들어 커밋된 표와 비교한다.
 
 요약: ID 354개 — 스펙 갭에 매핑 232개(그중 신규 사유 병기 80개), 신규(스펙 외)만 122개.
 
@@ -1168,3 +1168,7 @@ R31: c15ed6e의 제목 ID `R31`은 라운드 2의 R1–R16(R10–R15 미사용)�
 | 10a7b67 | 31 | — | Gaps: 신규(스펙 외) | subject | fix(bundle): OMO-1 the Windows bundle check requires the app shell's scripts and stylesheet too (gui-shell/history/settings/onboarding.js, gui-shell.css) — a bundle without them would open the old layout silently; a fresh build passes (OMO-1; Gaps: 신규) |
 | b2fbf19 | 31 | — | Gaps: 신규(스펙 외) | subject | fix(scan-jobs): OMO-4 the skipped-record count of the history comes back per call (stats) instead of a store attribute two concurrent requests could overwrite (OMO-4; Gaps: 신규) |
 | 4ec5f54 | 31 | — | Gaps: 신규(스펙 외) | subject | fix(bundle): OMO-1 the bundle check also requires gui-settings.css and gui-onboarding.css — without them the settings dialog and the welcome panel open unstyled (OMO-1; Gaps: 신규) |
+| 61c9416 | 31 | — | Gaps: 신규(스펙 외) | subject | docs(qa): OMO commit traceability regenerated on 4ec5f54 — the bundle-check fixes after the gate review (10a7b67, 4ec5f54) and the per-call history skip count (b2fbf19) in the table (OMO; Gaps: 신규) |
+| fc4b63d | 31 | — | Gaps: 신규(스펙 외) | subject | feat(gui): OMO-13 the UI font Pretendard Variable (OFL-1.1) ships in the package and both servers serve it at /fonts/PretendardVariable.woff2 — no web-font request leaves the machine; the bundle check requires it (OMO-13; Gaps: 신규) |
+| 3e912e5 | 31 | — | Gaps: 신규(스펙 외) | subject | feat(gui): OMO-13 modern redesign — Pretendard, zinc neutrals with one indigo accent, sticky translucent top bar, segmented tabs, verdict summary cards, rounded ledger, refined sidebar, dialogs and welcome card; theme tokens defined once in gui.css; the offline test now pins every CSS url() to the bundled /fonts/ (OMO-13; Gaps: 신규) |
+| 408637b | 31 | — | Gaps: 신규(스펙 외) | subject | fix(gui): OMO-8 a multi-file drop keeps every file (entries and the file list are read before the first await, the drop's data is gone after dispatch) and the running sidebar item names the case only when it belongs to the scanned folder (dfl:scan-started caseForScan) — found by the all-features QA (OMO-8; Gaps: 신규) |
