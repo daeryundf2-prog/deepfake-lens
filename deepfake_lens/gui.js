@@ -1336,13 +1336,14 @@
             dropZone.classList.remove('over');
             if (scanBusy) return;
             const items = e.dataTransfer.items;
+            // The drop's data is readable only while the event is dispatched: every entry and the plain file
+            // list are taken before the first await (later items of a multi-file drop were lost).
+            const plain = Array.from(e.dataTransfer.files || []);
             if (items && items.length && items[0].webkitGetAsEntry) {
+                const entries = Array.from(items, item => item.webkitGetAsEntry()).filter(Boolean);
                 const files = [];
-                for (const item of items) {
-                    const entry = item.webkitGetAsEntry();
-                    if (entry) await traverseEntry(entry, files);
-                }
-                addFiles(files);
+                for (const entry of entries) await traverseEntry(entry, files);
+                addFiles(files.length ? files : plain);
             } else {
                 addFiles(Array.from(e.dataTransfer.files));
             }
@@ -1424,7 +1425,8 @@
         // partial-result toasts, the move to the results and the dfl:scan-* events; the error toasts still show.
         async function runScanJob(jobId, folderPath, options, quiet) {
             currentJobId = jobId;
-            if (!quiet) dflEmit('dfl:scan-started', { jobId, folder: folderPath || '' });
+            // caseForScan: the case fields belong to the folder about to be scanned (lastScanRoot still names the last one)
+            if (!quiet) dflEmit('dfl:scan-started', { jobId, folder: folderPath || '', caseForScan: !caseNeedsConfirm(caseFolder, folderPath ? 'root:' + folderPath : caseScope(), caseHasValues()) });
             retireErrors();
             if (!quiet)
             progressStart('검사 중', true);

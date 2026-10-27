@@ -239,9 +239,10 @@
         }
     }
 
-    function startRunning(jobId, folder) {
-        const fields = DFL.getCase();
-        running = { jobId, title: caseTitle(fields) || folderName(folder) || '검사', done: 0, total: 0 };
+    function startRunning(jobId, folder, caseForScan) {
+        // the case label only when the case belongs to the scanned folder (as when it is saved on finish)
+        const fields = caseForScan ? DFL.getCase() : null;
+        running = { jobId, title: (fields && caseTitle(fields)) || folderName(folder) || '검사', done: 0, total: 0 };
         render();
     }
 
@@ -251,11 +252,11 @@
 
     document.addEventListener('dfl:scan-started', event => {
         const d = event.detail || {};
-        startRunning(d.jobId, d.folder);
+        startRunning(d.jobId, d.folder, d.caseForScan === true);
     });
     document.addEventListener('dfl:scan-progress', event => {
         const d = event.detail || {};
-        if (!running) startRunning(d.jobId, '');
+        if (!running) startRunning(d.jobId, '', DFL.caseConfirmed());
         running.done = Number.isInteger(d.done) ? d.done : running.done;
         running.total = Number.isInteger(d.total) ? d.total : running.total;
         render();
