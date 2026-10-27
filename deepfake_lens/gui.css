@@ -848,6 +848,34 @@ h1[tabindex="-1"]:focus, h2[tabindex="-1"]:focus, h1[tabindex="-1"]:focus-visibl
 /* big numerals in the UI font with tabular figures (the mono zero read as a slashed glyph) */
 .seg .seg-n, .prog-count .big, .prog-count .of, .qc-head .big { font-family: var(--font); font-feature-settings: "tnum"; }
 
+
+/* review fixes: Korean text stays in the UI font; numbers keep tabular figures */
+.step { font-family: var(--font); font-feature-settings: "tnum"; letter-spacing: 0.02em; }
+.case-meta { font-feature-settings: "tnum"; }
+.scope-hint { margin-top: 2px; }
+/* the finish toast: short, centred at the bottom of the main column, never over the evidence panel */
+#toasts { left: 50%; right: auto; transform: translateX(-50%); align-items: center; max-width: min(460px, calc(100vw - 32px)); }
+.toast { padding: 9px 14px; font-size: 13.5px; }
+@media (min-width: 1181px) { body.has-shell #toasts { left: calc(264px + (100vw - 264px) / 2); } }
+/* first-run: what the tool finds and what it cannot */
+.welcome-scope { width: 100%; display: flex; flex-direction: column; gap: 6px; padding: 12px 14px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--panel); font-size: 13.5px; line-height: 1.6; }
+.welcome-scope b { margin-right: 6px; }
+/* the report preview before an exhibit is chosen: an empty form */
+.a4 .a4-empty-note { margin-top: 18px; font-size: 11.5px; }
+.a4 .a4-skeleton td { height: 26px; }
+@media (max-width: 720px) {
+    /* a compact top bar: the brand line holds the history button; chips and version step aside */
+    .topbar { gap: 6px 10px; padding-top: 8px; padding-bottom: 8px; }
+    .topbar .sb-toggle { min-height: 40px; }
+    #ver-chip, #pdf-chip, #sign-chip { display: none !important; }
+    .brand { flex: 1 1 auto; }
+    .case-line { flex-basis: 100%; gap: 0 8px; }
+    .case-line .case-meta { display: none; }
+    .viewnav { order: 5; }
+    .viewnav a { min-height: 40px; padding: 0 10px; }
+    #toasts { bottom: 12px; }
+}
+
 @media (max-width: 1180px) {
     .strip { grid-template-columns: repeat(2, minmax(0, 1fr)); }
     .detail { top: auto; }

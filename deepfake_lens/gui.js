@@ -198,7 +198,7 @@
             el.className = 'toast';
             el.textContent = displayName(msg);  // R11-10: server messages may echo a name
             $('toasts').appendChild(el);
-            setTimeout(() => el.remove(), 4000);
+            setTimeout(() => el.remove(), 2500);
         }
 
         // A button that is busy keeps its focus: aria-disabled, not disabled (A11Y-4).
@@ -396,12 +396,12 @@
                 else if (wa < wt) parts.push(`신경망 가중치 일부 탑재 (${wa}/${wt}) — 미탑재 엔진의 판단이 빠져 있습니다.`);
             }
             const env = envFacts();
-            if (env.gated.length) parts.push(`측정 게이트 때문에 꺼진 신경망 탐지기 ${env.gated.length}종: ${env.gated.map(shown).join(', ')}`);
-            env.missing.forEach(([check, n]) => parts.push(`<b>결정 검사 미설치</b> — ${escapeHtml(checkLabel(check))}: 의존성이 없어 ${n}개 파일에서 실행하지 못했습니다. 이 검사가 내는 결론(원본성 근거 등)은 나올 수 없습니다.`));
+            if (env.gated.length) parts.push(`정확도 검증을 통과하지 못해 결론에 쓰지 않는 AI 판별 모델 ${env.gated.length}종: ${env.gated.map(shown).join(', ')}`);
+            env.missing.forEach(([check, n]) => parts.push(`<b>이 PC에서 못 한 검사</b> — ${escapeHtml(checkLabel(check))}: 필요한 구성요소가 이 PC에 없어 ${n}개 파일에서 실행하지 못했습니다. 그 파일에서는 이 검사가 내는 근거(원본성 근거 등)가 나올 수 없습니다.`));
             if (thr.provisional || thr.source === 'builtin_defaults') {
                 parts.push('판정 임계값: <b>미측정 잠정값</b> — 라벨 코퍼스로 보정되기 전에는 임계값을 근거로 쓰지 마십시오.');
             }
-            if (thr.in_sample) parts.push('판정 임계값: <b>in-sample(참고)</b> — 적합에 쓴 같은 표본에서 평가된 값이라 감정 근거가 아닙니다.');
+            if (thr.in_sample) parts.push('판정 기준값: <b>따로 검증되지 않은 참고값</b> — 기준값을 정한 표본으로만 평가했기 때문에 감정 근거가 아닙니다.');
             // N8: a non-recursive scan never omits subfolders silently.
             const skippedDirs = (lastProvenance.summary || {}).subfolders_skipped || 0;
             // P5: and the files inside them (recursive count, symlinks excluded).
@@ -833,7 +833,7 @@
             // G-3: a decisive check that did not run leads, ahead of the file's scope.
             const notRun = decisiveNotRun(r);
             // GUI-REV7 F-14: the row folds a reason's repeated phrases (foldReason); the detail panel keeps it whole.
-            if (notRun.length) parts.push('결정 검사 미실행 — ' + notRun.map(c => checkLabel(c.check) + ': ' + (c.reason ? foldReason(c.reason) : '사유 기록 없음')).join('; '));
+            if (notRun.length) parts.push('결정 검사 못 함 — ' + notRun.map(c => checkLabel(c.check) + ': ' + (c.reason ? guiText(foldReason(c.reason)) : '사유 기록 없음')).join('; '));
             const cues = cueEvidence(r);
             if (cues.length) parts.push(`결론에 못 미친 근거 ${cues.length}건 — ` + cues[0].title);
             const unverified = unverifiedRecords(r);
@@ -942,9 +942,9 @@
             const summary = lastProvenance.summary || {};
             const short = [];
             const neuralOff = gated.size > 0 || (cov.weights_total !== undefined && !(cov.weights_available > 0));
-            if (gated.size) short.push(`신경망 탐지기 ${gated.size}종은 측정 기준에 못 미쳐 꺼져 있습니다`);
-            else if (neuralOff) short.push('신경망 탐지기는 꺼져 있습니다(측정 게이트 미충족)');
-            Object.keys(missing).forEach(check => short.push(`${checkLabel(check)} 미설치 — ${missing[check]}개 파일에서 실행 못 함`));
+            if (gated.size) short.push(`AI 판별 모델 ${gated.size}종은 정확도가 검증되지 않아 결론에 쓰지 않습니다`);
+            else if (neuralOff) short.push('AI 판별 모델은 정확도가 검증되지 않아 결론에 쓰지 않습니다');
+            Object.keys(missing).forEach(check => short.push(`이 PC에서 할 수 없는 검사: ${checkLabel(check)} — ${missing[check]}개 파일에서 그 근거를 찾지 못함`));
             const notScanned = (summary.subfolder_files_skipped || 0) + (summary.files_over_cap || 0);
             if (notScanned || summary.subfolders_skipped) short.push(`검사하지 않은 파일 ${notScanned}개(하위 폴더·파일 상한)`);
             if (!short.length && (thr.in_sample || thr.provisional)) short.push('판정 임계값은 참고용입니다');
@@ -958,7 +958,7 @@
             // The specific threshold lines below replace the notice's short one.
             const lines = envFacts().short.filter(line => line !== '판정 임계값은 참고용입니다');
             const thr = lastProvenance.thresholds || {};
-            if (thr.in_sample) lines.push('판정 임계값은 적합에 쓴 같은 표본에서 평가된 값(in-sample)이라 감정 근거가 아님');
+            if (thr.in_sample) lines.push('판정 기준값은 따로 검증되지 않은 참고값이라 감정 근거가 아님');
             if (thr.provisional || thr.source === 'builtin_defaults') lines.push('판정 임계값은 미측정 잠정값');
             // K-6: only 판단 불가 rows are "판단 불가"; a row with a conclusion and a failed check
             // is said separately.
@@ -1512,12 +1512,12 @@
         function deniedFolderHint(message, folder, roots, desktop, earlier) {
             if (!/허용되지 않은 경로/.test(message)) return '';
             if (earlier && desktop) return " — 프로그램을 다시 시작하면 고른 폴더의 등록이 사라집니다. 같은 폴더를 '검사할 폴더 고르기'로 다시 고르십시오.";
-            if (earlier) return ' — 이 검사의 폴더가 지금 서버에 등록되어 있지 않습니다(서버를 다시 시작한 경우). 그 폴더를 --folder 또는 --allow-root로 등록해 서버를 다시 시작하십시오.';
+            if (earlier) return ' — 이 검사의 폴더가 지금 검사 허용 목록에 없습니다(프로그램을 다시 켠 경우). 데스크톱 모드(「Deepfake Lens」 실행 파일)에서 「검사할 폴더 고르기」로 그 폴더를 다시 고르십시오.';
             const pick = desktop ? ' 다른 폴더는 위의 "검사할 폴더 고르기"로 고르십시오.' : '';
             if (Array.isArray(roots) && roots.length) return ` — 지금 검사할 수 있는 폴더(그 안의 폴더 포함): ${rootsSummary(roots)}.` + pick;
             if (desktop) return ' — 아직 검사할 수 있는 폴더가 없습니다.' + pick;
             const own = folder ? ` 이 서버의 기본 폴더: ${folder}` : '';
-            return ' — 서버를 시작할 때 --folder 또는 --allow-root로 등록한 폴더 안만 검사할 수 있습니다.' + own;
+            return ' — 프로그램을 켤 때 등록한 폴더 안만 검사할 수 있습니다. 다른 폴더는 데스크톱 모드(「Deepfake Lens」 실행 파일)에서 「검사할 폴더 고르기」로 고르십시오.' + own;
         }
         // RISK B4: the hint for a 403 answer about a scan already made (the body is read from a copy).
         async function deniedResponseHint(res) {
@@ -1891,7 +1891,7 @@
                 `<span class="mk mk-${VERDICT_MARK[v]}" aria-hidden="true"></span>` +
                 `<span class="row-name"><span class="nm">${pathHtml(rowPath)}</span><span class="vs">${shown(shortVerdict(item))}</span></span>` +
                 `<span class="row-reason">${shown(rowReason(item))}</span>` +
-                `<span class="row-cov">${cov}</span>` +
+                `<span class="row-cov"${cc.total ? ` title="이 파일에 해당하는 검사 ${cc.total}개 중 ${cc.ran}개를 실행했습니다${cc.failed ? ` (실패 ${cc.failed}개)` : ''}"` : ''}>${cov}</span>` +
                 `<span class="row-rev">${rev.star ? '검토함' : ''}</span>`;
             btn.addEventListener('click', () => selectEntry(entry, window.innerWidth <= 1180));
             entry.row = btn;
@@ -2767,7 +2767,12 @@
             // 판단 불가 with that group unticked: 0 exhibits).
             if (!results.length) { a4Listing = null; box.innerHTML = '<p class="miss">검사 결과가 없습니다.</p>'; box.dataset.ready = String(a4Seq); return; }
             if (!sel.length) {
-                box.innerHTML = '<p class="miss">고른 서증이 없습니다 — 서증으로 넣을 파일을 고르면 증거설명서 서식 그대로 미리 봅니다.</p>';
+                // an empty form, so the page reads as "not filled yet", not as broken
+                box.innerHTML = '<div class="a4-top"><span>증거설명서 미리보기</span><span>서증 0개</span></div>' +
+                    '<p class="a4-title">증 거 설 명 서</p>' +
+                    '<p class="miss a4-center a4-empty-note">고른 서증이 없습니다 — 왼쪽의 「서증으로 넣을 파일」에서 고르면 이 서식에 그대로 채워집니다.</p>' +
+                    '<table class="a4-skeleton" aria-hidden="true"><thead><tr><th>호증</th><th>서증명</th><th>작성자</th><th>입증취지</th></tr></thead><tbody>' +
+                    '<tr><td>&nbsp;</td><td></td><td></td><td></td></tr>'.repeat(4) + '</tbody></table>';
                 box.dataset.ready = String(a4Seq);
                 return;
             }
@@ -3307,7 +3312,9 @@
             // file names, which are shown as they are.
             return String(text == null ? '' : text)
                 .replace(/결론은 `scan`을 사용하십시오/g, '결론은 폴더 검사를 사용하십시오')
-                .replace(/`(pip install [^`\n]*)`/g, '$1');
+                .replace(/`(pip install [^`\n]*)`/g, '$1')
+                // the engine's "의존성 부재: <모듈>" in the examiner's words (reports keep the engine's text)
+                .replace(/의존성 부재:\s*([^\s;·,)]+)/g, '이 PC에 필요한 구성요소($1)가 없음');
         }
         // GUI-REV7 F-12: an unmeasured comparison does not lead with its raw score in large type (read as
         // "99% 같은 사람"); the head says "참고 신호 — 미측정" and the number stays in the sentence
@@ -3604,7 +3611,7 @@
             }
             const id = typeof signing.key_id === 'string' && signing.key_id ? ` (키 id ${signing.key_id})` : '';
             if (signing.source === 'file' || signing.source === 'created') return { tag: 'info', text: '서명 키: 이 PC의 사용자 폴더(report-key) — 다른 PC에서는 검증되지 않음' + id };
-            if (signing.source === 'env') return { tag: 'info', text: '서명 키: 환경 변수(DEEPFAKE_LENS_REPORT_KEY)' + id };
+            if (signing.source === 'env') return { tag: 'info', text: '서명 키: 프로그램을 켤 때 지정된 키 — 같은 키를 가진 곳에서만 검증됨' + id };
             return { tag: 'info', text: '서명 키: 있음' + id };
         }
 
@@ -3613,14 +3620,14 @@
             if (!roots.length) {
                 return {
                     head: desktop ? '아직 검사할 수 있는 폴더가 없습니다 — 위의 "검사할 폴더 고르기"로 고르면 그 폴더(그 안의 폴더 포함)를 검사할 수 있습니다.'
-                        : '서버를 시작할 때 등록한 폴더(--folder, --allow-root) 안만 검사할 수 있습니다.',
+                        : '프로그램을 켤 때 등록한 폴더 안만 검사할 수 있습니다. 다른 폴더는 데스크톱 모드(「Deepfake Lens」 실행 파일)에서 「검사할 폴더 고르기」로 고르십시오.',
                     items: [], more: '',
                 };
             }
             const shown = roots.slice(0, ROOTS_SHOWN);
             return {
                 head: desktop ? '지금 검사할 수 있는 폴더(그 안의 폴더 포함 — 다른 폴더는 "검사할 폴더 고르기"로):'
-                    : '지금 검사할 수 있는 폴더(그 안의 폴더 포함 — 서버를 시작할 때 --folder, --allow-root로 등록):',
+                    : '지금 검사할 수 있는 폴더(그 안의 폴더 포함 — 다른 폴더는 데스크톱 모드의 「검사할 폴더 고르기」로):',
                 items: shown,
                 more: roots.length > shown.length ? `외 ${roots.length - shown.length}개` : '',
             };

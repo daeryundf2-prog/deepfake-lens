@@ -63,6 +63,7 @@ def _helpers() -> str:
         _function(source, "undeterminedSplitText"),
         _section(source, "        // Evidence-bearing rows first", "        function filteredResults("),
         _function(source, "skippedHtml"),
+        _function(source, "guiText"),
     ])
 
 
@@ -143,7 +144,7 @@ class LedgerReasonTest(unittest.TestCase):
         self.assertEqual(out["cue"][:3], ["결론에 못 미친 근거 1건 — 생성 도구 메타데이터 단서", "판단 불가 — 단서 1건",
                                           "기록에 단서가 있지만 결론을 낼 만큼은 아닙니다."])
         self.assertNotIn("근거 없음", out["cue"][0] + out["cue"][1])
-        self.assertEqual(out["c2pa_missing"][0], "결정 검사 미실행 — C2PA 출처 검증: 의존성 부재: c2pa")
+        self.assertEqual(out["c2pa_missing"][0], "결정 검사 못 함 — C2PA 출처 검증: 이 PC에 필요한 구성요소(c2pa)가 없음")
         self.assertEqual(out["c2pa_missing"][2], "결정 검사를 실행하지 못해 결론을 내리지 않았습니다.")
         # GUI-REV2 H-6 (G-3 residual): an unverified C2PA record is its own kind, never "근거 없음".
         self.assertEqual(out["c2pa_unverified"][:3], ["확인 안 된 기록 — C2PA 매니페스트 존재(검증 미완료)", "판단 불가 — 확인 안 된 기록",
@@ -203,7 +204,7 @@ class LedgerReasonTest(unittest.TestCase):
             "console.log(JSON.stringify([inSample, reportLimitLines()]));"
         )
         assert isinstance(out, list)
-        self.assertEqual(out[0], ["판정 임계값은 적합에 쓴 같은 표본에서 평가된 값(in-sample)이라 감정 근거가 아님"])
+        self.assertEqual(out[0], ["판정 기준값은 따로 검증되지 않은 참고값이라 감정 근거가 아님"])
         self.assertEqual(out[1], ["기록된 검사 한계 없음 — 결론은 파일에 남은 기록에만 근거함"])
         self.assertNotIn("특이 사항 없음", json.dumps(out, ensure_ascii=False))
 
@@ -275,8 +276,8 @@ class LedgerReasonTest(unittest.TestCase):
         assert isinstance(out, dict)
         self.assertEqual(sorted(out["gated"]), sorted(MODELS))
         self.assertEqual(out["missing"], [["c2pa", 2]])
-        self.assertIn("신경망 탐지기 3종은 측정 기준에 못 미쳐 꺼져 있습니다", out["short"])
-        self.assertIn("C2PA 출처 검증 미설치 — 2개 파일에서 실행 못 함", out["short"])
+        self.assertIn("AI 판별 모델 3종은 정확도가 검증되지 않아 결론에 쓰지 않습니다", out["short"])
+        self.assertIn("이 PC에서 할 수 없는 검사: C2PA 출처 검증 — 2개 파일에서 그 근거를 찾지 못함", out["short"])
         self.assertIn("결론은 파일에 남은 기록만으로 냈습니다", out["short"])
 
 

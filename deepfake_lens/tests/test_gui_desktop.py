@@ -162,10 +162,11 @@ class Desk3FolderPickerTest(unittest.TestCase):
         self.assertEqual(many["more"], "외 2개")
         self.assertIn("검사할 폴더 고르기", many["head"])
         self.assertEqual((one["items"], one["more"]), (["/a"], ""))
-        self.assertIn("--allow-root", one["head"])
+        self.assertIn("데스크톱 모드의 「검사할 폴더 고르기」", one["head"])
+        self.assertNotIn("--allow-root", one["head"])
         self.assertEqual(none_desktop["items"], [])
         self.assertTrue(none_desktop["head"].startswith("아직 검사할 수 있는 폴더가 없습니다"))
-        self.assertEqual(none_web["head"], "서버를 시작할 때 등록한 폴더(--folder, --allow-root) 안만 검사할 수 있습니다.")
+        self.assertEqual(none_web["head"], "프로그램을 켤 때 등록한 폴더 안만 검사할 수 있습니다. 다른 폴더는 데스크톱 모드(「Deepfake Lens」 실행 파일)에서 「검사할 폴더 고르기」로 고르십시오.")
 
     @unittest.skipUnless(_js_engine(), "no JavaScript engine (node or osascript)")
     def test_the_refusal_lists_the_registered_folders(self) -> None:
@@ -183,7 +184,7 @@ class Desk3FolderPickerTest(unittest.TestCase):
             " — 지금 검사할 수 있는 폴더(그 안의 폴더 포함): /1, /2, /3, /4, /5 외 1개." + pick,
             " — 아직 검사할 수 있는 폴더가 없습니다." + pick,
             # GUI-REV7 F-3's text when the list is not known (an older server) — unchanged
-            " — 서버를 시작할 때 --folder 또는 --allow-root로 등록한 폴더 안만 검사할 수 있습니다. 이 서버의 기본 폴더: /srv/case",
+            " — 프로그램을 켤 때 등록한 폴더 안만 검사할 수 있습니다. 다른 폴더는 데스크톱 모드(「Deepfake Lens」 실행 파일)에서 「검사할 폴더 고르기」로 고르십시오. 이 서버의 기본 폴더: /srv/case",
             "",
         ])
 
@@ -309,7 +310,8 @@ class RiskB4B5B13B17Test(unittest.TestCase):
         )
         desktop, web, host, new_scan = json.loads(_run_js(body))
         self.assertIn("같은 폴더를 '검사할 폴더 고르기'로 다시 고르십시오", desktop)
-        self.assertIn("--folder 또는 --allow-root", web)
+        self.assertIn("「검사할 폴더 고르기」로 그 폴더를 다시 고르십시오", web)
+        self.assertNotIn("--allow-root", web)
         self.assertEqual(host, "")
         self.assertTrue(new_scan.startswith(" — 지금 검사할 수 있는 폴더"))  # a new scan's refusal is unchanged
 
@@ -449,7 +451,7 @@ class Desk6StatusChipsTest(unittest.TestCase):
         file_, created, env, none, other, absent, empty = json.loads(_run_js(body))
         self.assertEqual(file_, {"tag": "info", "text": "서명 키: 이 PC의 사용자 폴더(report-key) — 다른 PC에서는 검증되지 않음 (키 id ab12)"})
         self.assertEqual(created, {"tag": "info", "text": "서명 키: 이 PC의 사용자 폴더(report-key) — 다른 PC에서는 검증되지 않음"})
-        self.assertEqual(env, {"tag": "info", "text": "서명 키: 환경 변수(DEEPFAKE_LENS_REPORT_KEY) (키 id cd34)"})
+        self.assertEqual(env, {"tag": "info", "text": "서명 키: 프로그램을 켤 때 지정된 키 — 같은 키를 가진 곳에서만 검증됨 (키 id cd34)"})
         self.assertEqual(none["tag"], "warn")
         self.assertIn("서명 없음", none["text"])
         self.assertEqual(other, {"tag": "info", "text": "서명 키: 있음 (키 id ef)"})
@@ -459,7 +461,10 @@ class Desk6StatusChipsTest(unittest.TestCase):
     def test_the_variable_name_matches_the_server(self) -> None:
         from deepfake_lens.signing import REPORT_KEY_ENV
 
-        self.assertIn(f"서명 키: 환경 변수({REPORT_KEY_ENV})", _function("signingCheck"))
+        # the key from the server's environment is still told apart, in the examiner's words (no variable name)
+        check = _function("signingCheck")
+        self.assertIn("signing.source === 'env'", check)
+        self.assertNotIn(REPORT_KEY_ENV, check)
 
 
 class Desk7EmptyStateTest(unittest.TestCase):
