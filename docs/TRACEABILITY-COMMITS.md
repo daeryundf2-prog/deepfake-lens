@@ -4,7 +4,7 @@
 
 Y13/P12: 검증 결함 ID(라운드 1–11)를 0단계 스펙의 갭 ID(G1–G34) 또는 신규(스펙 외) 사유에 매핑하고, 현재 phase0 히스토리의 커밋마다 제목의 ID와 'Gaps:' 줄을 적는다. 라운드 3과 라운드 6의 N은 서로 다른 집합이므로 N3-x / N6-x로, 라운드 5의 G1–G16은 스펙의 G1–G34와 충돌하므로 V5-G1…V5-G16으로 표기한다. 매핑(ids[], wp_gaps, unused_ids, notes)은 손으로 관리하는 데이터이고, commits[]와 ids[].commits는 scripts/build_traceability_commits.py가 git 히스토리에서 다시 만든다(제목으로 이전 항목과 매칭).
 
-범위: `dad9730..10efc79`(병합 커밋 제외, 커밋 560개). 이 표는 **표를 재생성한 커밋의 부모까지**를 덮는다 — 재생성 커밋 자신의 해시는 표에 없다(자기 해시를 담을 수 없음). CI(`python scripts/build_traceability_commits.py --check`)가 같은 범위를 히스토리에서 다시 만들어 커밋된 표와 비교한다.
+범위: `84dcb09..e8979ab`(병합 커밋 제외, 커밋 750개). 이 표는 **표를 재생성한 커밋의 부모까지**를 덮는다 — 재생성 커밋 자신의 해시는 표에 없다(자기 해시를 담을 수 없음). CI(`python scripts/build_traceability_commits.py --check`)가 같은 범위를 히스토리에서 다시 만들어 커밋된 표와 비교한다.
 
 요약: ID 354개 — 스펙 갭에 매핑 232개(그중 신규 사유 병기 80개), 신규(스펙 외)만 122개.
 
@@ -414,6 +414,179 @@ R31: c15ed6e의 제목 ID `R31`은 라운드 2의 R1–R16(R10–R15 미사용)�
 
 | 커밋 | 라운드 | 제목의 ID | Gaps 줄 | Gaps 출처 | 제목 |
 | --- | --- | --- | --- | --- | --- |
+| caa5276 |  | — | 없음 | — | fix(cli): restore CLI by removing nonexistent generate_legal_report import |
+| 409d342 |  | — | 없음 | — | refactor: remove fabricated metrics and simulated discovery features |
+| 8395d47 |  | — | 없음 | — | security: harden local web/API servers against drive-by and rebinding |
+| bd81807 |  | — | 없음 | — | refactor: remove dead modules and unreachable code |
+| 6e06354 |  | — | 없음 | — | fix: correct provably wrong detection math (audio, multimodal, fusion, face, video) |
+| 08f2cf4 |  | — | 없음 | — | fix: split-aware calibration, honest FPR fallback, excluded unanalyzed files |
+| dceb8a0 |  | — | 없음 | — | fix: bound resource use, validate ffmpeg argv, de-duplicate PixelAnalysis |
+| be817d7 |  | — | 없음 | — | fix(scripts): substitute @OUT@ placeholder correctly in smoke checks |
+| 356f2db |  | — | 없음 | — | feat: real frequency forensics expert and CHROM rPPG screening (Phase 2) |
+| 07cc64b |  | — | 없음 | — | feat: SBI training path, PRNU sensor-fingerprint screening, voice regularity metrics |
+| 62308a2 |  | — | 없음 | — | feat: real C2PA manifest validation via official SDK; honest byte-scan demotion |
+| a152b02 |  | — | 없음 | — | fix: measured evidence integrity, checksum naming, PDF notice, EER metric |
+| 94bc788 |  | — | 없음 | — | feat(android): ONNX Runtime inference path; chore: verified-link registry |
+| 20a20b4 |  | — | 없음 | — | ci: add workflow for tests, CLI smoke, Android unit tests, link checks |
+| 3b6d4f5 |  | — | 없음 | — | fix: keep stdlib-only CI green (guarded sbi import, lazy numpy, FloatBuffer read) |
+| d944693 |  | — | 없음 | — | fix: pass explicit input size in preprocessing tests; guard numpy in CI |
+| 6aee0ef |  | — | 없음 | — | fix(experiments): export TorchScript checkpoints through the legacy ONNX exporter |
+| f91a3a6 |  | — | 없음 | — | feat: Phase A hygiene — word-boundary tool matching, forensic loader issues, json-out parents, docs coverage, extras CI job |
+| 27bfd4e |  | — | 없음 | — | feat(experiments): best-checkpoint selection, early stopping, LR schedule |
+| c3c484f |  | — | 없음 | — | fix: repair 404 ComfyUI docs link, retry transient 5xx in link checker, guard onnx export dependency |
+| a5b8d1a |  | — | 없음 | — | fix: restore lost C2PA fixture and make it reproducible |
+| 65e176d |  | — | 없음 | — | feat: close the robustness-evaluation loop with a variant generator |
+| e4158bd |  | — | 없음 | — | docs: roadmap + preserved CI workflow patch (#8) |
+| 83bdf11 |  | — | 없음 | — | chore: dev extra for contributor onboarding; roadmap status update |
+| a0ecb92 |  | — | 없음 | — | fix: recognize benchmark 0_real/1_fake label folders; first real-data eval |
+| 2e9cd3c |  | — | 없음 | — | docs: record Synthbuster first-pass results in the roadmap |
+| 0e502a9 |  | — | 없음 | — | fix: multi-digit class-prefix label folders; full scorecard and rewritten roadmap |
+| c2182f1 |  | — | 없음 | — | feat: AIDE pretrained-detector adapter, verified bit-exact, AUROC 1.0 on measured sets |
+| e468866 |  | — | 없음 | — | feat: full Synthbuster sweep (AUROC 0.951) + AIDE ONNX parity; roadmap rewritten against the four-modality audit |
+| 44279b4 |  | — | 없음 | — | chore: add MIT license |
+| e582a70 |  | — | 없음 | — | ci: enable c2pa sdk tests and bump actions to v5/v6 |
+| 703a761 |  | — | 없음 | — | fix: add timeout to video extraction subprocess |
+| 39d9d66 |  | — | 없음 | — | docs: note consolidation plan for duplicate analysis paths |
+| 074cb06 |  | — | 없음 | — | feat: aide runtime profile, fetch script, and default-engine wiring |
+| 91fe404 |  | — | 없음 | — | feat: label face landmarks by source, add optional MediaPipe FaceMesh path |
+| f04ec13 |  | — | 없음 | — | refactor: rename pseudo-perplexity to bigram_entropy in text_advanced |
+| 0b79e46 |  | — | 없음 | — | refactor: rename ml_classifier to rule_classifier |
+| 7550cf9 |  | — | 없음 | — | feat: multi-ROI rPPG with FakeCatcher-style phase coherence |
+| 02f147d |  | — | 없음 | — | feat: real A/V sync check via envelope cross-correlation in multimodal |
+| 06d4c78 |  | — | 없음 | — | test: add visibility-only coverage config and dev-extra entry |
+| 2a9f3a0 |  | — | 없음 | — | test: synthetic benchmark fixtures + scan pipeline e2e smoke harness |
+| e69ab84 |  | — | 없음 | — | test: ONNX contract unit tests + instrumented graceful-null skeleton |
+| fd88785 |  | — | 없음 | — | feat: verify MediaPipe FaceMesh path, pin extra to legacy-API builds |
+| 94dcf8a |  | — | 없음 | — | feat: isotonic score-calibration layer with honest insufficient-data fallback |
+| 883041a |  | — | 없음 | — | feat: examiner feedback loop with advisory fusion-weight suggestions |
+| 91bce6d |  | — | 없음 | — | refactor: consolidate duplicate analysis paths per consolidation-notes |
+| 264c056 |  | — | 없음 | — | fix: disclose pixel ensemble is below-chance without external model |
+| 5736785 |  | — | 없음 | — | feat: HMAC-SHA256 report signing with honest unsigned fallback |
+| 3a1c96a |  | — | 없음 | — | feat: model-zoo profiles — clip-linear/torchvision runtimes, placeholders, multi-profile fusion |
+| 86b5903 |  | — | 없음 | — | feat: checksummed benchmark fetcher + in-tree fixture E2E as CI step |
+| b20569f |  | — | 없음 | — | chore: gate coverage at fail_under=65 (measured floor ~67%) |
+| af02193 |  | — | 없음 | — | docs: screening-service contract + loopback defaults pinned in tests |
+| 3da983e |  | — | 없음 | — | fix(ci): guard numpy-dependent face tests and normalize weights in integer units |
+| 479a737 |  | — | 없음 | — | test: make face-landmark tests numpy-free and pin exact weight normalization |
+| b5f33f8 |  | — | 없음 | — | fix(models): unwrap BaseModelOutputWithPooling for clip-linear on transformers 5.x |
+| 7af3087 |  | — | 없음 | — | fix(models): unwrap nested 'model'/'net' state-dict wrappers for torchvision runtime |
+| 9cba68f |  | — | 없음 | — | chore: gitignore the bundled Android model asset |
+| c91742b |  | — | 없음 | — | feat(models): add AASIST audio runtime with modality-aware profile dispatch |
+| e67fd3d |  | — | 없음 | — | docs: record CIFAKE cross-domain bound (3 runtimes, AUROC ~0.5 at 32x32) + remaining-items roadmap |
+| 9aa6977 |  | — | 없음 | — | feat(models): hf-text-classifier runtime + OpenAI detector profile (text modality) |
+| f387cc0 |  | — | 없음 | — | docs: mark text detector done in remaining-items doc |
+| 4a9a6a0 |  | — | 없음 | — | feat(web): honesty layer in GUI + default neural profiles + working upload |
+| a433862 |  | — | 없음 | — | feat(web): token auth for LAN binds + elapsed progress + windowed results |
+| 9331d18 |  | — | 없음 | — | Let the web GUI pick folders directly and cover keyboard/screen-reader use |
+| f98eec4 |  | — | 없음 | — | Add examiner ground-truth feedback loop to the web GUI |
+| ce6effa |  | — | 없음 | — | Close the web analysis->documentation loop and record model licenses |
+| 45e6866 |  | — | 없음 | — | Complete v0.1.0 plan: Windows fixes, CSRF gate, video-frames runtime, FaceLandmarker, modern text profile |
+| d200d04 |  | — | 없음 | — | Post-release: async web scans, verified model assets, doc accuracy |
+| bf3e59b |  | — | 없음 | — | Add full-archive Synthbuster benchmark and evaluation script |
+| f8c2bbc |  | — | 없음 | — | Emulator-validated Android ONNX: swap int8 asset for working fp32 export |
+| 21e1492 |  | — | 없음 | — | Record measured text-detection boundaries |
+| a01ad43 |  | — | 없음 | — | Extend text-detection eval with Antigravity-style probe |
+| c3d8177 |  | — | 없음 | — | Flag English-calibrated lexical thresholds on Hangul text |
+| aaed4ed |  | — | 없음 | — | Add causal-LM perplexity text detector + Korean-aware layer + labeled seed corpus |
+| 68dfdcb |  | — | 없음 | — | Add binoculars two-LM runtime + expand labeled text corpus to n=30 |
+| 091e0de |  | — | 없음 | — | Add frontier-LLM fingerprint signals + LM-level burstiness |
+| a9401d6 |  | — | 없음 | — | Add unified /api/check endpoint + GUI quick-check card |
+| 62d2103 |  | — | 없음 | — | Add all-modality detection coverage plan |
+| f814960 |  | V1, V2 | 없음 | — | Wire video into scan path + BMP/GIF/TIFF image support (V1-1, V1-2, V5-1) |
+| 4823f76 |  | V1, V2, V3 | 없음 | — | Add document pipeline + video audio-track analysis (V1-3, V2) |
+| 409ada7 |  | V3 | 없음 | — | Wire isolated detectors into scan via --deep-signals opt-in (V3) |
+| 20b1845 |  | — | 없음 | — | Add V4 audio physical signals: pause, noise floor, harmonic stability |
+| 14ea1fb |  | — | 없음 | — | Add JPEG double-compression + ELA forensics to pixel expert (V5-2, V5-3) |
+| 67175e1 |  | — | 없음 | — | Add V6 comparison/sync probes: speaker, stylometry, lipsync, KGW watermark |
+| 99becb7 |  | — | 없음 | — | Update --deep-signals help to include lip-sync layer |
+| 9a6e28c |  | — | 없음 | — | Expose comparison/watermark probes + copy-move detection + doc metadata |
+| 5567d07 |  | — | 없음 | — | Add capability audit plan + gap research with implementation paths |
+| f1f1a2e |  | — | 없음 | — | Add HWP/HWPX text extraction via syhwp (gap-research item B-7) |
+| 887944f |  | — | 없음 | — | Add rotation/scale-robust copy-move via keypoint transform voting (B-4) |
+| 19a3965 |  | — | 없음 | — | Close gap-research items: Korean gate, ECAPA speaker, C2PA, tech-doc gate, SyncNet path |
+| 18fdb4f |  | — | 없음 | — | Add lighting-direction consistency check and SynthID watermark path |
+| 42948e9 |  | — | 없음 | — | Cap short-text scores at 49 with disclosure exemption |
+| 25e3876 |  | — | 없음 | — | Exclude English-only members on Korean text; tune short-text cap |
+| e42cb57 |  | — | 없음 | — | Downweight qwen-ppl after measured anchor calibration failure |
+| a8285f7 |  | — | 없음 | — | Effectively disable binoculars member after measured inversion |
+| df7d021 |  | — | 없음 | — | Mark PPL-based text members as English-anchored |
+| d9856ef |  | — | 없음 | — | Record final calibrated eval: ko FPR 0, conservative posture |
+| 918f539 |  | — | 없음 | — | Fix document/member mismatch and lipsync field semantics |
+| 40c6db3 |  | — | 없음 | — | Document calibrated member weights and SyncNet asset license |
+| bd657ea |  | — | 없음 | — | Keep SyncNet pipeline noise off stdout for JSON consumers |
+| 5fa35f2 |  | — | 없음 | — | Redesign web GUI as iOS-style card viewer with compare and heatmap |
+| f8adc01 |  | — | 없음 | — | Expand archives into per-member scan rows (zip/tar, optional 7z/rar) |
+| 80864a9 |  | — | 없음 | — | Add onboarding guide and score-interpretation help to GUI |
+| 0a109ec |  | — | 없음 | — | Add media preview and signal-strength grouping to result viewer |
+| a139ddc |  | — | 없음 | — | Fix CI failures and harden tests against missing optional deps |
+| 84a4eb2 |  | — | 없음 | — | Fix evaluation metrics and add shared metrics module |
+| 36f53ad |  | — | 없음 | — | Add stabilization and quality improvement roadmap |
+| 166b0b8 |  | — | 없음 | — | Wire face-manipulation ViT detector; reject failed FF++ checkpoint |
+| 82c1e80 |  | — | 없음 | — | Reject face ViT on labeled eval; add face-crop machinery and eval harness |
+| 76ff1f5 |  | — | 없음 | — | Wire wav2vec audio member and Swin image member after measured screening |
+| 876d318 |  | — | 없음 | — | Add coverage roadmap: measurement gaps -> faceswap -> forensic layers |
+| 3706de2 |  | — | 없음 | — | Roadmap: measured coverage expansion — SBI faceswap detector, ELA, video flicker, robustness evals |
+| dc0e0b5 |  | — | 없음 | — | Fix measured failure modes: SBI cross-domain FPR 0.67->0.07, downweight flat members |
+| 236d8ce |  | — | 없음 | — | Add doctor CLI, JPEG-QF degraded weighting, SSE check stream, Android SBI model |
+| 1723fde |  | — | 없음 | — | Korean corpus eval: gate verified, KoELECTRA classifier rejected on cross-gen |
+| c7882a0 |  | — | 없음 | — | Add next-phase improvement plan grounded in measured gaps |
+| 46f4784 |  | — | 없음 | — | Phase A: persistent eval harness + corpus build script + derived weights |
+| 7784852 |  | — | 없음 | — | Phase A done: eval harness verified, corpus preserved, FPR-penalized weights |
+| 855d1f7 |  | — | 없음 | — | Promote SBI v2 checkpoint with score_bias recalibration |
+| d549ccb |  | — | 없음 | — | Record Phase B measurements and expanded image baseline |
+| 3939915 |  | — | 없음 | — | Add SSE batch scan endpoint with per-file progress and cancellation |
+| 277a753 |  | — | 없음 | — | Add SD-Turbo corpus generator for the B2 self-training retry |
+| f58ae55 |  | — | 없음 | — | Pin eval-harness regressions: FPR-penalized weights, unavailable != zero |
+| 244747a |  | — | 없음 | — | B2 retry: wire SD-Turbo-trained image detector as advisory member |
+| f207742 |  | — | 없음 | — | B-sweep: add measured ONNX/video model candidates, reject 4 of 6 |
+| 3b531f3 |  | — | 없음 | — | V-phase: verify SyncNet, add face-track temporal probe, measure screen-capture evasion |
+| 0634e98 |  | — | 없음 | — | chore: vendor lazy-contracts, add charter, align license metadata to MIT |
+| f07e28c |  | — | 없음 | — | fix(security): harden checkpoint loading, C2PA status, and data splits |
+| ce3f389 |  | — | 없음 | — | UI trust pass: canonical band counts, result filter, scan cancel |
+| 2236ed4 |  | — | 없음 | — | Harden file-serving roots, add lint+dep-audit gates (LUMOS findings applied) |
+| d6bc422 |  | — | 없음 | — | GUI polish pass: refined visual system, review marks, keyboard nav |
+| 574dd79 |  | — | 없음 | — | Fix image reads failing on non-ASCII paths |
+| 7c31fa9 |  | — | 없음 | — | Bound model caches, unify token headers, harden scan resilience |
+| e485d7a |  | — | 없음 | — | Persist examiner review marks server-side |
+| 6275ccf |  | — | 없음 | — | feat(core): harden face detection, doctor diagnostics, and LRU neural cache |
+| 04e4c85 |  | — | 없음 | — | feat(reviews): add thread-safe review store and REST persistence endpoints |
+| 86011cb |  | — | 없음 | — | feat(gui): introduce forensic split comparison studio and accessible token dialog |
+| 39c3a0b |  | — | 없음 | — | feat(text): add Korean AI text detector profile and stylometry heuristics |
+| e4ba23b |  | — | 없음 | — | feat(reports): add court-admissible forensic PDF export with ECFS exhibit stamp |
+| 5652006 |  | — | 없음 | — | feat(forensics): add localized faceswap boundary seam and blending artifact detector |
+| 8cecd3f |  | — | 없음 | — | feat(legal): add ECFS electronic litigation evidence statement generator and PyMuPDF PDF builder |
+| 270c260 |  | — | 없음 | — | feat(offline): add air-gapped forensic lab model weight bundler and integrity verifier |
+| 9d1f896 |  | — | 없음 | — | feat(cli,gui): wire faceswap-seam, evidence-statement, vendor-weights into CLI and web GUI |
+| da24f11 |  | — | 없음 | — | Merge origin/main: unify examiner review persistence behind ReviewStore |
+| adf4b43 |  | — | 없음 | — | fix: render evidence PDF purpose column, honest unknown verdicts, air-gap verify semantics |
+| e31ed54 |  | — | 없음 | — | feat(calibration): provenance-backed layer threshold profiles |
+| f49e0cb |  | — | 없음 | — | refactor(webapp): split monolithic gui.html into gui.css + gui.js under CSP |
+| 2574630 |  | — | 없음 | — | feat(offline): sha256-verified weight fetch, coverage count, degraded-mode banner |
+| 98c198c |  | — | 없음 | — | refactor(core,cli): split monoliths into focused modules; wire thresholds, coverage, mypy CI |
+| 7bfe60a |  | — | 없음 | — | docs(calibration): corpus acquisition plan + seam-threshold measurement pipeline |
+| 88a16f7 |  | — | 없음 | — | refactor(model_adapter): extract runtime executors into model_runtimes.py |
+| eb12b09 |  | — | 없음 | — | refactor(gui): migrate inline styles to CSS classes; drop style-src 'unsafe-inline' |
+| 3198cf7 |  | — | 없음 | — | refactor(typing): extend scoped mypy gate to 12 modules |
+| 8d61e29 |  | — | 없음 | — | fix(ci): guard optional-dependency tests; skip editable package in dep audit |
+| 53321d4 |  | — | 없음 | — | refactor(core,pixel): extract metadata, text-heuristic, and raster layers |
+| 6b36f0b |  | — | 없음 | — | refactor(cli): split argument parser construction into cli_parser.py |
+| d52ee04 |  | — | 없음 | — | refactor(webapp): move /api/* payload handlers into webapp_api.py |
+| e7b4d97 |  | — | 없음 | — | feat(calibration): surface threshold provenance in scan output and reports |
+| e7004ee |  | — | 없음 | — | ci: hard-gate dependency audit; extend mypy scope to 16 modules |
+| 94066a1 |  | — | 없음 | — | test+ci: cv2 skip guards, contract drift gate, coverage floor, mypy 61 modules |
+| d74b180 |  | — | 없음 | — | refactor(models): ship model profiles as package data |
+| ae1a496 |  | — | 없음 | — | feat(offline): honest vendor-weights lifecycle + pinned checkpoint loading |
+| de1b60d |  | — | 없음 | — | fix(forensics): court artifacts never overstate integrity or certainty |
+| 7e7e925 |  | — | 없음 | — | fix(robustness): per-file failures can't kill a batch; archives fail-closed |
+| cc9afbd |  | — | 없음 | — | feat(web): provenance everywhere + honest archive/upload errors + GUI UX |
+| 8c84871 |  | — | 없음 | — | feat(cli): provenance in scan/CSV output + models-dir wiring + doctor fixes |
+| cce0de2 |  | — | 없음 | — | fix(face): vendored Haar cascade + crash-safe detection on OpenCV 5.x |
+| 52e2faa |  | — | 없음 | — | feat(calibration): AUROC quality gate + first measured thresholds.json |
+| 8ff3353 |  | — | 없음 | — | fix(model_adapter): load only *-runtime.json from profile directories |
+| 3567144 |  | — | 없음 | — | fix(scan): summary parity — container and failed rows never count as analyzed |
+| 53518ae |  | — | 없음 | — | fix(evidence): measure every table cell for row height + 60-item stress test |
+| 1dd9b6f |  | — | 없음 | — | test(gui): headless Chrome smoke harness + NN badge requires live weights |
+| dad9730 |  | — | 없음 | — | feat(calibration): first MEASURED thresholds — real faceswap corpus via inswapper |
 | 01faad0 | wp | WP-A | Gaps: G5, G6, G12, G24 | body | feat(contract): result contract v2 — three verdicts, classified evidence, coverage (WP-A) |
 | ad76dfd | wp | WP-B | Gaps: G1 | body | fix(fail-closed): crashed checks are "failed", never clean; lint gate (WP-B) |
 | 7f4ee2a | wp | WP-E | Gaps: G4 | body | fix(text): keywords are lexical evidence only, never points (WP-E) |
@@ -974,3 +1147,20 @@ R31: c15ed6e의 제목 ID `R31`은 라운드 2의 R1–R16(R10–R15 미사용)�
 | 619c90b | 31 | — | Gaps: 신규(스펙 외) | subject | fix(gui): REV2-D3 D4 D5 second hands-on review — the heartbeat's recovery reads /api/stats again (roots, chips), a scan-start 403 in the desktop mode reads the roots first and says "pick the same folder again" for a folder this page saw registered, a scan-start failure is scrolled into view and summarised under the path box, and the pick's text is said once (under the path box) (REV2; Gaps: 신규) |
 | fccf5ad | 31 | — | Gaps: 신규(스펙 외) | subject | fix(gui): REV2-D6 D7 D8 second hands-on review — the shutdown page is the main landmark and names itself in the tab, the 409 refusal of 프로그램 종료 goes when the scan ends, the recovery is announced in #toasts, and the note under the path box follows the box's value (a cancelled pick keeps it) (REV2; Gaps: 신규) |
 | 10efc79 | 31 | — | Gaps: 신규(스펙 외) | subject | docs(qa): REV2 the async-run skip reason of test_gui_desktop is documented (QA-SYS-10 table) (REV2; Gaps: 신규) |
+| f3543ad | 31 | WP-J | Gaps: G26, G27, G28 | subject | docs(qa): CONFORMANCE.md and commit traceability regenerated on 10efc79 — REV2 second-review commits (server, bundle, GUI, docs) in the table; 19 QA scenarios pass in the gate image's API environment (WP-J; Gaps: G26, G27, G28) |
+| 2bd2217 | 31 | — | Gaps: 신규(스펙 외) | subject | feat(scan-jobs): OMO-2 the job store lists an owner's finished jobs newest first (memory and verified disk records, 7-day TTL) and deletes a finished one — a running job is never deleted (OMO-2; Gaps: 신규) |
+| 8ef36aa | 31 | — | Gaps: 신규(스펙 외) | subject | feat(case-store): OMO-3 case fields are kept per scan job in cases.json (0600) in the user-data folder, validated, never inside an examined folder, and pruned with their jobs (OMO-3; Gaps: 신규) |
+| a5e4824 | 31 | — | Gaps: 신규(스펙 외) | subject | feat(desktop): OMO-6 the desktop mode opens the GUI in an Edge/Chrome app window with its own profile, the browser tab stays the fallback and --browser-tab (OMO-6; Gaps: 신규) |
+| 2a79381 | 31 | — | Gaps: 신규(스펙 외) | subject | fix(case-store): OMO-3 the side refusal quotes the field name as an interpolated value — SourceQuotesTest held 「」 to interpolated values only (OMO-3; Gaps: 신규) |
+| b9e9026 | 31 | — | Gaps: 신규(스펙 외) | subject | feat(gui): OMO-1 the app shell's seven assets are served by both servers, packaged and listed in the service doc's endpoint tables, and gui.html carries the sidebar, settings, delete-confirm and welcome skeletons (OMO-1; Gaps: 신규) |
+| b8f89eb | 31 | — | Gaps: 신규(스펙 외) | subject | feat(gui): OMO-5 window.DFL — a finished job loads into the ledger through runScanJob's quiet mode (no progress panel, toasts or dfl:scan-* events), and the scan lifecycle is announced as dfl:* events (OMO-5; Gaps: 신규) |
+| efca051 | 31 | — | Gaps: 신규(스펙 외) | subject | feat(gui): OMO-7 the app shell — a left sidebar with 새 검사 and 설정, a drawer under 1181 px, Ctrl/Cmd+N and Ctrl/Cmd+, and the page keeps its old layout when the shell script is missing (OMO-7; Gaps: 신규) |
+| 573a4e7 | 31 | — | Gaps: 신규(스펙 외) | subject | feat(gui): OMO-9 설정 — theme 시스템/밝게/어둡게, scan defaults, shortcuts and the record folder, key and retention, kept across restarts (OMO-9; Gaps: 신규) |
+| d990124 | 31 | — | Gaps: 신규(스펙 외) | subject | feat(gui): OMO-10 a first-run welcome panel with the three steps and one way in, hidden once a scan exists, reopened from 설정 (OMO-10; Gaps: 신규) |
+| 5a82db6 | 31 | — | Gaps: 신규(스펙 외) | subject | feat(gui): OMO-11 the long caveat explanations fold behind 자세한 설명 while every warning's headline stays in view; the text is unchanged (OMO-11; Gaps: 신규) |
+| 512f5a5 | 31 | — | Gaps: 신규(스펙 외) | subject | feat(server): OMO-4 /api/history, /api/history-delete and /api/job-case on both servers — owner as /api/scan-status, a running job is never deleted, unverifiable records are counted in the note, case entries are pruned with their jobs; both endpoint tables list them (OMO-4; Gaps: 신규) |
+| 45c5c42 | 31 | — | Gaps: 신규(스펙 외) | subject | feat(gui): OMO-8 the sidebar lists the finished scans, reopens one with its case fields (an item without saved fields clears them), saves the case with the scan, deletes after a confirmation and shows a running scan, also after a reload (OMO-8; Gaps: 신규) |
+| caa9ce2 | 31 | — | Gaps: 신규(스펙 외) | subject | docs: OMO-12 README, the CLI and service docs and the changelog describe the app window, --browser-tab, the sidebar history, the case store and where the GUI keeps its settings (OMO-12; Gaps: 신규) |
+| 0a58c0b | 31 | — | Gaps: 신규(스펙 외) | subject | fix(gui): OMO-11 the closing one-line caveat stays in view and the 자세한 설명 targets keep their 44 px hit area inside the line, so the folded banner is never taller than before (143 px at 1280 px, 432 -> 225 px at 390 px) (OMO-11; Gaps: 신규) |
+| 379e8b5 | 31 | — | Gaps: 신규(스펙 외) | subject | fix(gui): OMO-10 the welcome panel waits for the history's answer (1.5 s at most) so a returning examiner never sees it flash before the list arrives (OMO-10; Gaps: 신규) |
+| e8979ab | 31 | — | Gaps: 신규(스펙 외) | subject | docs(qa): OMO-3 the cases.json file-mode test's skip reason is documented (QA-SYS-10 skip-reason table) (OMO-3; Gaps: 신규) |
