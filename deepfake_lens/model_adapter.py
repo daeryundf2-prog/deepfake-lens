@@ -375,7 +375,7 @@ def _lr_suffix(profile_path: object, score: float) -> str:
     source = Path(str(profile_path))
     try:
         profile = json.loads(source.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
+    except (OSError, ValueError, RecursionError):
         return ""
     name = profile.get("lr_profile") if isinstance(profile, dict) else None
     if not isinstance(name, str) or relpath_outside_corpus(name, source.parent):

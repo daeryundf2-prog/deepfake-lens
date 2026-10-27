@@ -257,6 +257,19 @@ def verbal(lr: float) -> str:
 
 
 SCORE_GRID = range(101)
+
+
+def _finite(value: object, *, limit: float = 1e6) -> float:
+    """A JSON number (not a string or bool) whose magnitude is at most ``limit``; else ValueError."""
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise ValueError("숫자가 아닌 값입니다.")
+    if isinstance(value, int) and abs(value) > limit:
+        raise ValueError("허용 범위를 넘는 값입니다.")
+    number = float(value)
+    if not math.isfinite(number) or abs(number) > limit:
+        raise ValueError("허용 범위를 넘는 값입니다.")
+    return number
+
 MIN_TAIL = 10
 MAX_ABS_LOG10_LR = 12
 
@@ -331,13 +344,12 @@ class LrCalibration:
 
     @classmethod
     def from_json(cls, data: dict[str, Any]) -> "LrCalibration":
-        table = [float(v) * math.log(10) for v in data["log10_lr_table"]]
-        clipped = [bool(v) for v in data["clipped"]]
-        if len(table) != len(SCORE_GRID) or len(clipped) != len(SCORE_GRID):
-            raise ValueError("log10_lr_table과 clipped는 점수 0~100의 101개 항목이어야 합니다.")
-        if not all(math.isfinite(v) and abs(v) <= MAX_ABS_LOG10_LR * math.log(10) for v in table):
-            raise ValueError(f"log10_lr_table 값은 절댓값 {MAX_ABS_LOG10_LR} 이하의 유한한 수여야 합니다.")
-        return cls(float(data["a"]), float(data["b"]), float(data["prior_log_odds"]), table, clipped)
+        raw_table, raw_clipped = data["log10_lr_table"], data["clipped"]
+        if not isinstance(raw_table, list) or not isinstance(raw_clipped, list) or len(raw_table) != len(SCORE_GRID) or len(raw_clipped) != len(SCORE_GRID):
+            raise ValueError("log10_lr_table과 clipped는 점수 0~100의 101개 항목 목록이어야 합니다.")
+        table = [_finite(v, limit=MAX_ABS_LOG10_LR) * math.log(10) for v in raw_table]
+        clipped = [v is True for v in raw_clipped]
+        return cls(_finite(data["a"]), _finite(data["b"]), _finite(data["prior_log_odds"]), table, clipped)
 
 
 def tippett(llr_pos: Sequence[float], llr_neg: Sequence[float]) -> list[dict[str, float]]:
@@ -533,7 +545,7 @@ def lr_profile(
 def load_lr_profile(path: Path) -> dict[str, Any] | None:
     try:
         data = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
+    except (OSError, ValueError, RecursionError):  # ValueError covers bad UTF-8, bad JSON and over-long integers
         return None
     if not isinstance(data, dict) or data.get("type") != LR_PROFILE_TYPE:
         return None

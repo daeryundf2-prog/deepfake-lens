@@ -257,11 +257,25 @@ class ReferenceSignalLrTest(unittest.TestCase):
             lambda p: p["calibration"].__setitem__("log10_lr_table", [float("nan")] * 101),
             lambda p: p.__setitem__("scope", ["kakao"]),
             lambda p: p.__setitem__("calibration", "broken"),
+            lambda p: p["calibration"].__setitem__("log10_lr_table", [10 ** 400] * 101),
+            lambda p: p["calibration"].__setitem__("a", 10 ** 400),
+            lambda p: p["calibration"].__setitem__("log10_lr_table", ["0.5"] * 101),
         ):
             profile = json.loads(json.dumps(good))
             change(profile)
             (detail,) = self._signals(profile)
             self.assertIn("원점수 90/100", detail)
+            self.assertNotIn("우도비", detail)
+
+    def test_an_unreadable_lr_file_leaves_the_raw_score_row_alone(self) -> None:
+        for raw in (b"\xff\xfe junk", b"[" * 100000, b'{"a": ' + b"9" * 5000 + b"}"):
+            with tempfile.TemporaryDirectory() as tmp:
+                profile = Path(tmp) / "m-runtime.json"
+                profile.write_text(json.dumps({"lr_profile": "lr.json"}), encoding="utf-8")
+                (Path(tmp) / "lr.json").write_bytes(raw)
+                model = ExternalModelAnalysis(available=False, score=0, confidence="gated", model="zoo", detail="",
+                                              models=[{"profile": str(profile), "model": "m", "display_name": "M", "available": False, "score": 90, "confidence": REFERENCE_CONFIDENCE}])
+                (detail,) = [signal.detail for signal in model_reference_signals(model)]
             self.assertNotIn("우도비", detail)
 
     def test_a_scope_list_of_the_wrong_type_is_shown_as_the_whole_corpus(self) -> None:
