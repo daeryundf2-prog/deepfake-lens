@@ -1520,10 +1520,11 @@ def _history_payload(*, owner: str = LOCAL_OWNER, evidence: list[Path] | tuple[P
     from .scan_jobs import store_folder, ttl_seconds
     from .user_data import UserDataRefused
 
-    items = STORE.list_finished(owner, evidence=evidence)
+    stats: dict[str, int] = {}
+    items = STORE.list_finished(owner, evidence=evidence, stats=stats)
     notes: list[str] = []
-    if STORE.last_history_skipped:
-        notes.append(HISTORY_SKIPPED_NOTE.format(count=STORE.last_history_skipped))
+    if stats.get("skipped"):
+        notes.append(HISTORY_SKIPPED_NOTE.format(count=stats["skipped"]))
     try:
         prune_cases([item["job_id"] for item in items], evidence)  # party names never outlive their job record
         cases = read_all(evidence)

@@ -158,8 +158,6 @@ class JobStore:
     def __init__(self) -> None:
         self._lock = threading.Lock()
         self._jobs: dict[str, dict[str, Any]] = {}
-        # OMO-4: how many unverifiable records the last list_finished left out (the history says so).
-        self.last_history_skipped = 0
 
     # -- bookkeeping -------------------------------------------------------------------------------------------------
 
@@ -365,8 +363,12 @@ class JobStore:
                 raise JobIntegrityError(JOB_INTEGRITY_FAILED)
         return record
 
-    def list_finished(self, owner: str, *, evidence: list[Path] | tuple[Path, ...] = ()) -> list[dict[str, Any]]:
-        self.last_history_skipped = 0
+    def list_finished(
+        self, owner: str, *, evidence: list[Path] | tuple[Path, ...] = (), stats: dict[str, int] | None = None,
+    ) -> list[dict[str, Any]]:
+        """OMO-4: an owner's finished jobs, newest first; ``stats["skipped"]`` counts the unverifiable records left out."""
+        if stats is not None:
+            stats["skipped"] = 0
         now = time.time()
         items: dict[str, dict[str, Any]] = {}
         with self._lock:
@@ -398,7 +400,8 @@ class JobStore:
                 record = self._load(job_id, evidence)
             except (JobIntegrityError, OSError, ValueError) as exc:
                 logger.warning("scan job record %s skipped: %s", path, exc)
-                self.last_history_skipped += 1
+                if stats is not None:
+                    stats["skipped"] += 1
                 continue
             if record is None or record.get("owner") != owner or record.get("status") not in ("done", "cancelled"):
                 continue
