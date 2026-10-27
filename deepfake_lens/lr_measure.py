@@ -36,14 +36,13 @@ from __future__ import annotations
 import json
 import math
 import random
-import tempfile
 from collections.abc import Iterable, Sequence
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
 from .corpus_manifest import _refs, _resolve_root, load_manifest, manifest_sha256, origin_key, relpath_outside_corpus
-from .measurement_gate import MEASURED_ON_KEYS, MIN_AUROC_CI_LOW, MIN_PER_CLASS, check_profile
+from .measurement_gate import MEASURED_ON_KEYS, MIN_AUROC_CI_LOW, MIN_PER_CLASS, profile_problems
 
 LR_PROFILE_TYPE = "deepfake-lens-lr-profile-v1"
 MEASURE_TYPE = "deepfake-lens-measurement-v1"
@@ -481,14 +480,12 @@ def measure(
 
 
 def gate_check(measured_on: dict[str, object]) -> list[str]:
-    """The unchanged measurement gate, run on a throwaway supported profile."""
+    """The unchanged measurement gate, run on this measurement as a supported image profile."""
     missing = [key for key in MEASURED_ON_KEYS if key not in measured_on]
     if missing:
         return [f"measured_on에 필수 키가 없습니다: {', '.join(missing)}"]
-    with tempfile.TemporaryDirectory() as tmp:
-        candidate = Path(tmp) / "candidate-runtime.json"
-        candidate.write_text(json.dumps({"supported": True, "modality": "image", "measured_on": measured_on}, ensure_ascii=False), encoding="utf-8")
-        return check_profile(candidate)
+    candidate = {"supported": True, "modality": "image", "measured_on": measured_on}
+    return profile_problems(candidate, Path(str(measured_on["manifest_path"])), modality="image")
 
 
 def lr_profile(

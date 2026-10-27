@@ -936,7 +936,7 @@ def _run_command(args: argparse.Namespace, parser: argparse.ArgumentParser, cmd_
         if args.lr_out:
             write_json_report(args.lr_out, payload["lr_profile"])
         if args.scores_out:
-            args.scores_out.write_text("".join(json_dumps({"id": key, "score": value}, ensure_ascii=False) + "\n" for key, value in sorted(scores.items())), encoding="utf-8")
+            write_cases_jsonl(args.scores_out, [{"id": key, "score": value} for key, value in sorted(scores.items())])
         print(json_dumps(payload, ensure_ascii=False, indent=2))
         return 0
     if args.command == "feedback":

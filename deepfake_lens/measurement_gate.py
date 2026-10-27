@@ -83,6 +83,11 @@ def check_profile(path: Path) -> list[str]:
         return [f"프로필을 읽을 수 없습니다({type(exc).__name__}) — 지원 여부를 판단할 수 없으므로 실패로 처리합니다."]
     if not isinstance(profile, dict):
         return ["프로필이 JSON 객체가 아닙니다."]
+    return profile_problems(profile, path)
+
+
+def profile_problems(profile: dict[str, Any], path: Path, *, modality: str | None = None) -> list[str]:
+    """Korean reasons an already-read profile fails the gate (``path`` locates a relative manifest)."""
     if not profile_is_supported(profile):
         return []
     measured = profile.get("measured_on")
@@ -108,7 +113,7 @@ def check_profile(path: Path) -> list[str]:
         problems.append("measured_on.manifest_sha256이 64자리 소문자 16진수가 아닙니다 — 코퍼스 매니페스트(corpus-manifest-v1)를 특정할 수 없습니다.")
     else:
         problems.extend(_manifest_problems(path, measured))
-    if profile_modality(path) == "text":
+    if (modality or profile_modality(path)) == "text":
         if TEXT_RECALL_KEY not in measured:
             problems.append(f"텍스트 프로필은 measured_on.{TEXT_RECALL_KEY}(FPR 1%에서의 재현율)가 필요합니다.")
     else:
