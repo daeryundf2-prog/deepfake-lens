@@ -333,6 +333,35 @@ class DependencyCheckTest(unittest.TestCase):
             (models / "a.onnx").write_bytes(good)
             self.assertEqual(bundle.weight_problems(models, ["a.onnx"], assets), [])
 
+    def test_exported_reference_checkpoint_is_the_profiles_pin(self) -> None:
+        relpath, digest = bundle.exported_pin("community-forensics-vit-runtime.json")
+        self.assertEqual(relpath, "checkpoints/community-forensics/commfor-vit-s384.onnx")
+        self.assertRegex(digest, r"^[0-9a-f]{64}$")
+        self.assertNotIn("aasist-runtime.json", bundle.EXPORTED_WEIGHTS)  # needs torch, not shipped
+
+    def test_exported_weights_are_checked_and_copied(self) -> None:
+        import hashlib
+        from unittest import mock
+
+        good = b"exported checkpoint"
+        pin = ("checkpoints/x/model.onnx", hashlib.sha256(good).hexdigest())
+        with tempfile.TemporaryDirectory() as tmp, mock.patch.object(bundle, "exported_pin", return_value=pin):
+            cache, site = Path(tmp) / "cache", Path(tmp) / "site"
+            (site / "deepfake_lens" / "models").mkdir(parents=True)
+            with self.assertRaises(bundle.BuildError) as missing:
+                bundle.install_exported_weights(cache, site)
+            self.assertIn("fetch_community_forensics.py", str(missing.exception))
+            source = cache / "exported" / pin[0]
+            source.parent.mkdir(parents=True)
+            source.write_bytes(b"other bytes")
+            with self.assertRaises(bundle.BuildError):
+                bundle.install_exported_weights(cache, site)
+            source.write_bytes(good)
+            self.assertEqual(bundle.install_exported_weights(cache, site), [pin[0]])
+            copied = site / "deepfake_lens" / "models" / pin[0]
+            self.assertEqual(copied.read_bytes(), good)
+            self.assertFalse(any(pin[0] in p for p in bundle.weight_problems(site / "deepfake_lens" / "models")))
+
 
 class ZipAndVerifyTest(unittest.TestCase):
     def test_zip_uses_slashes_and_utf8_names(self) -> None:

@@ -98,7 +98,15 @@ resolves to inside the bundle): asset name in ``deepfake_lens/models/assets.json
 fetched at build time and must match that asset's pinned, non-empty sha256 (an unpinned name stops the build). Add a
 detector's weight by its asset name here, once its runtime is in :data:`TOP_LEVEL`. VideoSeal, AudioSeal and PerTh are
 not listed: their decoders need torch, which the bundle does not ship."""
+EXPORTED_WEIGHTS: Mapping[str, str] = {
+    "community-forensics-vit-runtime.json": "scripts/fetch_community_forensics.py",
+}
+"""Reference-signal detector checkpoints that have no download URL of their own (exported from the upstream weights by
+the named script): runtime profile -> producer. The file is the profile's ``checkpoint`` path under
+``<cache>/exported/`` and must match the profile's ``pin.sha256``; it is copied to the same relative path in
+``site-packages/deepfake_lens/models/``. AASIST is not listed: it needs torch, which the bundle does not ship."""
 ASSETS_JSON = REPO_ROOT / "deepfake_lens" / "models" / "assets.json"
+MODELS_DIR = REPO_ROOT / "deepfake_lens" / "models"
 WEIGHTS_USER_AGENT = "deepfake-lens-build-desktop-bundle/1.0"
 VCRUNTIME_DLLS = ("vcruntime140.dll", "vcruntime140_1.dll")
 """REV2-D7: the embeddable 3.12.10 ships these as 14.42; ``msvcp140.dll`` 14.51 from the wheel expects a vcruntime at
@@ -570,9 +578,54 @@ def pinned_sha256(name: str, assets_json: Path = ASSETS_JSON) -> str:
     return digests[0]
 
 
+def exported_pin(profile_name: str, models_dir: Path = MODELS_DIR) -> tuple[str, str]:
+    """(checkpoint path relative to the models folder, pinned sha256) of an :data:`EXPORTED_WEIGHTS` profile."""
+    profile = json.loads((models_dir / profile_name).read_text(encoding="utf-8"))
+    relpath = str(profile.get("checkpoint") or "")
+    pin = profile.get("pin") if isinstance(profile.get("pin"), dict) else {}
+    digest = str(pin.get("sha256") or "")
+    if not relpath or not digest:
+        raise BuildError(f"{profile_name}: checkpoint 또는 pin.sha256이 없습니다 — 꼬러미에 넣지 않습니다")
+    return relpath, digest
+
+
+def install_exported_weights(cache: Path, site: Path) -> list[str]:
+    """Copy every :data:`EXPORTED_WEIGHTS` checkpoint from ``<cache>/exported/`` (checked against its profile pin)."""
+    models = site / "deepfake_lens" / "models"
+    done: list[str] = []
+    for profile_name, producer in EXPORTED_WEIGHTS.items():
+        relpath, expected = exported_pin(profile_name)
+        source = cache / "exported" / relpath
+        if not source.is_file():
+            raise BuildError(
+                f"{relpath}이(가) 없습니다 — 먼저 {producer} --dest {cache / 'exported'} 를 실행해 만드십시오"
+            )
+        actual = sha256_of(source)
+        if actual != expected:
+            raise BuildError(f"{relpath}의 sha256이 {profile_name} 고정값과 다릅니다: {actual} (기대 {expected})")
+        target = models / relpath
+        target.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(source, target)
+        done.append(relpath)
+    return done
+
+
 def weight_problems(models: Path, names: Iterable[str] | None = None, assets_json: Path = ASSETS_JSON) -> list[str]:
-    """Each of ``names`` (default :data:`BUNDLED_WEIGHTS`) that is missing from ``models`` or not its pinned bytes."""
+    """Each of ``names`` (default :data:`BUNDLED_WEIGHTS`, then the :data:`EXPORTED_WEIGHTS` checkpoints) that is
+    missing from ``models`` or not its pinned bytes."""
     problems: list[str] = []
+    if names is None:
+        for profile_name in EXPORTED_WEIGHTS:
+            try:
+                relpath, expected = exported_pin(profile_name)
+            except BuildError as exc:
+                problems.append(str(exc))
+                continue
+            target = models / relpath
+            if not target.is_file():
+                problems.append(f"site-packages/deepfake_lens/models/{relpath} 없음")
+            elif sha256_of(target) != expected:
+                problems.append(f"site-packages/deepfake_lens/models/{relpath}: sha256이 {profile_name} 고정값과 다름")
     for name in BUNDLED_WEIGHTS if names is None else names:
         target = models / name
         try:
@@ -1063,6 +1116,8 @@ def build_windows(out_parent: Path, cache: Path) -> Path:
         raise BuildError("의존성 검사 실패:\n  " + "\n  ".join(problems))
     weights = install_weights(cache, site)
     print(f"  모델 가중치(assets.json sha256 일치): {', '.join(weights)}", flush=True)
+    exported = install_exported_weights(cache, site)
+    print(f"  참고 신호 모델(프로필 pin 일치): {', '.join(exported)}", flush=True)
     runtime = install_msvc_runtime(fetch_msvc_runtime(cache), python)
     print(f"  C/C++ 런타임(msvc-runtime {MSVC_RUNTIME_VERSION}): {', '.join(runtime)}", flush=True)
     for dll, version in runtime_versions(python).items():
