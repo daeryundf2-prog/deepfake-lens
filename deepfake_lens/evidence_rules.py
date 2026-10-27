@@ -10,7 +10,12 @@ Classification (phase-0 spec, WP-A):
 
 | source                                            | kind          | direction | strength |
 | C2PA valid + trusted + AI digitalSourceType       | deterministic | synthetic | strong   |
+| C2PA valid + ITL-only signer + AI declaration,    | deterministic | synthetic | strong   | detail: 임시 신뢰 목록 서명 — 공식 신뢰 목록 밖
+|   hash match (owner decision 2026-10-27)          |               |           |          |
+| C2PA valid + ITL-only signer + digitalCapture     | deterministic | authentic | moderate | (P0R-21, unchanged)
 | generator metadata in a tool-identifying field     | deterministic | synthetic | strong   |
+|   (A1111/ComfyUI, and the generator records of     |               |           |          | self-declared
+|   NovelAI/InvokeAI/Fooocus/SwarmUI/Midjourney)     |               |           |          |
 | XMP DigitalSourceType / generator name in XMP tool | deterministic | synthetic | strong   |
 | C2PA valid + trusted + digitalCapture, hash match | deterministic | authentic | strong   |
 | camera EXIF consistent, no recompression (D7)     | deterministic | authentic | moderate |
@@ -45,7 +50,7 @@ from .digital_source_type import (
     split_declared,
 )
 from .image_class import DIRECTION_NEUTRAL_NOTE, ImageClass
-from .image_metadata import guess_image_source
+from .image_metadata import generator_record, guess_image_source
 from .result_types import (
     EvidenceDirection,
     EvidenceItem,
@@ -127,6 +132,7 @@ XMP_GENERATOR_FIELDS = (
 XMP_TOOL_FIELDS = (("xmp.CreatorTool", "xmp:CreatorTool"),)
 # Non-XMP metadata keys (lower-case, matched on the part after the last ".") that name the producing tool or hold a
 # generator's own record: PNG/EXIF Software, A1111 parameters, ComfyUI prompt/workflow, a "generator" field.
+# (The NovelAI/InvokeAI/Fooocus/SwarmUI/Midjourney records are matched by their exact keys in generator_record.)
 GENERATOR_SPECIFIC_KEYS = frozenset({"software", "parameters", "prompt", "workflow", "generator", "creatortool"})
 XMP_DIGITAL_SOURCE_TYPE_KEY = "xmp.DigitalSourceType"
 
@@ -373,7 +379,9 @@ def image_metadata_evidence(
     # P0R-11: only a structural generator record (ComfyUI graph, A1111 parameters) in a tool field is strong; a brand
     # word counts only in a generator-specific field and is moderate; neither ever comes from exif.Model, LensModel,
     # Credit or creator. Every such item is a self-declaration (P0R-12): unsigned metadata the file states about itself.
-    tool_guess = guess_image_source(_tool_field_metadata(generic), brands=False)
+    # A generator's own structured record (NovelAI/InvokeAI/Fooocus/SwarmUI/Midjourney — image_metadata.generator_record)
+    # is read in its own field, which is that generator's tool field: the same strong self-declared rule as A1111/ComfyUI.
+    tool_guess = generator_record(metadata) or guess_image_source(_tool_field_metadata(generic), brands=False)
     specific = {key: value for key, value in generic.items() if key.rsplit(".", 1)[-1].lower() in GENERATOR_SPECIFIC_KEYS}
     brand_guess = guess_image_source(specific)
     any_guess = guess_image_source(generic, brands=False)
@@ -467,6 +475,8 @@ def _codes(raw: object) -> set[str]:
 # changed), claimSignature.mismatch (claim changed). C2PA 2.x spec, §15
 # "Validation" status codes.
 C2PA_INTEGRITY_TITLE = "C2PA 무결성 불일치"
+# Owner decision 2026-10-27: the caveat every ITL-signed generative declaration carries in its detail.
+C2PA_ITL_CAVEAT = "임시 신뢰 목록 서명 — 공식 신뢰 목록 밖"
 C2PA_INTEGRITY_DETAIL = "매니페스트 해시 불일치 — 서명 이후 내용이 변경됨"
 # techniques-2026: the content hard bindings a validator reports a match for
 # (data hash for JPEG/PNG/PDF…, BMFF hash for MP4/MOV/HEIF, box hash, collection hash).
@@ -646,16 +656,27 @@ def c2pa_evidence(validation: Mapping[str, object] | None) -> list[EvidenceItem]
             f"신뢰 서명자 {signer}의 유효한 매니페스트이나 촬영/생성 출처 유형을 선언하지 않았습니다." + basis,
             EvidenceKind.DETERMINISTIC, EvidenceDirection.NEUTRAL, EvidenceStrength.MODERATE, "c2pa",
         )
-    elif itl_verified and (declared_text or capture):
-        # P0R-21: a valid manifest whose signer chains only to the frozen Interim Trust List — "legacy trust": the
-        # product was never evaluated by the C2PA conformance program, so the declaration is moderate, never strong.
-        direction = EvidenceDirection.SYNTHETIC if declared_text else EvidenceDirection.AUTHENTIC
-        what = f"{declared_text}를 선언합니다" if declared_text else "digitalCapture(카메라 촬영)를 선언합니다"
+    elif itl_verified and declared_text:
+        # Owner decision 2026-10-27 (revises P0R-21 for generative declarations): a cryptographically valid signature
+        # chaining only to the frozen Interim Trust List, with a matching hard binding, whose manifest declares
+        # generative AI is strong synthetic evidence — the signer states against its own interest that the content
+        # was generated. The detail names the caveat (interim list, not the official C2PA trust list) for the report.
         main = EvidenceItem(
-            "C2PA 서명(동결된 임시 신뢰 목록 ITL): " + ("생성형 AI 출처 선언" if declared_text else "카메라 촬영 출처"),
-            f"서명자 {signer}의 유효한 매니페스트가 {what}(해시 일치). 서명 인증서는 현재 C2PA 공식 신뢰 목록이 아니라 2026-01-01에 동결된 "
+            "C2PA 서명(동결된 임시 신뢰 목록 ITL): 생성형 AI 출처 선언",
+            f"서명자 {signer}의 유효한 매니페스트가 {declared_text}를 선언합니다(해시 일치). {C2PA_ITL_CAVEAT}: 서명 인증서는 현재 C2PA "
+            "공식 신뢰 목록이 아니라 2026-01-01에 동결된 임시 신뢰 목록(ITL)에만 연결되며, ITL 제품은 C2PA 적합성 프로그램의 평가를 받지 "
+            "않았습니다. 서명자가 스스로 생성형 AI 산출물이라고 밝힌 서명된 선언이어서 생성 근거로 씁니다." + basis,
+            EvidenceKind.DETERMINISTIC, EvidenceDirection.SYNTHETIC, EvidenceStrength.STRONG, "c2pa",
+        )
+    elif itl_verified and capture:
+        # P0R-21: a valid manifest whose signer chains only to the frozen Interim Trust List — "legacy trust": the
+        # product was never evaluated by the C2PA conformance program, so a capture (authenticity) declaration is
+        # moderate, never strong.
+        main = EvidenceItem(
+            "C2PA 서명(동결된 임시 신뢰 목록 ITL): 카메라 촬영 출처",
+            f"서명자 {signer}의 유효한 매니페스트가 digitalCapture(카메라 촬영)를 선언합니다(해시 일치). 서명 인증서는 현재 C2PA 공식 신뢰 목록이 아니라 2026-01-01에 동결된 "
             "임시 신뢰 목록(ITL)에만 연결됩니다 — ITL 제품은 C2PA 적합성 프로그램의 평가를 받지 않았으므로 단독 결론 근거로 쓰지 않습니다." + basis,
-            EvidenceKind.DETERMINISTIC, direction, EvidenceStrength.MODERATE, "c2pa",
+            EvidenceKind.DETERMINISTIC, EvidenceDirection.AUTHENTIC, EvidenceStrength.MODERATE, "c2pa",
         )
     elif declared_text:
         main = EvidenceItem(

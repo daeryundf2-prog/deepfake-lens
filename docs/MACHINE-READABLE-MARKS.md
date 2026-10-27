@@ -63,8 +63,12 @@ fail closed, 모든 검사의 coverage 기록, 재현 가능한 기록 근거(�
 - **신뢰 목록 분리(P0R-21)**: 2026-01-01에 동결된 임시 신뢰 목록(ITL)의 루트 앵커(`deepfake_lens/models/c2pa-itl-anchors.pem`, 27개,
   `models/c2pa-itl.json` — contentauth/verify-site `static/trust/anchors.pem`, 커밋 c2bf16d, Apache-2.0, sha256 확인)를 공식 목록과 따로 둔다.
   서명자는 먼저 공식 목록(+ 운영자 앵커)으로 확인하고, 신뢰되지 않을 때만 ITL 앵커만으로 다시 확인한다. 판독 기록의 `trust_list`는
-  `c2pa`(공식 목록) / `c2pa_or_operator`(운영자 앵커가 지정된 경우) / `itl`(동결된 ITL에만 연결) / 없음이다. ITL에만 연결된 유효 서명의 생성형·촬영
-  선언은 **보통**(「C2PA 서명(동결된 임시 신뢰 목록 ITL): …」 — ITL 제품은 C2PA 적합성 프로그램의 평가를 받지 않음)이며 결론 근거가 아니다.
+  `c2pa`(공식 목록) / `c2pa_or_operator`(운영자 앵커가 지정된 경우) / `itl`(동결된 ITL에만 연결) / 없음이다. 소유자 결정(2026-10-27)으로
+  ITL에만 연결된 유효 서명이 콘텐츠 해시(하드 바인딩) 일치이고 매니페스트가 **생성형 AI를 선언**하면(`trainedAlgorithmicMedia`·
+  `compositeWithTrainedAlgorithmicMedia` 등 생성형 `digitalSourceType` 또는 `c2pa.ai-disclosure`) 결정적·생성·**강함**이다 — 서명자가 스스로
+  생성물이라고 밝힌 서명된 선언이기 때문이다. 이 항목(「C2PA 서명(동결된 임시 신뢰 목록 ITL): 생성형 AI 출처 선언」)의 설명에는 법정 보고서에
+  남도록 「임시 신뢰 목록 서명 — 공식 신뢰 목록 밖」과 ITL 제품이 C2PA 적합성 프로그램의 평가를 받지 않았다는 점이 함께 적힌다. ITL에만
+  연결된 서명의 촬영(`digitalCapture`, 원본성) 선언은 그대로 **보통**(「C2PA 서명(동결된 임시 신뢰 목록 ITL): 카메라 촬영 출처」)이며 결론 근거가 아니다.
   ITL의 최종 개체 허용 목록(`allowed.pem`)은 넣지 않았다.
 - **폐기 확인(P0R-21)**: 공식 C2PA 오프라인 폐기 목록(CRL 스냅숏)은 2026-10-17 현재 공개된 것이 없어 동봉하지 않았다. 모든 C2PA 근거의 검증 기준
   문구와 `c2pa` 사유에 「인증서 폐기 여부는 확인하지 않음(오프라인 폐기 목록 미적용·OCSP 조회 안 함 — 폐기된 서명 인증서도 신뢰로 보일 수 있음)」이
@@ -83,7 +87,23 @@ IPTC NewsCodes digitalsourcetype 2024-10-23판의 20개 값 전부(퇴역 `minor
 
 IPTC·C2PA 이름공간이 아닌 IRI는 마지막 경로 조각이 같아도 "알 수 없는 값"으로 그대로 표시한다. 서명 없는 XMP
 `Iptc4xmpExt:DigitalSourceType`은 "자기 신고"로 표시한다(생성형이면 기존처럼 결정적·생성·강 — WP-A 표의 생성 도구 메타데이터 급,
-`screenCapture`는 중립·중).
+`screenCapture`는 중립·중). 값이 속성·요소 글자뿐 아니라 `rdf:resource` 빈 요소(`<Iptc4xmpExt:DigitalSourceType rdf:resource="…"/>`,
+RDF 1.1 XML 문법 §2.4)로 적혀도 읽는다 — C2PA 밖의 IPTC/XMP 선언이다.
+
+### 2.1 생성기 자기 기록 (`image_metadata.generator_record`, 2026-10-27)
+
+A1111 `parameters` 글·ComfyUI 그래프와 같은 규칙(도구 필드의 구조적 생성 기록 → 결정적·생성·강함, 자기 선언 「생성 도구 메타데이터」)으로
+다음 생성기의 고유 레코드를 인식한다. 키 이름이나 브랜드 단어 하나만으로는 레코드가 아니다(브랜드 규칙 — 보통). 키마다의 출처는
+`models/generator-strings.json`의 `generator_records`에 있다.
+
+| 생성기 | 레코드 | 강도 |
+| --- | --- | --- |
+| NovelAI | PNG `Software`=`NovelAI` + `Comment` JSON(`prompt`와 `steps`·`sampler`·`seed`·`scale`·`uc` 중 둘 이상) | 강함 |
+| InvokeAI | PNG `invokeai_metadata` 설정 JSON(필드 둘 이상) 또는 `invokeai_workflow`/`invokeai_graph` 노드 그래프 JSON(`nodes`) | 강함 |
+| Fooocus | PNG `fooocus_scheme`(`fooocus`/`a1111`) + `parameters`(Fooocus JSON 또는 A1111 글) | 강함 |
+| Fooocus | EXIF `Software`=`Fooocus v…`만 있음 | 보통(브랜드) |
+| SwarmUI | PNG `parameters` JSON의 `sui_image_params`(프롬프트·시드·단계 등 둘 이상) | 강함 |
+| Midjourney | PNG `Description` 또는 XMP `dc:description`에 `--v` 같은 매개변수와 `Job ID: <UUID>`가 함께 | 강함 |
 
 ## 3. SDXL 고정 메시지 워터마크 (`watermark_sdxl`)
 

@@ -1,7 +1,7 @@
 {
   "schema": "generator-strings-v1",
-  "version": "2026-10-17.2",
-  "note": "techniques-2026b TB-7: the generator / service strings the self-declaration rules look for (tool_guess_rules, xmp_generator_names — strengths unchanged: evidence_rules decides them) and the C2PA signer / claim-generator display table (c2pa_signers — a neutral naming fact only; the C2PA rules decide). Every addition names its source. Not found (2026-10-17): Midjourney V8-specific fields (only '--v N' inside Description), Firefly partner-model naming, Stability / ElevenLabs claim generators, Seedream 4.x strings, gpt-image-1.5 / ChatGPT Images 2.5 consumer strings — see docs/FACT-LAYERS.md.",
+  "version": "2026-10-27.1",
+  "note": "techniques-2026b TB-7: the generator / service strings the self-declaration rules look for (tool_guess_rules, xmp_generator_names — strengths unchanged: evidence_rules decides them) and the C2PA signer / claim-generator display table (c2pa_signers — a neutral naming fact only; the C2PA rules decide). Every addition names its source. Not found (2026-10-17): Midjourney V8-specific fields (only '--v N' inside Description — the Description + Job ID record is recognised, generator_records), Firefly partner-model naming, Stability / ElevenLabs claim generators, Seedream 4.x strings, gpt-image-1.5 / ChatGPT Images 2.5 consumer strings — see docs/FACT-LAYERS.md. 2026-10-27: generator_records documents the structured generator records image_metadata.generator_record recognises (strong, self-declared — the A1111/ComfyUI rule), each key with its upstream source.",
   "tool_guess_rules": [
     {
       "label": "Midjourney/Niji 추정",
@@ -190,6 +190,37 @@
       "source": "wiltodelta/remove-ai-watermarks (photoshop:Credit = Apple Image Playground, 2026-09-23)",
       "confidence": "제3자 실제 파일 관찰",
       "checked": "2026-10-17"
+    },
+    {
+      "label": "Fooocus 추정",
+      "markers": [
+        "fooocus"
+      ],
+      "reason": "Fooocus 단서가 메타데이터에 있습니다.",
+      "source": "lllyasviel/Fooocus@f597bf1ab653bd4bea8cb1e5cc7996348fbe8879 modules/meta_parser.py L646-647 (JPEG/WebP EXIF 0x0131 Software = 'Fooocus v' + version)",
+      "confidence": "공식 소스 코드",
+      "checked": "2026-10-27"
+    },
+    {
+      "label": "InvokeAI 추정",
+      "markers": [
+        "invokeai",
+        "invoke ai"
+      ],
+      "reason": "InvokeAI 단서가 메타데이터에 있습니다.",
+      "source": "invoke-ai/InvokeAI@6af20578bce65177ff9da43df0e82c788a2e14ae invokeai/app/services/image_files/image_files_disk.py L265-272 (PNG text keys invokeai_metadata / invokeai_workflow / invokeai_graph)",
+      "confidence": "공식 소스 코드",
+      "checked": "2026-10-27"
+    },
+    {
+      "label": "SwarmUI 추정",
+      "markers": [
+        "swarmui"
+      ],
+      "reason": "SwarmUI 단서가 메타데이터에 있습니다.",
+      "source": "mcmonkeyprojects/SwarmUI master src/Text2Image/T2IParamInput.cs L428-485 (parameters JSON sui_image_params / sui_extra_data / sui_models)",
+      "confidence": "공식 소스 코드",
+      "checked": "2026-10-27"
     }
   ],
   "xmp_generator_names": {
@@ -299,5 +330,69 @@
       "source": "storytold/artcraft-services seedance_info.rs (2026-06-19)",
       "confidence": "제3자 실제 파일 관찰"
     }
-  ]
+  ],
+  "generator_records": {
+    "note": "Structured generator records recognised by image_metadata.generator_record — deterministic/synthetic/strong, self-declared (the same rule as an A1111 parameters text or a ComfyUI graph in a tool field: evidence_rules.image_metadata_evidence). A key name alone, or a brand word alone, is not a record (the brand rule above gives moderate).",
+    "records": [
+      {
+        "generator": "NovelAI",
+        "keys": [
+          "png.Software == 'NovelAI'",
+          "png.Comment (JSON: prompt + steps/sampler/seed/scale/uc …)"
+        ],
+        "source": "AUTOMATIC1111/stable-diffusion-webui master modules/images.py L806-813 (items['Software'] == 'NovelAI' → json.loads(items['Comment']): uc, steps, sampler, scale, seed); NovelAI/novelai-image-metadata nai_meta.py (Comment JSON, the same record also in the alpha channel)",
+        "confidence": "공식 저장소 + 널리 쓰이는 판독기 소스",
+        "checked": "2026-10-27"
+      },
+      {
+        "generator": "InvokeAI",
+        "keys": [
+          "png.invokeai_metadata (JSON settings)",
+          "png.invokeai_workflow (JSON, nodes)",
+          "png.invokeai_graph (JSON, nodes)"
+        ],
+        "source": "invoke-ai/InvokeAI@6af20578bce65177ff9da43df0e82c788a2e14ae invokeai/app/services/image_files/image_files_disk.py L265-272 (pnginfo.add_text), L675-682 (read back)",
+        "confidence": "공식 소스 코드",
+        "checked": "2026-10-27"
+      },
+      {
+        "generator": "Fooocus",
+        "keys": [
+          "png.parameters (JSON in the 'fooocus' scheme, or A1111 text in the 'a1111' scheme)",
+          "png.fooocus_scheme",
+          "exif.Software 'Fooocus v…' (brand rule only — moderate)"
+        ],
+        "source": "lllyasviel/Fooocus@f597bf1ab653bd4bea8cb1e5cc7996348fbe8879 modules/meta_parser.py L610-611 (items.pop('parameters'), items.pop('fooocus_scheme')), L644-649 (EXIF UserComment = parameters, Software = 'Fooocus v' + version, MakerNote = scheme), L339-362 (field names)",
+        "confidence": "공식 소스 코드",
+        "checked": "2026-10-27"
+      },
+      {
+        "generator": "SwarmUI",
+        "keys": [
+          "png.parameters (JSON with sui_image_params: prompt, seed, steps, cfgscale, model …)"
+        ],
+        "source": "mcmonkeyprojects/SwarmUI master src/Text2Image/T2IParamInput.cs L428 (new JObject { [\"sui_image_params\"] = paramData }), L431, L485; receyuki/stable-diffusion-prompt-reader sd_prompt_reader/image_data_reader.py L67-74 (reads sui_image_params from parameters)",
+        "confidence": "공식 소스 코드",
+        "checked": "2026-10-27"
+      },
+      {
+        "generator": "Midjourney",
+        "keys": [
+          "png.Description / xmp dc:description: prompt + '--v N' (or another --parameter) + 'Job ID: <uuid>'"
+        ],
+        "source": "no official Midjourney documentation; observed files: https://auditimg.com/en/guide/midjourney-metadata (2026-09-03, prompt + Job ID), https://www.numonic.ai/blog/midjourney-metadata-what-survives (verified 2026-03, Description = prompt + parameters + Job ID), https://ai101.peterkaminski.wiki/how_to_use_exiftool_to_retrieve_the_image_prompt_from_a_midjourney_png_file (exiftool -Description)",
+        "confidence": "제3자 실제 파일 관찰",
+        "checked": "2026-10-27"
+      },
+      {
+        "generator": "IPTC digital source type (any tool)",
+        "keys": [
+          "xmp Iptc4xmpExt:DigitalSourceType (attribute, element text or rdf:resource)"
+        ],
+        "source": "IPTC Photo Metadata Standard 2024.1, Digital Source Type (http://cv.iptc.org/newscodes/digitalsourcetype/); W3C RDF 1.1 XML Syntax §2.4 (IRI-valued property as rdf:resource) — read by image_metadata.parse_xmp_fields, decided by evidence_rules.xmp_evidence (unchanged strong self-declaration)",
+        "confidence": "공식 표준",
+        "checked": "2026-10-27"
+      }
+    ]
+  }
 }

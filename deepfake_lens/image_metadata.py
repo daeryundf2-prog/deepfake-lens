@@ -25,10 +25,12 @@ EXIF error is a failed metadata read — the caller records the
 
 from __future__ import annotations
 
+import json
 import os
 import re
 import struct
 import xml.etree.ElementTree as ElementTree
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -61,10 +63,12 @@ XMP_NS = "http://ns.adobe.com/xap/1.0/"
 IPTC_EXT_NS = "http://iptc.org/std/Iptc4xmpExt/2008-02-29/"
 DC_NS = "http://purl.org/dc/elements/1.1/"
 PHOTOSHOP_NS = "http://ns.adobe.com/photoshop/1.0/"
+RDF_NS = "http://www.w3.org/1999/02/22-rdf-syntax-ns#"
 XMP_FIELDS = {
     (XMP_NS, "CreatorTool"): "xmp.CreatorTool",
     (IPTC_EXT_NS, "DigitalSourceType"): "xmp.DigitalSourceType",
     (DC_NS, "creator"): "xmp.creator",
+    (DC_NS, "description"): "xmp.description",  # Midjourney writes its prompt + Job ID here (generator_record)
     (PHOTOSHOP_NS, "Credit"): "xmp.Credit",
 }
 # P0R-22: the China GB 45438-2025 implicit label in XMP — a property named
@@ -532,7 +536,10 @@ def parse_xmp_fields(packet: bytes) -> dict[str, str]:
         key = _xmp_key(element.tag)
         if key:
             texts = [text.strip() for text in element.itertext() if text and text.strip()]
-            found.setdefault(key, []).extend(texts)
+            # An IRI-valued property may be written as an empty element with rdf:resource (RDF/XML 1.1 §2.4),
+            # e.g. <Iptc4xmpExt:DigitalSourceType rdf:resource="http://cv.iptc.org/…/trainedAlgorithmicMedia"/>.
+            resource = element.attrib.get(f"{{{RDF_NS}}}resource", "").strip()
+            found.setdefault(key, []).extend(texts + ([resource] if resource else []))
     return {
         key: "; ".join(dict.fromkeys(values))[: XMP_AIGC_MAX_CHARS if key == XMP_AIGC_KEY else MAX_EXIF_VALUE_CHARS]
         for key, values in found.items()
@@ -585,9 +592,80 @@ def _read_tiff_dimensions(data: bytes) -> tuple[int, int] | None:
     return None
 
 
+# Generator records (owner decision 2026-10-27): the structured self-declarations of generators whose record is not an
+# A1111 parameters text or a ComfyUI graph. Each is recognized only by its own key and structure (sources of every key:
+# models/generator-strings.json, generator_records) — a key name or a brand word alone is not a record.
+_MIDJOURNEY_JOB_ID = re.compile(r"\bjob id:\s*[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b", re.IGNORECASE)
+_MIDJOURNEY_PARAMETER = re.compile(r"(?:^|\s)--(?:v|version|niji|ar|aspect|stylize|s|chaos|c|weird|w|style|q|quality|seed|sref|cref|p|raw)\b", re.IGNORECASE)
+_NOVELAI_FIELDS = ("steps", "sampler", "seed", "scale", "uc", "noise_schedule", "n_samples", "cfg_rescale")
+_INVOKEAI_METADATA_FIELDS = ("positive_prompt", "seed", "steps", "cfg_scale", "model", "generation_mode", "scheduler")
+_FOOOCUS_FIELDS = ("performance", "styles", "base_model", "guidance_scale", "sharpness", "adm_guidance", "full_prompt")
+_SWARMUI_FIELDS = ("prompt", "seed", "steps", "cfgscale", "model", "swarm_version")
+
+
+def _json_object(value: str | None) -> dict[str, Any] | None:
+    if not value or not value.lstrip().startswith("{"):
+        return None
+    try:
+        parsed = json.loads(value)
+    except ValueError:
+        return None
+    return parsed if isinstance(parsed, dict) else None
+
+
+def _field_hits(record: dict[str, Any], fields: tuple[str, ...]) -> int:
+    keys = {str(key).lower() for key in record}
+    return sum(1 for name in fields if name in keys)
+
+
+def generator_record(metadata: Mapping[str, str]) -> SourceGuess | None:
+    """The generator that a structured record in ``metadata`` names (NovelAI, InvokeAI, Fooocus, SwarmUI, Midjourney).
+
+    HIGH like the A1111/ComfyUI structural rules: the file carries the generator's own structured record in the
+    generator's own field. ``None`` when no such record is present (a brand word alone is the brand rule's).
+    """
+    fields = {key.lower(): value for key, value in metadata.items()}
+    # NovelAI: PNG tEXt Software == "NovelAI" + Comment JSON of the generation settings.
+    if fields.get("png.software", "").strip() == "NovelAI":
+        comment = _json_object(fields.get("png.comment"))
+        if comment is not None and "prompt" in comment and _field_hits(comment, _NOVELAI_FIELDS) >= 2:
+            return SourceGuess("NovelAI 추정", SourceConfidence.HIGH, [
+                "PNG `Software`=`NovelAI`와 `Comment`의 NovelAI 생성 설정 JSON(프롬프트·단계·샘플러·시드)이 발견되었습니다."])
+    # InvokeAI 3+: PNG text invokeai_metadata (settings JSON), invokeai_workflow / invokeai_graph (node graph JSON).
+    invoke_metadata = _json_object(fields.get("png.invokeai_metadata"))
+    invoke_graph = next((graph for key in ("png.invokeai_graph", "png.invokeai_workflow")
+                         if (graph := _json_object(fields.get(key))) is not None and "nodes" in graph), None)
+    if (invoke_metadata is not None and _field_hits(invoke_metadata, _INVOKEAI_METADATA_FIELDS) >= 2) or invoke_graph is not None:
+        return SourceGuess("InvokeAI 추정", SourceConfidence.HIGH, [
+            "PNG `invokeai_metadata`/`invokeai_workflow`/`invokeai_graph`에 InvokeAI 생성 설정 또는 노드 그래프 JSON이 발견되었습니다."])
+    # Fooocus: PNG text parameters (settings JSON in its own scheme) + fooocus_scheme naming the scheme.
+    parameters = _json_object(fields.get("png.parameters"))
+    if fields.get("png.fooocus_scheme", "").strip().lower() in ("fooocus", "a1111") and fields.get("png.parameters"):
+        if (parameters is not None and "prompt" in parameters and _field_hits(parameters, _FOOOCUS_FIELDS) >= 1) or (
+                parameters is None and _looks_like_a1111(f"png.parameters: {fields['png.parameters']}".lower())):
+            return SourceGuess("Fooocus 추정", SourceConfidence.HIGH, [
+                "PNG `fooocus_scheme`과 `parameters`의 Fooocus 생성 설정(프롬프트·성능·스타일·기본 모델)이 발견되었습니다."])
+    # SwarmUI: PNG text parameters = JSON {"sui_image_params": {...}, "sui_extra_data": ...}.
+    swarm = parameters.get("sui_image_params") if parameters is not None else None
+    if isinstance(swarm, dict) and _field_hits(swarm, _SWARMUI_FIELDS) >= 2:
+        return SourceGuess("SwarmUI 추정", SourceConfidence.HIGH, [
+            "PNG `parameters`의 `sui_image_params` 생성 설정 JSON(프롬프트·시드·단계)이 발견되었습니다."])
+    # Midjourney (web downloads): Description (PNG tEXt / XMP dc:description) = prompt + --parameters + "Job ID: <uuid>".
+    for key in ("png.description", "xmp.description"):
+        text = fields.get(key, "")
+        if _MIDJOURNEY_JOB_ID.search(text) and _MIDJOURNEY_PARAMETER.search(text):
+            return SourceGuess("Midjourney/Niji 추정", SourceConfidence.HIGH, [
+                "설명 필드에 Midjourney 프롬프트 매개변수(`--v` 등)와 작업 식별자(`Job ID`)가 함께 발견되었습니다."])
+    return None
+
+
 def guess_image_source(metadata: dict[str, str], *, brands: bool = True) -> SourceGuess:
     """The source guess of image metadata. ``brands=False`` (P0R-11): structural generator records only (ComfyUI,
-    A1111, generation-parameter fields) — a brand word alone ("Firefly", "Runway") is not considered."""
+    A1111, the generator records of :func:`generator_record`, generation-parameter fields) — a brand word alone
+    ("Firefly", "Runway") is not considered."""
+    record = generator_record(metadata)
+    if record is not None:
+        return record
     blob = "\n".join(f"{key}: {value}" for key, value in metadata.items())
     normalized = blob.lower()
     if not normalized.strip():
