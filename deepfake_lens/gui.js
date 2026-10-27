@@ -411,7 +411,8 @@
             const overCap = (lastProvenance.summary || {}).files_over_cap || 0;
             if (overCap) parts.push(`파일 수 상한에 도달해 <b>${overCap}개 파일은 검사·기록하지 않았습니다</b> — ${escapeHtml(overCapAdvice(lastScanOptions.max_files))}`);
             if (!parts.length) return '';
-            return `${parts.map(foldWarningHtml).join('')}${caveatMoreHtml('<p class="note">이 결과는 결론과 근거로 읽으십시오; 점수는 보정된 경우에만 표시됩니다. 유죄·불법성의 확정 판정이 아닙니다.</p>')}`;
+            // The closing one-line caveat stays in view: folding it cost a row of its own and hid the verdict limit.
+            return `${parts.map(foldWarningHtml).join('')}<p class="note">이 결과는 결론과 근거로 읽으십시오; 점수는 보정된 경우에만 표시됩니다. 유죄·불법성의 확정 판정이 아닙니다.</p>`;
         }
 
         // P7: inverse of result_text.escape_row_path ("\\:" -> ":", "\\\\" -> "\\").

@@ -650,7 +650,7 @@ select.field { padding-right: 8px; }
 .caveat-item > p, .caveat-item > .caveat-more, .band-advice > .caveat-more { display: inline; }
 .caveat-item > .caveat-more[open] > :not(summary) { display: block; }
 .caveat-item > .caveat-more > summary, .band-advice > .caveat-more > summary, .prov-details > .caveat-more > summary {
-    display: inline-flex; vertical-align: middle; margin: -12px 0 -12px 8px; padding: 0 4px;
+    display: inline-flex; vertical-align: middle; margin: -14px 0 -14px 8px; padding: 0 4px;
 }
 .prov-details > .caveat-more > summary { margin-left: 0; }
 @media print {
