@@ -103,7 +103,7 @@ from .vendor_weights import (
 from .json_text import json_dumps
 
 
-COMMANDS = {"doctor", "scan", "verify-report", "corpus", "collect", "dataset", "eval", "benchmark", "fusion", "calibrate", "feedback", "train", "train-neural-plan", "models", "video", "video-analysis", "audio", "face", "faceswap-seam", "evidence-statement", "vendor-weights", "inpaint", "text-advanced", "compare", "watermark", "forensic", "classify", "multimodal", "realtime", "rppg", "prnu", "evidence", "api-serve", "batch", "explain", "agent", "3d", "avatar", "pixel-analysis", "ml-classify", "legal-report", "perf", "security", "release", "web", "desktop", "-h", "--help"}
+COMMANDS = {"doctor", "scan", "verify-report", "corpus", "collect", "dataset", "eval", "benchmark", "fusion", "calibrate", "measure", "feedback", "train", "train-neural-plan", "models", "video", "video-analysis", "audio", "face", "faceswap-seam", "evidence-statement", "vendor-weights", "inpaint", "text-advanced", "compare", "watermark", "forensic", "classify", "multimodal", "realtime", "rppg", "prnu", "evidence", "api-serve", "batch", "explain", "agent", "3d", "avatar", "pixel-analysis", "ml-classify", "legal-report", "perf", "security", "release", "web", "desktop", "-h", "--help"}
 
 def _pkg_profile(name: str) -> str:
     # Absolute path into the resolved models dir — works from the source
@@ -911,6 +911,30 @@ def _run_command(args: argparse.Namespace, parser: argparse.ArgumentParser, cmd_
         write_json_report(args.out, payload)
         if args.mapping_out:
             write_json_report(args.mapping_out, payload["score_calibration"])
+        print(json_dumps(payload, ensure_ascii=False, indent=2))
+        return 0
+    if args.command == "measure":
+        from .lr_measure import MeasureError, load_scores, measure, score_items_with_profile
+        from .corpus_manifest import ManifestError, load_manifest
+
+        if (args.scores is None) == (args.model_path is None):
+            cmd_parsers["measure"].error("--scores와 --model-path 중 정확히 하나를 지정하십시오")
+        try:
+            if args.scores is not None:
+                scores = load_scores(args.scores)
+                model_name = args.scores.name
+            else:
+                items = load_manifest(args.manifest)["items"]
+                scores = score_items_with_profile(args.manifest.resolve(), items, args.model_path)
+                model_name = args.model_path.name
+            payload = measure(args.manifest, scores, variants=args.variant, target_fpr=args.target_fpr, resamples=args.bootstrap, seed=args.seed, model=model_name)
+        except (MeasureError, ManifestError, OSError) as exc:
+            print(f"측정할 수 없습니다: {exc}", file=sys.stderr)
+            return 2
+        if args.json_out:
+            write_json_report(args.json_out, payload)
+        if args.lr_out:
+            write_json_report(args.lr_out, payload["lr_profile"])
         print(json_dumps(payload, ensure_ascii=False, indent=2))
         return 0
     if args.command == "feedback":

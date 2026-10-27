@@ -333,22 +333,42 @@ def model_reference_signals(model: ExternalModelAnalysis | None) -> list[Evidenc
         return []
     if model.models:
         scored = [
-            (str(member.get("display_name") or member.get("model") or ""), member.get("score"))
+            (str(member.get("display_name") or member.get("model") or ""), member.get("score"), member.get("profile"))
             for member in model.models
             if member.get("confidence") == REFERENCE_CONFIDENCE
         ]
     else:
-        scored = [(model.label, model.score)] if model.confidence == REFERENCE_CONFIDENCE else []
+        scored = [(model.label, model.score, None)] if model.confidence == REFERENCE_CONFIDENCE else []
     return [
         EvidenceSignal(
             REFERENCE_SIGNAL_TITLE,
             f"{label}: 원점수 {int(score)}/100 — 측정 게이트를 통과하지 않은 미측정 모델의 참고 신호입니다. "
-            "보정되지 않은 값이며 확률이 아니고, 결론과 근거 항목에 쓰이지 않습니다.",
+            "보정되지 않은 값이며 확률이 아니고, 결론과 근거 항목에 쓰이지 않습니다."
+            + _lr_suffix(profile_path, float(score)),
             int(score),
         )
-        for label, score in scored
+        for label, score, profile_path in scored
         if isinstance(score, (int, float)) and not isinstance(score, bool)
     ]
+
+
+def _lr_suffix(profile_path: object, score: float) -> str:
+    """The validated 「증거 강도(우도비)」 sentence a profile's ``lr_profile`` names (OMO-20)."""
+    if not profile_path:
+        return ""
+    from .lr_measure import load_lr_profile, lr_statement
+
+    source = Path(str(profile_path))
+    try:
+        profile = json.loads(source.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return ""
+    name = profile.get("lr_profile") if isinstance(profile, dict) else None
+    if not isinstance(name, str) or not name:
+        return ""
+    lr = load_lr_profile(source.parent / name)
+    statement = lr_statement(lr, score) if lr else None
+    return f" {statement}" if statement else ""
 
 
 def _bare_checkpoint_sha256(checkpoint: Path) -> str:

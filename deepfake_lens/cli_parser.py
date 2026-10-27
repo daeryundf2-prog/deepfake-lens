@@ -386,6 +386,17 @@ def build_parser() -> tuple[argparse.ArgumentParser, dict[str, argparse.Argument
     calibrate_parser.add_argument("--mapping-out", type=Path, help="등위(isotonic) 점수 보정 프로필(매핑표·방법·데이터셋 지문)도 저장 — 값은 데이터셋 의존 신뢰도이며 진실 확률이 아님")
     calibrate_parser.add_argument("--thresholds", type=Path, help=THRESHOLDS_HELP)
 
+    measure_parser = subparsers.add_parser("measure", help="좁은 범위 측정: 코퍼스 test 분할의 AUROC(원본 묶음 부트스트랩 95%% 신뢰구간)·measured_on·측정 게이트 판정과 우도비(LR) 보정 프로필")
+    measure_parser.add_argument("manifest", type=Path, metavar="<매니페스트>", help="corpus-manifest-v1 매니페스트(분할 완료)")
+    measure_parser.add_argument("--scores", type=Path, help="항목별 점수 파일(한 줄에 항목 식별자와 0~100 사이 점수 하나씩)")
+    measure_parser.add_argument("--model-path", type=Path, help="각 항목을 직접 채점할 런타임 모델 프로필(--scores와 둘 중 하나)")
+    measure_parser.add_argument("--variant", action="append", default=[], help="측정할 변형(예: kakao, 반복 지정 가능; 생략하면 전체)")
+    measure_parser.add_argument("--target-fpr", type=float, default=0.05, help="val 분할에서 임계값을 맞출 목표 오탐률")
+    measure_parser.add_argument("--bootstrap", type=int, default=2000, help="원본 묶음 부트스트랩 반복 수")
+    measure_parser.add_argument("--seed", type=int, default=0, help="부트스트랩 난수 시드(같은 시드는 같은 구간)")
+    measure_parser.add_argument("--json-out", type=Path, help="측정 결과 JSON 저장")
+    measure_parser.add_argument("--lr-out", type=Path, help="우도비 보정 프로필 JSON 저장(검증 통과 여부 포함)")
+
     feedback_parser = subparsers.add_parser("feedback", help="감정인 라벨과 검사 점수를 비교해 융합 가중치 제안")
     feedback_parser.add_argument("labels", type=Path, help="감정인 판정 JSONL/JSON: 행마다 `path`, `expected_label`, `notes`(선택) 필드")
     feedback_parser.add_argument("--scan-json", type=Path, help="비교할 이전 scan --json-out 결과(기본: 라벨의 경로를 다시 분석)")
@@ -693,7 +704,7 @@ def build_parser() -> tuple[argparse.ArgumentParser, dict[str, argparse.Argument
         "corpus": corpus_parser,
         "scan": scan_parser, "collect": collect_parser, "dataset": dataset_parser,
         "eval": eval_parser, "benchmark": benchmark_parser, "fusion": fusion_parser,
-        "calibrate": calibrate_parser, "feedback": feedback_parser, "train": train_parser,
+        "calibrate": calibrate_parser, "measure": measure_parser, "feedback": feedback_parser, "train": train_parser,
         "models": models_parser, "train-neural-plan": neural_parser, "video": video_parser,
         "audio": audio_parser, "face": face_parser, "video-analysis": video_analysis_parser,
         "inpaint": inpaint_parser, "text-advanced": text_advanced_parser, "compare": compare_parser,

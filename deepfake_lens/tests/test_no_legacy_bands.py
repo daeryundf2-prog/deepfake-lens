@@ -57,6 +57,7 @@ EXCLUDED_COMMANDS = {
     "benchmark": "evaluation tooling over the scan path (scan rows, read-compat band)",
     "eval": "evaluation tooling over labeled datasets (metrics + scan rows)",
     "calibrate": "evaluation tooling: fits threshold profiles",
+    "measure": "evaluation tooling: measures one corpus domain and fits likelihood-ratio profiles",
     "fusion": "evaluation tooling: fits fusion profiles",
     "feedback": "evaluation tooling: reviewer feedback statistics",
     "train": "training tooling (portable baseline)",

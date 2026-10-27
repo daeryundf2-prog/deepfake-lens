@@ -291,6 +291,7 @@ INPUT_SPECS: dict[str, tuple[InputSpec, ...]] = {
     "benchmark": (_folder("folder"),),
     "fusion": (_folder("folder"),),
     "calibrate": (_folder("folder"),),
+    "measure": (InputSpec("manifest", "file", JSON_SUFFIXES), InputSpec("scores", "file", FEEDBACK_SUFFIXES)),
     "feedback": (InputSpec("labels", "file", FEEDBACK_SUFFIXES), InputSpec("scan_json", "file", JSON_SUFFIXES)),
     "train": (_folder("folder"),),
     "train-neural-plan": (_folder("folder"),),
@@ -358,7 +359,7 @@ COMMON_INPUT_EXEMPT: dict[str, frozenset[str]] = {"vendor-weights": frozenset({"
 OUTPUT_FILE_ATTRS: tuple[str, ...] = (
     "out", "output", "json_out", "csv_out", "html_out", "pdf_out", "md_out", "forensic_pdf_out",
     "evidence_statement_out", "evidence_statement_pdf_out", "manifest_out", "audit_out", "split_out",
-    "robustness_out", "profile_out", "false_positive_out", "false_negative_out", "mapping_out",
+    "robustness_out", "profile_out", "false_positive_out", "false_negative_out", "mapping_out", "lr_out",
     "cache", "hash_db",
 )
 
