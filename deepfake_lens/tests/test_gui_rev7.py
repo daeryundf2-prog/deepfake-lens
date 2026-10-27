@@ -146,7 +146,7 @@ class F3DefaultFolderDoesNotOverwriteTypingTest(unittest.TestCase):
             "var out = JSON.stringify([deniedFolderHint('허용되지 않은 경로', '/srv/case'), deniedFolderHint('허용되지 않은 경로', ''),"
             " deniedFolderHint('폴더를 찾을 수 없습니다', '/srv/case')]);"
         )
-        base = " — 프로그램을 켤 때 등록한 폴더 안만 검사할 수 있습니다. 다른 폴더는 데스크톱 모드(「Deepfake Lens」 실행 파일)에서 「검사할 폴더 고르기」로 고르십시오."
+        base = " — 프로그램을 켤 때 등록한 폴더 안만 검사할 수 있습니다. 다른 폴더는 데스크톱 모드에서 \"검사할 폴더 고르기\"로 고르십시오."
         self.assertEqual(json.loads(_run_js(body)), [base + " 이 서버의 기본 폴더: /srv/case", base, ""])
 
 

@@ -1512,12 +1512,12 @@
         function deniedFolderHint(message, folder, roots, desktop, earlier) {
             if (!/허용되지 않은 경로/.test(message)) return '';
             if (earlier && desktop) return " — 프로그램을 다시 시작하면 고른 폴더의 등록이 사라집니다. 같은 폴더를 '검사할 폴더 고르기'로 다시 고르십시오.";
-            if (earlier) return ' — 이 검사의 폴더가 지금 검사 허용 목록에 없습니다(프로그램을 다시 켠 경우). 데스크톱 모드(「Deepfake Lens」 실행 파일)에서 「검사할 폴더 고르기」로 그 폴더를 다시 고르십시오.';
+            if (earlier) return ' — 이 검사의 폴더가 지금 검사 허용 목록에 없습니다(프로그램을 다시 켠 경우). 데스크톱 모드에서 "검사할 폴더 고르기"로 그 폴더를 다시 고르십시오.';
             const pick = desktop ? ' 다른 폴더는 위의 "검사할 폴더 고르기"로 고르십시오.' : '';
             if (Array.isArray(roots) && roots.length) return ` — 지금 검사할 수 있는 폴더(그 안의 폴더 포함): ${rootsSummary(roots)}.` + pick;
             if (desktop) return ' — 아직 검사할 수 있는 폴더가 없습니다.' + pick;
             const own = folder ? ` 이 서버의 기본 폴더: ${folder}` : '';
-            return ' — 프로그램을 켤 때 등록한 폴더 안만 검사할 수 있습니다. 다른 폴더는 데스크톱 모드(「Deepfake Lens」 실행 파일)에서 「검사할 폴더 고르기」로 고르십시오.' + own;
+            return ' — 프로그램을 켤 때 등록한 폴더 안만 검사할 수 있습니다. 다른 폴더는 데스크톱 모드에서 "검사할 폴더 고르기"로 고르십시오.' + own;
         }
         // RISK B4: the hint for a 403 answer about a scan already made (the body is read from a copy).
         async function deniedResponseHint(res) {
@@ -2770,7 +2770,7 @@
                 // an empty form, so the page reads as "not filled yet", not as broken
                 box.innerHTML = '<div class="a4-top"><span>증거설명서 미리보기</span><span>서증 0개</span></div>' +
                     '<p class="a4-title">증 거 설 명 서</p>' +
-                    '<p class="miss a4-center a4-empty-note">고른 서증이 없습니다 — 왼쪽의 「서증으로 넣을 파일」에서 고르면 이 서식에 그대로 채워집니다.</p>' +
+                    '<p class="miss a4-center a4-empty-note">고른 서증이 없습니다 — 왼쪽의 "서증으로 넣을 파일"에서 고르면 이 서식에 그대로 채워집니다.</p>' +
                     '<table class="a4-skeleton" aria-hidden="true"><thead><tr><th>호증</th><th>서증명</th><th>작성자</th><th>입증취지</th></tr></thead><tbody>' +
                     '<tr><td>&nbsp;</td><td></td><td></td><td></td></tr>'.repeat(4) + '</tbody></table>';
                 box.dataset.ready = String(a4Seq);
@@ -3620,14 +3620,14 @@
             if (!roots.length) {
                 return {
                     head: desktop ? '아직 검사할 수 있는 폴더가 없습니다 — 위의 "검사할 폴더 고르기"로 고르면 그 폴더(그 안의 폴더 포함)를 검사할 수 있습니다.'
-                        : '프로그램을 켤 때 등록한 폴더 안만 검사할 수 있습니다. 다른 폴더는 데스크톱 모드(「Deepfake Lens」 실행 파일)에서 「검사할 폴더 고르기」로 고르십시오.',
+                        : '프로그램을 켤 때 등록한 폴더 안만 검사할 수 있습니다. 다른 폴더는 데스크톱 모드에서 "검사할 폴더 고르기"로 고르십시오.',
                     items: [], more: '',
                 };
             }
             const shown = roots.slice(0, ROOTS_SHOWN);
             return {
                 head: desktop ? '지금 검사할 수 있는 폴더(그 안의 폴더 포함 — 다른 폴더는 "검사할 폴더 고르기"로):'
-                    : '지금 검사할 수 있는 폴더(그 안의 폴더 포함 — 다른 폴더는 데스크톱 모드의 「검사할 폴더 고르기」로):',
+                    : '지금 검사할 수 있는 폴더(그 안의 폴더 포함 — 다른 폴더는 데스크톱 모드의 "검사할 폴더 고르기"로):',
                 items: shown,
                 more: roots.length > shown.length ? `외 ${roots.length - shown.length}개` : '',
             };
