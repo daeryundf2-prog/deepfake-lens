@@ -296,6 +296,8 @@ HTML / signed JSON through `POST /api/report`, a preview) and `#/tools`
 
 **History item** — each element of `items` is a finished scan job, newest first: `{"job_id", "status", "source", "created", "finished", "scan_root", "folder_name", "files", "summary", "persisted", "case": {"case_no", "case_name"}}`. `case_no` and `case_name` are `""` when the job has no case fields.
 
+**Where the history lives** — the list is the existing scan-job store (`scan-jobs/` in the user-data folder, `DEEPFAKE_LENS_SCAN_JOBS` overrides; records are HMAC-signed with the report key and kept `DEEPFAKE_LENS_SCAN_JOB_TTL_DAYS`, default 7 days). A record whose signature does not verify is left out and counted in `note`. The case fields of each job live in `cases.json` next to `reviews.json` (`DEEPFAKE_LENS_CASES` overrides; file mode 0600; never inside an examined folder, refused with 409 like the other examiner records); `/api/history` drops the entries whose job record is gone, so party names do not outlive their scan. The GUI's own settings (theme, scan defaults, shortcuts, the welcome panel) are kept in the browser's local storage for the page's origin, so a different port or `desktop --browser-tab` starts with the defaults.
+
 Read-root rule (G31) for `/api/scan`, `/api/analyze-file`,
 `/api/heatmap`, `/api/preview`, `/api/report` (evidence hashing and
 heatmap embedding) and every `api-serve` endpoint that takes a
