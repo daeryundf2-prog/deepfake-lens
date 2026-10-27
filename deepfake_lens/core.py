@@ -26,7 +26,7 @@ from .video_analysis import (
     audio_track_check,
 )
 from .documents import SUPPORTED_DOCUMENT_EXTENSIONS, extract_document_text, extractor_dependency, extractor_text
-from .model_adapter import FAILED_CONFIDENCE, ExternalModelAnalysis, analyze_external_model, profile_probability_thresholds
+from .model_adapter import FAILED_CONFIDENCE, ExternalModelAnalysis, analyze_external_model, model_reference_signals, profile_probability_thresholds
 from .pixel import DEFAULT_PIXEL_MAX_SIDE, PixelAnalysis, analyze_image_pixels
 from .image_metadata import (  # noqa: F401
     DEFAULT_METADATA_BYTES,
@@ -1826,7 +1826,7 @@ def _analyze_image_file(
         c2pa_unknown=c2pa_unknown,
         image_format=image_format,
         jpeg_quality=jpeg_quality,
-        extra_reference=deep.reference,
+        extra_reference=[*deep.reference, *model_reference_signals(model_analysis)],
         # G8: rule 4's thresholds are the loaded profiles' (calibration id -> threshold/100).
         probability_thresholds=profile_probability_thresholds(model_path),
         marking_context=marks.marking_context,
@@ -1895,6 +1895,7 @@ def _audio_result(
         for signal in analysis.signals
         if not signal.title.startswith("외부 모델")
     ]
+    reference.extend(model_reference_signals(analysis.model_analysis))
     source_known = bool(analysis.source_guess) and analysis.source_guess != "unknown"
     source_guess = SourceGuess(
         analysis.source_guess if source_known else "출처 단서 없음",

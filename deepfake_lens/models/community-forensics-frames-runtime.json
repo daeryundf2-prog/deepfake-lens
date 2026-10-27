@@ -10,26 +10,27 @@
   "frames": 8,
   "inner": {
     "runtime": "onnx",
-    "checkpoint": "checkpoints/community-forensics/generative_detector.onnx",
+    "checkpoint": "checkpoints/community-forensics/commfor-vit-s384.onnx",
     "input_size": 384,
     "input_name": "input",
     "mean": [
-      0.48145466,
-      0.4578275,
-      0.40821073
+      0.485,
+      0.456,
+      0.406
     ],
     "std": [
-      0.26862954,
-      0.26130258,
-      0.27577711
+      0.229,
+      0.224,
+      0.225
     ],
     "score_index": 0,
     "score_activation": "sigmoid",
     "name": "CommunityForensics ViT-S/384",
-    "display_name": "CommunityForensics ViT-S/384 생성 이미지 탐지기"
+    "display_name": "CommunityForensics ViT-S/384 생성 이미지 탐지기",
+    "resize_size": 440
   },
   "ensemble_weight": 0.6,
-  "source_url": "https://huggingface.co/Red-had1911/deepfake-detector-onnx (generative_detector.onnx — Community Forensics ViT-S/384, arXiv:2411.04125, MIT)",
+  "source_url": "https://huggingface.co/OwensLab/commfor-model-384 (revision 6076002bf0d9dd37537f965ee2f06f826c333b61, model.safetensors sha256 b89f36275f3bf5e2b040eee36597a8f19db051bff9a473a9cf7b2466284fb387; ONNX export by scripts/fetch_community_forensics.py; code https://github.com/JeongsooP/Community-Forensics; Park & Owens, CVPR 2025, arXiv:2411.04125; MIT code+weights)",
   "limitations": [
     "프레임 단위 생성 이미지 탐지이며 시간축/립싱크/페이스스왑 모델이 아닙니다 — 완전 생성 영상(Sora급) 프레임은 반응할 수 있지만 실제 영상에 얼굴만 바꾼 영상은 반응하지 않습니다(그 유형은 추출한 얼굴에 대한 crop_faces 멤버가 필요).",
     "ONNX 체크포인트(저장소 미포함)와 프레임 디코딩용 opencv가 필요합니다.",
@@ -37,7 +38,7 @@
     "점수는 보정 전 원점수이며 진위 판정이 아닙니다."
   ],
   "pin": {
-    "sha256": ""
+    "sha256": "32d3f2ed0ec00fc66df6e987210fb55a862fcf00b2d359b2290acc4446626369"
   },
   "measured_on": null,
   "license": "MIT"

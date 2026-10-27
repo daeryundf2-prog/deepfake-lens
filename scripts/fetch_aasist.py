@@ -45,11 +45,14 @@ DEFAULT_NAME = "aasist.pth"
 
 # Official checkpoint location: committed inside clovaai/aasist at
 # models/weights/AASIST.pth — the raw URL is a direct download.
-AASIST_CHECKPOINT_URL = "https://raw.githubusercontent.com/clovaai/aasist/main/models/weights/AASIST.pth"
+AASIST_CHECKPOINT_URL = "https://raw.githubusercontent.com/clovaai/aasist/a04c9863f63d44471dde8a6abcb3b082b07cd1d1/models/weights/AASIST.pth"
 AASIST_SOURCE_URL = "https://github.com/clovaai/aasist"
 
-# The AASIST authors publish no checksum; users must supply --sha256 to pin one.
-EXPECTED_SHA256: str | None = None
+# The AASIST authors publish no checksum; this is the digest of AASIST.pth at
+# the pinned commit above (retrieved 2026-10-27), also the pin in
+# aasist-runtime.json. It applies to the default --url only; --sha256 sets the
+# digest for any URL.
+EXPECTED_SHA256: str | None = "51d2d9cf0738172f61e2a384ec50a54a55363240f67c971ed55a92435bc1a1c0"
 
 LICENSE_NOTICE = """\
 AASIST checkpoint notice
@@ -193,7 +196,8 @@ def main(argv: list[str] | None = None) -> int:
         return 1
 
     digest = sha256_file(part)
-    expected = (args.sha256 or EXPECTED_SHA256 or "").strip().lower() or None
+    pinned = EXPECTED_SHA256 if args.url == AASIST_CHECKPOINT_URL else None
+    expected = (args.sha256 or pinned or "").strip().lower() or None
     if expected is not None and digest != expected:
         part.unlink(missing_ok=True)
         print(f"error: sha256 mismatch: expected {expected}, got {digest}", file=sys.stderr)
