@@ -119,10 +119,10 @@ class LikelihoodRatioTest(unittest.TestCase):
 
     def test_enfsi_verbal_bands_follow_the_lr_direction(self) -> None:
         self.assertEqual(verbal(1.0), "어느 쪽도 지지하지 않음")
-        self.assertEqual(verbal(5.0), f"{HP}을(를) 약하게 지지")
-        self.assertEqual(verbal(50.0), f"{HP}을(를) 중간 정도로 지지")
-        self.assertEqual(verbal(1 / 500), f"{HD}을(를) 중간보다 강하게 지지")
-        self.assertEqual(verbal(2e6), f"{HP}을(를) 극히 강하게 지지")
+        self.assertEqual(verbal(5.0), f"{HP}을 약하게 지지")
+        self.assertEqual(verbal(50.0), f"{HP}을 중간 정도로 지지")
+        self.assertEqual(verbal(1 / 500), f"{HD}을 중간보다 강하게 지지")
+        self.assertEqual(verbal(2e6), f"{HP}을 극히 강하게 지지")
         with self.assertRaises(MeasureError):
             verbal(0.0)
 

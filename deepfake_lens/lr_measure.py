@@ -23,7 +23,7 @@ Two things the measurement gate needs but the repo did not have:
    do) and Tippett data. An LR profile counts as validated only with at least
    ``MIN_PER_CLASS`` test samples per class and a test Cllr below 1.
 
-Neither changes a verdict: a validated LR is shown as 「증거 강도(우도비)」 in
+Neither changes a verdict: a validated LR is shown as "증거 강도(우도비)" in
 the reference signals of files inside the measured domain. Only the existing
 rule 4 path (``measured_on`` + threshold, gate unchanged) can turn a model
 score into a conclusion.
@@ -254,8 +254,8 @@ def verbal(lr: float) -> str:
     hypothesis = HP if lr > 1.0 else HD
     for upper, term in VERBAL_SCALE[1:]:
         if magnitude <= upper:
-            return f"{hypothesis}을(를) {term}"
-    return f"{hypothesis}을(를) {VERBAL_SCALE[-1][1]}"
+            return f"{hypothesis}을 {term}"
+    return f"{hypothesis}을 {VERBAL_SCALE[-1][1]}"
 
 
 SCORE_GRID = range(101)
@@ -542,7 +542,7 @@ def load_lr_profile(path: Path) -> dict[str, Any] | None:
 
 
 def lr_statement(profile: dict[str, Any], score: float) -> str | None:
-    """Korean 「증거 강도(우도비)」 sentence for one raw score; None unless validated."""
+    """Korean "증거 강도(우도비)" sentence for one raw score; None unless validated."""
     if profile.get("validated") is not True:
         return None
     try:

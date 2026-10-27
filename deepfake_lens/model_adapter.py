@@ -366,7 +366,7 @@ def _single_source(model_path: Path | str | list[Path | str] | tuple[Path | str,
 
 
 def _lr_suffix(profile_path: object, score: float) -> str:
-    """The validated 「증거 강도(우도비)」 sentence a profile's ``lr_profile`` names (OMO-20)."""
+    """The validated "증거 강도(우도비)" sentence a profile's ``lr_profile`` names (OMO-20)."""
     if not profile_path:
         return ""
     from .lr_measure import load_lr_profile, lr_statement
