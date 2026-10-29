@@ -4,7 +4,7 @@
 
 Y13/P12: 검증 결함 ID(라운드 1–11)를 0단계 스펙의 갭 ID(G1–G34) 또는 신규(스펙 외) 사유에 매핑하고, 현재 phase0 히스토리의 커밋마다 제목의 ID와 'Gaps:' 줄을 적는다. 라운드 3과 라운드 6의 N은 서로 다른 집합이므로 N3-x / N6-x로, 라운드 5의 G1–G16은 스펙의 G1–G34와 충돌하므로 V5-G1…V5-G16으로 표기한다. 매핑(ids[], wp_gaps, unused_ids, notes)은 손으로 관리하는 데이터이고, commits[]와 ids[].commits는 scripts/build_traceability_commits.py가 git 히스토리에서 다시 만든다(제목으로 이전 항목과 매칭).
 
-범위: `84dcb09..e1c6fbf`(병합 커밋 제외, 커밋 779개). 이 표는 **표를 재생성한 커밋의 부모까지**를 덮는다 — 재생성 커밋 자신의 해시는 표에 없다(자기 해시를 담을 수 없음). CI(`python scripts/build_traceability_commits.py --check`)가 같은 범위를 히스토리에서 다시 만들어 커밋된 표와 비교한다.
+범위: `84dcb09..f56b467`(병합 커밋 제외, 커밋 781개). 이 표는 **표를 재생성한 커밋의 부모까지**를 덮는다 — 재생성 커밋 자신의 해시는 표에 없다(자기 해시를 담을 수 없음). CI(`python scripts/build_traceability_commits.py --check`)가 같은 범위를 히스토리에서 다시 만들어 커밋된 표와 비교한다.
 
 요약: ID 354개 — 스펙 갭에 매핑 232개(그중 신규 사유 병기 80개), 신규(스펙 외)만 122개.
 
@@ -1193,3 +1193,5 @@ R31: c15ed6e의 제목 ID `R31`은 라운드 2의 R1–R16(R10–R15 미사용)�
 | 0e15c77 | 31 | — | Gaps: 신규(스펙 외) | subject | fix(evidence): OMO-20 LR profile numbers must be JSON numbers within range — strings, booleans, over-large integers and non-finite values are refused, and an unreadable LR or model profile (bad UTF-8, bad JSON, a 5000-digit literal, deep nesting) leaves only the raw-score reference row (gate re-review blockers; test_an_unreadable_lr_file_leaves_the_raw_score_row_alone) (OMO-20; Gaps: 신규) |
 | 1c599af | 31 | — | Gaps: 신규(스펙 외) | subject | docs(qa): OMO commit traceability regenerated on 0e15c77 — the OMO-20 gate-review fixes in the table (OMO; Gaps: 신규) |
 | e1c6fbf | 31 | — | Gaps: 신규(스펙 외) | subject | feat(measure): OMO-20 review follow-ups — per-generator results with the weakest generator, --clusters resamples a person/speaker (real and AI together), --dropped-scores puts audit-dropped AI candidates back and gates on that interval, --audit-pos/--audit-neg raise the required CI low (Clopper-Pearson) and cap the LR table (test_hard_ai_dropped_by_the_audit_is_put_back_and_gated) (OMO-20; Gaps: 신규) |
+| 3641ef4 | 31 | — | Gaps: 신규(스펙 외) | subject | docs(qa): OMO commit traceability regenerated on e1c6fbf — the OMO-20 review follow-ups (per-generator results, person/speaker clusters, audit drops, label-audit bounds) in the table (OMO; Gaps: 신규) |
+| f56b467 | 31 | — | Gaps: 신규(스펙 외) | subject | feat(gui): OMO-21 design review — the scan screen leads with the folder and 검사 시작 (case fields fold below, one primary per view), an empty ledger opens the latest saved scan, the four tabs share one style, the evidence panel folds neutral records and the long limitation list, the report picks a format and exports with one 내보내기 button (blocking checks first, the rest folded), neutral status chips explain themselves, a six-step type scale and radius tokens, drawn radios and checkboxes that read unchecked in dark mode, a compact phone header and a folder path that shows its end; verdicts and reports unchanged (OMO-21; Gaps: 신규) |
