@@ -419,7 +419,7 @@ class ExportFeedbackSourceTest(unittest.TestCase):
         on the report view, and a 409 was announced there a second time); failures go to the
         role=alert box, warnings to their own 주의 box that only new results clear."""
         source = GUI_JS.read_text(encoding="utf-8")
-        body = source[source.index("        async function exportReport(kind) {"):source.index("        Object.entries(EXPORT_BUTTONS).forEach(([kind, id]) => $(id).addEventListener('click', () => exportReport(kind)));")]
+        body = source[source.index("        async function exportReport(kind) {"):source.index("        Object.values(EXPORT_BUTTONS).forEach(id => $(id).addEventListener('change'")]
         self.assertNotIn("showError(", body)
         self.assertNotIn("toast(spec[3] + ' 생성", body)
         html = (PACKAGE / "gui.html").read_text(encoding="utf-8")

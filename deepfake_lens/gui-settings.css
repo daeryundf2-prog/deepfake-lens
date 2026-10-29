@@ -19,9 +19,9 @@ dialog.settings::backdrop,
 dialog.confirm::backdrop { background: var(--backdrop); backdrop-filter: blur(2px); }
 
 dialog.settings[open] { display: flex; flex-direction: column; gap: 12px; }
-dialog.settings h2 { margin: 0 0 4px; font-size: 20px; font-weight: 650; letter-spacing: -0.02em; }
+dialog.settings h2 { margin: 0 0 4px; font-size: var(--fs-xl); font-weight: 650; letter-spacing: -0.02em; }
 dialog.settings .set-group { border: 0; border-top: 1px solid var(--line-2); margin: 0; padding: 14px 0 2px; }
-dialog.settings .set-group > legend { padding: 0; font-size: 12px; font-weight: 600; letter-spacing: 0.02em; color: var(--muted); }
+dialog.settings .set-group > legend { padding: 0; font-size: var(--fs-xs); font-weight: 600; letter-spacing: 0.02em; color: var(--muted); }
 dialog.settings .set-pixel { border: 0; margin: 0; padding: 0; }
 dialog.settings .check,
 dialog.confirm .btn,
@@ -34,8 +34,8 @@ dialog.settings .set-info {
     padding-top: 8px;
     border-top: 1px solid var(--line-2);
 }
-dialog.settings .set-info dt { color: var(--muted); font-size: 13px; }
-dialog.settings .set-info dd { font-size: 13.5px; }
+dialog.settings .set-info dt { color: var(--muted); font-size: var(--fs-sm); }
+dialog.settings .set-info dd { font-size: var(--fs-md); }
 dialog.settings .set-info dd { margin: 0; overflow-wrap: anywhere; }
 dialog.settings .btn { align-self: flex-start; }
 

@@ -141,8 +141,30 @@
             list.appendChild(itemNode(item));
         }
         empty.hidden = list.childElementCount > 0;
+        renderLedgerEmpty();
         document.dispatchEvent(new CustomEvent('dfl:history', { detail: { count: items.length } }));
     }
+
+    // Design review 2: the ledger's empty state, when saved scans exist, opens the latest one instead of only
+    // pointing back to the scan screen (the sidebar listed the scan while the ledger said there was none).
+    const openLatest = document.getElementById('ledger-open-latest');
+    const toScan = document.getElementById('ledger-to-scan');
+    const emptyText = document.getElementById('ledger-empty-text');
+    function latestItem() { return items.find(item => !(running && item.job_id === running.jobId)) || null; }
+    function renderLedgerEmpty() {
+        if (!openLatest) return;
+        const latest = latestItem();
+        openLatest.hidden = !latest;
+        toScan.classList.toggle('btn-primary', !latest);
+        emptyText.textContent = latest
+            ? `저장된 검사가 있습니다 — 최근 검사(${titleOf(latest)})를 열거나 왼쪽 목록에서 고르십시오.`
+            : '검사 화면에서 폴더를 검사하거나 파일을 올리십시오.';
+    }
+    if (openLatest) openLatest.addEventListener('click', () => {
+        const latest = latestItem();
+        const li = latest && list.querySelector(`.sb-item[data-job="${CSS.escape(latest.job_id)}"]`);
+        if (latest && li) openItem(latest, li);
+    });
 
     async function refresh() {
         if (refreshing) return refreshing;

@@ -1073,6 +1073,7 @@
         function updateCaseLine() {
             const no = caseValue('case-no'), name = caseValue('case-name');
             $('case-line-title').textContent = no || name ? [no, name].filter(Boolean).join(' · ') : '사건 정보 없음';
+            $('case-line-title').classList.toggle('is-empty', !(no || name));
             const meta = [];
             if (results.length) {
                 // The folder's last name only; the full path is in the report preview and exports.
@@ -1245,7 +1246,7 @@
         const SCAN_INPUTS = ['folder-path', 'analyze-btn', 'pick-folder-btn', 'max-files',
             'opt-recursive', 'opt-dedupe', 'opt-heatmaps', 'opt-model',
             'opt-deep', 'file-picker-btn', 'dir-picker-btn', 'upload-btn', 'upload-clear',
-            'exp-json', 'exp-csv', 'exp-report', 'exp-pdf', 'exp-evidence', 'exp-signed', 'exp-clear'];
+            'exp-json', 'exp-csv', 'exp-report', 'exp-pdf', 'exp-evidence', 'exp-signed', 'exp-go', 'exp-clear'];
 
         // R19-3: every export handler refuses while a scan runs (a click that beat the disabled state).
         function exportBlocked() {
@@ -1669,7 +1670,7 @@
             try { saved = JSON.parse(sessionStorage.getItem(JOB_STORE) || 'null'); } catch (e) { saved = null; }
             if (!saved || typeof saved.job !== 'string') return false;
             const options = saved.options && typeof saved.options === 'object' ? saved.options : {};
-            if (typeof saved.folder === 'string') $('folder-path').value = saved.folder;
+            if (typeof saved.folder === 'string') { $('folder-path').value = saved.folder; requestAnimationFrame(showPathEnd); }
             toast('진행 중이던 검사에 다시 연결합니다');
             // GUI-REV G-6: a reconnected scan is shown, not left behind an empty ledger.
             if (currentView !== 'scan') navigate('scan');
@@ -2131,7 +2132,8 @@
             const decisive = decisiveEvidence(r, v);
             const neutral = ((r && r.evidence) || []).filter(e => e.kind === 'deterministic' && e.direction === 'neutral');
             let ev = decisive.length ? `<ol class="ev-list">${decisive.map(evItemHtml).join('')}</ol>` : `<p>${shown(noEvidenceText(item))}</p>`;
-            if (neutral.length) ev += `<p class="hint">확인한 기록 (결론과 무관한 중립 기록)</p><ol class="ev-list">${neutral.map(evItemHtml).join('')}</ol>`;
+            // Design review 4: neutral records (law notes, marks not found) fold under one line so the conclusion leads.
+            if (neutral.length) ev += `<details class="disc disc-inline"><summary>확인한 중립 기록 <span class="cnt">${neutral.length}</span><span class="sub">결론과 무관</span></summary><div class="disc-body"><ol class="ev-list">${neutral.map(evItemHtml).join('')}</ol></div></details>`;
             if (item.error && v !== 'other') ev += `<p class="c-red">분석 실패: ${shown(guiText(item.error))}</p>`;
             body.push(`<section class="d-sec"><h3>근거</h3>${ev}</section>`);
             // Merge of phase0 P0R-12: why this conclusion could be wrong — never behind a disclosure.
@@ -2143,7 +2145,7 @@
             // Limitations that repeat a failed check word for word are shown once, in 실패한 검사.
             const failedTexts = new Set(failed.map(c => '검사 실패 — ' + coverageText(c)));
             const lims = detailLimitations(item).filter(l => !failedTexts.has(l));
-            body.push(`<section class="d-sec d-limit"><h3>이 결론의 한계</h3><p>${escapeHtml(limitAdvice(item))}</p>${lims.length ? `<ul>${lims.map(l => `<li>${shown(guiText(l))}</li>`).join('')}</ul>` : ''}</section>`);
+            body.push(`<section class="d-sec d-limit"><h3>이 결론의 한계</h3><p>${escapeHtml(limitAdvice(item))}</p>${lims.length ? `<details class="disc disc-inline"><summary>자세한 한계 <span class="cnt">${lims.length}</span></summary><div class="disc-body"><ul>${lims.map(l => `<li>${shown(guiText(l))}</li>`).join('')}</ul></div></details>` : ''}</section>`);
             const discs = [];
             if (r) {
                 const skipped = (r.coverage || []).filter(c => c.status === 'skipped').length;
@@ -2722,14 +2724,53 @@
             GROUPS.forEach(([band, id]) => { $(id + '-n').textContent = exhibitable.filter(e => itemBand(e) === band).length + '개'; });
             $('inc-label').textContent = `${sel.length}개 선택`;
             renderChecks(sel);
-            Object.entries(EXPORT_BUTTONS).forEach(([kind, id]) => setBusyButton($(id), Boolean(exportBlockReason(kind, sel))));
+            renderFormats(sel);
             if (!typing) setExportNote([exportNote(sel), exportStickyNote].filter(Boolean).join(' '));
             renderA4(sel, typing ? 500 : 250);
         }
+        // Design review 5: one format is chosen (radio), one 내보내기 button exports it. A format that cannot be made
+        // now stays choosable and says why next to its name; the button is aria-disabled while the chosen one is blocked.
+        let formatTouched = false;
+        function selectedFormat() {
+            const checked = document.querySelector('input[name="export-kind"]:checked');
+            return checked ? checked.value : '';
+        }
+        function renderFormats(sel) {
+            Object.entries(EXPORT_BUTTONS).forEach(([kind, id]) => {
+                const why = exportBlockReason(kind, sel);
+                $(id).closest('.fmt-opt').classList.toggle('fmt-blocked', Boolean(why));
+                $(id + '-why').textContent = why;
+            });
+            if (!formatTouched) {
+                const first = Object.keys(EXPORT_BUTTONS).find(kind => !exportBlockReason(kind, sel)) || 'evidence';
+                $(EXPORT_BUTTONS[first]).checked = true;
+            }
+            const kind = selectedFormat();
+            setBusyButton($('exp-go'), !kind || Boolean(exportBlockReason(kind, sel)));
+        }
+        // Design review 5: what blocks an export (필수, 주의) leads; confirmations and notes fold under one line.
         function renderChecks(sel) {
             const list = $('report-checks');
             list.innerHTML = '';
-            reportChecks(sel).forEach(c => {
+            const checks = reportChecks(sel);
+            const urgent = checks.filter(c => c.tag === 'req' || c.tag === 'warn');
+            const rest = checks.filter(c => c.tag !== 'req' && c.tag !== 'warn');
+            urgent.forEach(c => list.appendChild(checkItem(c)));
+            if (rest.length) {
+                const li = document.createElement('li');
+                li.className = 'checks-more';
+                const more = document.createElement('details');
+                const summary = document.createElement('summary');
+                summary.textContent = urgent.length ? `그 밖의 확인 ${rest.length}개` : `막는 항목 없음 · 확인 ${rest.length}개`;
+                const inner = document.createElement('ul');
+                inner.className = 'checks';
+                rest.forEach(c => inner.appendChild(checkItem(c)));
+                more.append(summary, inner);
+                li.appendChild(more);
+                list.appendChild(li);
+            }
+        }
+        function checkItem(c) {
                 const li = document.createElement('li');
                 const tag = document.createElement('span');
                 tag.className = 'tag ' + TAGS[c.tag][1];
@@ -2745,8 +2786,7 @@
                     btn.addEventListener('click', c.act[1]);
                     li.appendChild(btn);
                 }
-                list.appendChild(li);
-            });
+                return li;
         }
         // GUI-REV2 H-2: the preview is drawn from the server's own statement template
         // (format=evidence-preview: the same build and the same case box, boxes and
@@ -2938,7 +2978,7 @@
         }
         $('export-alert-rescan').addEventListener('click', () => rescanFolder());
         function rescanFolder() {
-            if (lastScanRoot) $('folder-path').value = lastScanRoot;
+            if (lastScanRoot) { $('folder-path').value = lastScanRoot; requestAnimationFrame(showPathEnd); }
             // GUI-REV4 K-3: the focus target goes with the navigation — focusing after it lost
             // to the hashchange, which focused the screen heading.
             navigate('scan', $('analyze-btn'));
@@ -3040,7 +3080,8 @@
                 delete btn.dataset.busy;
             }
         }
-        Object.entries(EXPORT_BUTTONS).forEach(([kind, id]) => $(id).addEventListener('click', () => exportReport(kind)));
+        Object.values(EXPORT_BUTTONS).forEach(id => $(id).addEventListener('change', () => { formatTouched = true; renderFormats(selectedEntries()); }));
+        $('exp-go').addEventListener('click', () => { if (selectedFormat()) exportReport(selectedFormat()); });
 
         /* ── quick check ───────────────────────────── */
         function startElapsed(el, text) {
@@ -3594,6 +3635,10 @@
             const signText = signing && typeof signing.available === 'boolean' ? (signing.available ? '서명 자동' : '서명 없음') : '';
             return [pdfText, signText];
         }
+        function statusChipHelp(id, off) {
+            if (id === 'pdf-chip') return off ? 'PDF 엔진(pymupdf)이 없어 PDF는 만들 수 없습니다. HTML 보고서와 서명된 JSON은 만들 수 있습니다.' : '증거설명서·감정 보고서를 PDF로 만들 수 있습니다.';
+            return off ? '서명 키가 없어 내보내는 문서에 서명이 붙지 않습니다. 설정에서 서명 키를 확인하십시오.' : '내보내는 문서에 서명이 자동으로 붙습니다.';
+        }
         function renderStatusChips() {
             const [pdfText, signText] = statusChipTexts(pdfAvailable, signingInfo);
             [['pdf-chip', pdfText, pdfAvailable === false], ['sign-chip', signText, Boolean(signingInfo) && signingInfo.available === false]].forEach(([id, text, off]) => {
@@ -3601,6 +3646,9 @@
                 chip.textContent = text;
                 chip.hidden = !text;
                 chip.classList.toggle('chip-off', off);
+                // Design review 6: a neutral chip says what it means on hover and to screen readers.
+                chip.title = statusChipHelp(id, off);
+                chip.setAttribute('aria-label', text + ' — ' + chip.title);
             });
         }
         // DESK-6: the checklist line on the signing key. A key file of this PC verifies only where that file is.
@@ -3693,6 +3741,10 @@
             note.classList.toggle('pick-err', folderNote.isError);
         }
         $('folder-path').addEventListener('input', showFolderNote);
+        // Design review 10: a long path shows its end (the folder name), not the drive or home part.
+        function showPathEnd() { const box = $('folder-path'); if (document.activeElement !== box) box.scrollLeft = box.scrollWidth; }
+        $('folder-path').addEventListener('blur', showPathEnd);
+        window.addEventListener('resize', showPathEnd);
         $('pick-folder-btn').addEventListener('click', async () => {
             const btn = $('pick-folder-btn');
             if (!desktopMode || appShutDown || scanBusy || isBusyButton(btn) || isBusyButton($('analyze-btn'))) return;
@@ -3732,6 +3784,7 @@
             setPickNote(outcome.note ? PICK_NOTED : '', false);
             pickedFolder = { folder: outcome.folder, b64: outcome.b64 };
             $('folder-path').value = outcome.folder;
+            requestAnimationFrame(showPathEnd);
             setFolderNote(outcome.note, false, outcome.folder);
             $('scan-form').requestSubmit();
         });

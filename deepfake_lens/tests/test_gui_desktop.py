@@ -518,8 +518,8 @@ class Rev2D1PickRowOnTopTest(unittest.TestCase):
         self.assertLess(row, html.index('id="scan-h"'))
         self.assertLess(html.index('id="pick-folder-btn"'), html.index('id="case-no"'))  # tab order: the button first
         self.assertLess(row, html.index('<div class="scan-grid">'))
-        # the path box stays in the scan form, under the case fields
-        self.assertLess(html.index('id="case-slot-scan"'), html.index('id="folder-path"'))
+        # Design review 2026-10-30 (item 1): the path box leads the scan form; the case fields fold below it
+        self.assertLess(html.index('id="folder-path"'), html.index('id="case-slot-scan"'))
         self.assertIn("hidden", _element(html, "pick-row"))
         self.assertNotIn("tabindex", _element(html, "pick-folder-btn"))
 
