@@ -291,7 +291,12 @@ INPUT_SPECS: dict[str, tuple[InputSpec, ...]] = {
     "benchmark": (_folder("folder"),),
     "fusion": (_folder("folder"),),
     "calibrate": (_folder("folder"),),
-    "measure": (InputSpec("manifest", "file", JSON_SUFFIXES), InputSpec("scores", "file", FEEDBACK_SUFFIXES)),
+    "measure": (
+        InputSpec("manifest", "file", JSON_SUFFIXES),
+        InputSpec("scores", "file", FEEDBACK_SUFFIXES),
+        InputSpec("clusters", "file", FEEDBACK_SUFFIXES),
+        InputSpec("dropped_scores", "file", FEEDBACK_SUFFIXES),
+    ),
     "feedback": (InputSpec("labels", "file", FEEDBACK_SUFFIXES), InputSpec("scan_json", "file", JSON_SUFFIXES)),
     "train": (_folder("folder"),),
     "train-neural-plan": (_folder("folder"),),

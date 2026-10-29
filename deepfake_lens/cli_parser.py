@@ -159,6 +159,18 @@ def port_number(text: str) -> int:
     return value
 
 
+def _audit_counts(text: str) -> tuple[int, int]:
+    """argparse type of ``measure --audit-pos/--audit-neg``: ``errors/checked`` with 0 <= errors <= checked, checked >= 1."""
+    errors, _, checked = text.partition("/")
+    try:
+        pair = int(errors), int(checked)
+    except ValueError:
+        pair = (-1, 0)
+    if not 0 <= pair[0] <= pair[1] or pair[1] < 1:
+        raise argparse.ArgumentTypeError(f"감사 결과는 '오류 수/검사 수' 형식이어야 합니다(예: 6/200): {escape_echo(repr(text))}")
+    return pair
+
+
 def escape_echo(text: object) -> str:
     """``text`` with newlines and other control characters written as escapes (R9-7, R10-1)."""
     from .result_text import escape_controls
@@ -397,6 +409,10 @@ def build_parser() -> tuple[argparse.ArgumentParser, dict[str, argparse.Argument
     measure_parser.add_argument("--json-out", type=Path, help="측정 결과 JSON 저장")
     measure_parser.add_argument("--scores-out", type=Path, help="측정에 쓴 항목별 점수를 JSONL로 저장(--scores로 같은 측정을 다시 할 수 있음)")
     measure_parser.add_argument("--lr-out", type=Path, help="우도비 보정 프로필 JSON 저장(검증 통과 여부 포함)")
+    measure_parser.add_argument("--clusters", type=Path, help="항목별 묶음 파일(한 줄에 항목 식별자와 묶음 이름 하나씩; 예: 인물·화자) — 부트스트랩을 이 단위로 다시 뽑음, 없는 항목은 원본 파일 단위")
+    measure_parser.add_argument("--dropped-scores", type=Path, help="라벨 감사에서 출처를 확인하지 못해 빠진 AI 후보의 점수 파일(--scores와 같은 형식) — AI로 되돌려 넣은 구간에도 게이트 적용")
+    measure_parser.add_argument("--audit-pos", type=_audit_counts, metavar="오류/검사", help="AI로 라벨된 항목 감사 결과(예: 6/200) — 요구 신뢰구간 하한을 올리고 우도비에 상한을 둠")
+    measure_parser.add_argument("--audit-neg", type=_audit_counts, metavar="오류/검사", help="실제로 라벨된 항목 감사 결과(예: 0/200)")
 
     feedback_parser = subparsers.add_parser("feedback", help="감정인 라벨과 검사 점수를 비교해 융합 가중치 제안")
     feedback_parser.add_argument("labels", type=Path, help="감정인 판정 JSONL/JSON: 행마다 `path`, `expected_label`, `notes`(선택) 필드")

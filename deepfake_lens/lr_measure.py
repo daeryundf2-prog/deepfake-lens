@@ -99,21 +99,27 @@ def cluster_bootstrap_auroc_ci(
     resamples: int = DEFAULT_BOOTSTRAP,
     seed: int = DEFAULT_SEED,
 ) -> tuple[float, float] | None:
-    """Percentile 95% CI of AUROC, resampling whole origin groups per class.
+    """Percentile 95% CI of AUROC, resampling whole groups.
 
-    Groups are split by the label of their items (an origin group is one
-    picture and its re-encodings, so it has one label); positive and negative
-    groups are resampled separately so every replicate keeps both classes.
+    Single-label groups (an origin group is one picture and its re-encodings)
+    are resampled per class so every replicate keeps both classes. A group
+    holding both labels (one person or speaker with real and AI files) is
+    resampled as one unit from its own pool, so the dependence between that
+    person's real and AI scores is kept; a replicate left with one class is
+    skipped.
     """
-    positive_groups = [list(group) for group in groups if group and group[0][1]]
-    negative_groups = [list(group) for group in groups if group and not group[0][1]]
-    if not positive_groups or not negative_groups or resamples < 1:
+    positive_groups = [list(group) for group in groups if group and all(p for _, p in group)]
+    negative_groups = [list(group) for group in groups if group and not any(p for _, p in group)]
+    mixed_groups = [list(group) for group in groups if group and any(p for _, p in group) and not all(p for _, p in group)]
+    has_pos = bool(positive_groups) or bool(mixed_groups)
+    has_neg = bool(negative_groups) or bool(mixed_groups)
+    if not has_pos or not has_neg or resamples < 1:
         return None
     rng = random.Random(seed)
     values: list[float] = []
     for _ in range(resamples):
         sample: list[tuple[float, bool]] = []
-        for pool in (positive_groups, negative_groups):
+        for pool in (positive_groups, negative_groups, mixed_groups):
             for _ in range(len(pool)):
                 sample.extend(pool[rng.randrange(len(pool))])
         value = rank_auroc(sample)
@@ -125,6 +131,58 @@ def cluster_bootstrap_auroc_ci(
     low = values[max(0, math.floor(0.025 * len(values)))]
     high = values[min(len(values) - 1, math.ceil(0.975 * len(values)) - 1)]
     return round(low, 4), round(high, 4)
+
+
+def clopper_pearson_upper(errors: int, n: int, *, confidence: float = 0.95) -> float:
+    """One-sided Clopper-Pearson upper bound of an error rate seen ``errors`` times in ``n`` checks."""
+    if n < 1 or not 0 <= errors <= n:
+        raise MeasureError(f"감사 결과는 0 ≤ 오류 수 ≤ 검사 수(1 이상)여야 합니다({errors}/{n}).")
+    if errors == n:
+        return 1.0
+
+    def cdf(p: float) -> float:
+        log_p, log_q = math.log(p), math.log1p(-p)
+        return sum(
+            math.exp(math.lgamma(n + 1) - math.lgamma(i + 1) - math.lgamma(n - i + 1) + i * log_p + (n - i) * log_q)
+            for i in range(errors + 1)
+        )
+
+    low, high = 0.0, 1.0
+    for _ in range(100):
+        mid = (low + high) / 2
+        if mid > 0 and cdf(mid) > 1 - confidence:
+            low = mid
+        else:
+            high = mid
+    return high
+
+
+def label_audit(audit_pos: tuple[int, int] | None, audit_neg: tuple[int, int] | None) -> dict[str, Any] | None:
+    """Worst-case label-noise bounds from audits of the AI-labelled and real-labelled items.
+
+    With mislabel rates at most ``a`` (AI-labelled items that are real) and
+    ``b`` (real-labelled items that are AI), a fraction ``w = (1 - a)(1 - b)``
+    of AI/real pairs is correctly labelled and the rest can, at worst, all be
+    ranked the favourable way, so ``observed <= w * true + (1 - w)``. For the
+    true AUROC to clear ``MIN_AUROC_CI_LOW`` the CI low must reach
+    ``MIN_AUROC_CI_LOW * w + (1 - w)``. Mixing the classes also bounds the
+    likelihood ratio the data can show to ``[a / (1 - b), (1 - a) / b]``.
+    """
+    if audit_pos is None and audit_neg is None:
+        return None
+    a = clopper_pearson_upper(*audit_pos) if audit_pos else 0.0
+    b = clopper_pearson_upper(*audit_neg) if audit_neg else 0.0
+    w = (1 - a) * (1 - b)
+    return {
+        "ai_labelled_audit": list(audit_pos) if audit_pos else None,
+        "real_labelled_audit": list(audit_neg) if audit_neg else None,
+        "ai_mislabel_upper": round(a, 4),
+        "real_mislabel_upper": round(b, 4),
+        "required_auroc_ci_low": round(MIN_AUROC_CI_LOW * w + (1 - w), 4),
+        "lr_cap": (1 - a) / b if b > 0 else None,
+        "lr_floor": a / (1 - b) if a > 0 else None,
+        "note": "감사 오류율은 한쪽 95% Clopper-Pearson 상한입니다. 감사로 확인되지 않은 항목은 이 계산에 들어가지 않습니다(--dropped-scores).",
+    }
 
 
 def threshold_at_fpr(pairs: Sequence[tuple[float, bool]], target_fpr: float) -> float:
@@ -322,6 +380,14 @@ class LrCalibration:
             table.append(value)
         return cls(a, b, prior, table, clipped)
 
+    def capped(self, lr_floor: float | None, lr_cap: float | None) -> "LrCalibration":
+        """The same table clipped into ``[lr_floor, lr_cap]`` (label-audit bounds); clipped entries are marked."""
+        low = math.log(lr_floor) if lr_floor else -math.inf
+        high = math.log(lr_cap) if lr_cap else math.inf
+        table = [max(low, min(high, v)) for v in self.table]
+        clipped = [was or new != old for was, new, old in zip(self.clipped, table, self.table)]
+        return LrCalibration(self.a, self.b, self.prior_log_odds, table, clipped)
+
     def llr(self, score: float) -> float:
         return self.table[max(0, min(100, int(round(score))))]
 
@@ -385,6 +451,24 @@ def load_scores(path: Path | str) -> dict[str, float]:
     return scores
 
 
+def load_clusters(path: Path | str) -> dict[str, str]:
+    """``{id or relpath: cluster}`` from a JSONL of ``{"id"|"relpath", "cluster"}`` rows (for example a person or speaker)."""
+    clusters: dict[str, str] = {}
+    for number, line in enumerate(Path(path).read_text(encoding="utf-8").splitlines(), 1):
+        if not line.strip():
+            continue
+        try:
+            row = json.loads(line)
+        except json.JSONDecodeError as exc:
+            raise MeasureError(f"묶음 파일 {number}행이 JSON이 아닙니다: {exc}") from exc
+        key = row.get("id") or row.get("relpath") if isinstance(row, dict) else None
+        cluster = row.get("cluster") if isinstance(row, dict) else None
+        if not key or not isinstance(cluster, str) or not cluster:
+            raise MeasureError(f"묶음 파일 {number}행에 id(또는 relpath)와 비어 있지 않은 문자열 cluster가 필요합니다.")
+        clusters[str(key)] = cluster
+    return clusters
+
+
 def score_items_with_profile(manifest_path: Path, items: list[dict[str, Any]], profile_path: Path) -> dict[str, float]:
     """Run one runtime profile on every item for its raw 0-100 score (gate ignored)."""
     from .model_adapter import _score_from_runtime_profile
@@ -420,14 +504,28 @@ def measure(
     resamples: int = DEFAULT_BOOTSTRAP,
     seed: int = DEFAULT_SEED,
     model: str = "",
+    clusters: dict[str, str] | None = None,
+    dropped: dict[str, float] | None = None,
+    audit_pos: tuple[int, int] | None = None,
+    audit_neg: tuple[int, int] | None = None,
 ) -> dict[str, Any]:
-    """Measure one domain of a corpus; returns measured_on, gate verdict and LR profile."""
+    """Measure one domain of a corpus; returns measured_on, gate verdict and LR profile.
+
+    ``clusters`` maps item id (or relpath) to a resampling unit such as a
+    person or speaker; unmapped items fall back to their origin file.
+    ``dropped`` holds the scores of AI candidates the label audit removed
+    because their provenance could not be confirmed; they are put back as AI
+    in test and the gate also has to pass on that reinserted interval.
+    ``audit_pos``/``audit_neg`` are (mislabelled, checked) counts of label
+    audits; they raise the required CI low and cap the LR table.
+    """
     manifest_path = Path(manifest_path).resolve()
     manifest = load_manifest(manifest_path)
     items = [dict(item) for item in manifest["items"]]
     by_ref = _refs(items)
     wanted = set(variants or [])
-    rows: dict[str, list[tuple[str, float, bool]]] = {"val": [], "test": []}
+    rows: dict[str, list[tuple[str, float, bool, str]]] = {"val": [], "test": []}
+    clustered = 0
     unscored = 0
     for item in items:
         positive = _label(item)
@@ -439,9 +537,12 @@ def measure(
         if score is None:
             unscored += 1
             continue
-        rows[str(item["split"])].append((origin_key(item, by_ref), score, positive))
-    val = [(score, positive) for _, score, positive in rows["val"]]
-    test = [(score, positive) for _, score, positive in rows["test"]]
+        unit = (clusters or {}).get(str(item["id"]), (clusters or {}).get(str(item.get("relpath"))))
+        clustered += unit is not None
+        key = f"cluster:{unit}" if unit is not None else origin_key(item, by_ref)
+        rows[str(item["split"])].append((key, score, positive, str(item.get("generator"))))
+    val = [(score, positive) for _, score, positive, _ in rows["val"]]
+    test = [(score, positive) for _, score, positive, _ in rows["test"]]
     for name, pairs in (("val", val), ("test", test)):
         if not any(p for _, p in pairs) or all(p for _, p in pairs):
             raise MeasureError(
@@ -449,9 +550,12 @@ def measure(
                 f"선택한 변형({', '.join(sorted(wanted)) or '전체'})에 두 클래스가 있는지 확인하십시오."
             )
     threshold = threshold_at_fpr(val, target_fpr)
-    groups: dict[str, list[tuple[float, bool]]] = {}
-    for key, score, positive in rows["test"]:
-        groups.setdefault(f"{key}|{positive}", []).append((score, positive))
+    # A clusters-file unit (person, speaker) keeps both classes in one group; an origin group is split by label.
+    labelled_groups: dict[str, list[tuple[float, bool, str]]] = {}
+    for key, score, positive, generator in rows["test"]:
+        name = key if key.startswith("cluster:") else f"{key}|{positive}"
+        labelled_groups.setdefault(name, []).append((score, positive, generator))
+    groups = {name: [(s, p) for s, p, _ in group] for name, group in labelled_groups.items()}
     auc = rank_auroc(test)
     ci = cluster_bootstrap_auroc_ci(list(groups.values()), resamples=resamples, seed=seed)
     fpr, recall = rates_at(test, threshold)
@@ -474,21 +578,70 @@ def measure(
         "target_fpr": target_fpr,
         "variants": sorted(wanted) or ["(전체)"],
         "ci_method": CI_METHOD,
-        "bootstrap": {"resamples": resamples, "seed": seed, "origin_groups": len(groups)},
+        "bootstrap": {
+            "resamples": resamples,
+            "seed": seed,
+            "origin_groups": len(groups),
+            "cluster_by": "clusters file (real and AI of one unit resampled together), origin file for unmapped items" if clusters else "origin file",
+            "items_in_clusters_file": clustered,
+        },
     }
     gate_problems = gate_check(measured_on)
+    per_generator = []
+    for generator in sorted({g for _, _, positive, g in rows["test"] if positive}):
+        own = [[(s, p) for s, p, g in group if not p or g == generator] for group in labelled_groups.values()]
+        own = [group for group in own if group]
+        pairs = [pair for group in own for pair in group]
+        g_ci = cluster_bootstrap_auroc_ci(own, resamples=resamples, seed=seed)
+        g_auc = rank_auroc(pairs)
+        n_g = sum(1 for _, p in pairs if p)
+        per_generator.append({
+            "generator": generator,
+            "n_pos": n_g,
+            "auroc": round(g_auc, 4) if g_auc is not None else None,
+            "auroc_ci": list(g_ci) if g_ci else None,
+            "recall_at_threshold": rates_at(pairs, threshold)[1],
+            "passed": n_g >= MIN_PER_CLASS and n_neg >= MIN_PER_CLASS and bool(g_ci) and g_ci[0] >= MIN_AUROC_CI_LOW,
+        })
+    weakest = min(per_generator, key=lambda row: (row["auroc_ci"] or [-1.0])[0], default=None)
+    dropped_block = None
+    if dropped:
+        reinserted_groups = [*groups.values(), *([(score, True)] for score in dropped.values())]
+        reinserted = test + [(score, True) for score in dropped.values()]
+        r_auc = rank_auroc(reinserted)
+        r_ci = cluster_bootstrap_auroc_ci(reinserted_groups, resamples=resamples, seed=seed)
+        dropped_block = {
+            "n": len(dropped),
+            "fraction_of_ai": round(len(dropped) / (n_pos + len(dropped)), 4),
+            "auroc_excluding_dropped": measured_on["auroc"],
+            "auroc_reinserted_as_ai": round(r_auc, 4) if r_auc is not None else None,
+            "auroc_ci_reinserted_as_ai": list(r_ci) if r_ci else None,
+            "note": "감사에서 출처를 확인하지 못해 빠진 AI 후보를 AI로 되돌려 넣은 값입니다. 어려운 표본이 빠지면 측정값이 부풀므로 게이트는 이 구간에도 적용됩니다.",
+        }
+        if not r_ci or r_ci[0] < MIN_AUROC_CI_LOW:
+            low = f"{r_ci[0]:.3f}" if r_ci else "없음"
+            gate_problems.append(f"감사에서 빠진 AI 후보 {len(dropped)}개를 AI로 되돌려 넣으면 AUROC 95% 신뢰구간 하한이 {low} < {MIN_AUROC_CI_LOW}입니다.")
+    audit = label_audit(audit_pos, audit_neg)
+    if audit and ci and ci[0] < audit["required_auroc_ci_low"]:
+        gate_problems.append(
+            f"라벨 감사의 오류율 상한을 반영하면 AUROC 95% 신뢰구간 하한이 {audit['required_auroc_ci_low']:.3f} 이상이어야 하는데 {ci[0]:.3f}입니다."
+        )
     lr = lr_profile(val, test, model=model, scope={
         "corpus_id": manifest.get("corpus_id"),
         "manifest_sha256": measured_on["manifest_sha256"],
         "variants": measured_on["variants"],
         "generators": sorted({str(item.get("generator")) for item in items if _label(item) and (not wanted or item.get("variant") in wanted)}),
-    })
+    }, audit=audit)
     return {
         "type": MEASURE_TYPE,
         "model": model,
         "measured_on": measured_on,
         "gate": {"passed": not gate_problems, "problems": gate_problems, "min_per_class": MIN_PER_CLASS, "min_auroc_ci_low": MIN_AUROC_CI_LOW},
         "counts": {"val": len(val), "test": len(test), "unscored_excluded": unscored},
+        "per_generator": per_generator,
+        "weakest_generator": weakest,
+        "dropped_by_audit": dropped_block,
+        "label_audit": audit,
         "lr_profile": lr,
     }
 
@@ -508,8 +661,11 @@ def lr_profile(
     *,
     model: str,
     scope: dict[str, object],
+    audit: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     calibration = LrCalibration.fit(val)
+    if audit:
+        calibration = calibration.capped(audit["lr_floor"], audit["lr_cap"])
     scored = [(calibration.llr(score), positive) for score, positive in test]
     llr_pos = [v for v, p in scored if p]
     llr_neg = [v for v, p in scored if not p]

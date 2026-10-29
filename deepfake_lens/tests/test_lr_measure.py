@@ -17,7 +17,10 @@ from deepfake_lens.lr_measure import (
     LrCalibration,
     MeasureError,
     cllr,
+    clopper_pearson_upper,
     cluster_bootstrap_auroc_ci,
+    label_audit,
+    load_clusters,
     load_scores,
     lr_statement,
     measure,
@@ -178,6 +181,112 @@ class MeasureTest(unittest.TestCase):
             manifest, scores = _write_corpus(Path(tmp), {"val": 20, "test": 20}, 70, 30)
             with self.assertRaises(MeasureError):
                 measure(manifest, load_scores(scores), variants=["telegram"], resamples=50)
+
+
+class ReviewFollowUpTest(unittest.TestCase):
+    """Per-generator results, person/speaker clusters, audit drops and label-audit bounds."""
+
+    def _two_generators(self, root: Path) -> tuple[Path, dict[str, float]]:
+        manifest, scores_path = _write_corpus(root, {"val": 220, "test": 220}, 75, 25)
+        data = json.loads(manifest.read_text(encoding="utf-8"))
+        scores = load_scores(scores_path)
+        for item in data["items"]:
+            if item["label"] == "synthetic" and item["split"] == "test" and int(item["id"].split("-")[2]) % 2:
+                item["generator"] = "hard"
+                scores[item["id"]] = max(0.0, scores[item["id"]] - 40)
+        data["manifest_sha256"] = manifest_sha256(data["items"])
+        manifest.write_text(json.dumps(data), encoding="utf-8")
+        return manifest, scores
+
+    def test_each_generator_is_judged_and_the_weakest_is_named(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            manifest, scores = self._two_generators(Path(tmp))
+            payload = measure(manifest, scores, variants=["kakao"], resamples=200)
+            rows = {row["generator"]: row for row in payload["per_generator"]}
+            self.assertEqual(set(rows), {"gen", "hard"})
+            self.assertEqual(rows["gen"]["n_pos"] + rows["hard"]["n_pos"], payload["measured_on"]["n_pos"])
+            self.assertLess(rows["hard"]["auroc"], rows["gen"]["auroc"])
+            self.assertFalse(rows["hard"]["passed"])
+            self.assertEqual(payload["weakest_generator"]["generator"], "hard")
+
+    def test_person_clusters_widen_the_interval(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            manifest, scores_path = _write_corpus(Path(tmp), {"val": 220, "test": 220}, 60, 40)
+            items = json.loads(manifest.read_text(encoding="utf-8"))["items"]
+            cluster_file = Path(tmp) / "clusters.jsonl"
+            cluster_file.write_text("\n".join(json.dumps({"id": item["id"], "cluster": f"person-{int(item['id'].split('-')[2]) % 8}"}) for item in items), encoding="utf-8")
+            scores = load_scores(scores_path)
+            base = measure(manifest, scores, variants=["kakao"], resamples=300)
+            grouped = measure(manifest, scores, variants=["kakao"], resamples=300, clusters=load_clusters(cluster_file))
+            width = lambda m: m["measured_on"]["auroc_ci"][1] - m["measured_on"]["auroc_ci"][0]  # noqa: E731
+            self.assertGreater(width(grouped), width(base))
+            self.assertEqual(grouped["measured_on"]["auroc"], base["measured_on"]["auroc"])
+            self.assertEqual(grouped["measured_on"]["bootstrap"]["origin_groups"], 8)
+
+    def test_a_person_with_real_and_ai_files_is_resampled_as_one_unit(self) -> None:
+        rng = random.Random(4)
+        people = []
+        for _ in range(40):
+            offset = rng.gauss(0, 15)
+            people.append([(offset + 60 + rng.gauss(0, 5), True), (offset + 40 + rng.gauss(0, 5), False)])
+        joint = cluster_bootstrap_auroc_ci(people, resamples=400, seed=1)
+        split = cluster_bootstrap_auroc_ci([[pair] for person in people for pair in person], resamples=400, seed=1)
+        assert joint is not None and split is not None
+        self.assertEqual(joint, cluster_bootstrap_auroc_ci(people, resamples=400, seed=1))
+        self.assertNotEqual(joint, split)
+        self.assertIsNone(cluster_bootstrap_auroc_ci([[(1.0, True)], [(2.0, True)]], resamples=10))
+
+    def test_a_bad_cluster_row_is_refused(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "clusters.jsonl"
+            path.write_text(json.dumps({"id": "a", "cluster": 3}), encoding="utf-8")
+            with self.assertRaises(MeasureError):
+                load_clusters(path)
+
+    def test_hard_ai_dropped_by_the_audit_is_put_back_and_gated(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            manifest, scores = _write_corpus(Path(tmp), {"val": 220, "test": 220}, 75, 25)
+            dropped = {f"dropped-{k}": 5.0 for k in range(80)}
+            payload = measure(manifest, load_scores(scores), variants=["kakao"], resamples=300, dropped=dropped)
+            block = payload["dropped_by_audit"]
+            self.assertEqual(block["n"], 80)
+            self.assertAlmostEqual(block["fraction_of_ai"], round(80 / 300, 4))
+            self.assertLess(block["auroc_reinserted_as_ai"], block["auroc_excluding_dropped"])
+            self.assertFalse(payload["gate"]["passed"])
+            self.assertTrue(any("되돌려" in problem for problem in payload["gate"]["problems"]))
+            self.assertIsNone(measure(manifest, load_scores(scores), variants=["kakao"], resamples=50)["dropped_by_audit"])
+
+    def test_clopper_pearson_upper_bounds(self) -> None:
+        self.assertAlmostEqual(clopper_pearson_upper(0, 200), 1 - 0.05 ** (1 / 200), places=6)
+        self.assertAlmostEqual(clopper_pearson_upper(6, 200), 0.0583, places=3)
+        self.assertEqual(clopper_pearson_upper(3, 3), 1.0)
+        with self.assertRaises(MeasureError):
+            clopper_pearson_upper(5, 3)
+
+    def test_a_label_audit_raises_the_required_low_and_caps_the_lr(self) -> None:
+        audit = label_audit((6, 200), (0, 200))
+        assert audit is not None
+        self.assertAlmostEqual(audit["required_auroc_ci_low"], 0.861, places=3)
+        self.assertAlmostEqual(audit["lr_cap"], 63, delta=1)
+        self.assertIsNone(label_audit(None, None))
+        with tempfile.TemporaryDirectory() as tmp:
+            manifest, scores = _write_corpus(Path(tmp), {"val": 400, "test": 400}, 90, 10)
+            plain = measure(manifest, load_scores(scores), variants=["kakao"], resamples=100)
+            capped = measure(manifest, load_scores(scores), variants=["kakao"], resamples=100, audit_pos=(6, 200), audit_neg=(0, 200))
+            top = lambda m: max(m["lr_profile"]["calibration"]["log10_lr_table"])  # noqa: E731
+            self.assertGreater(top(plain), math.log10(audit["lr_cap"]))
+            self.assertAlmostEqual(top(capped), math.log10(audit["lr_cap"]), places=5)
+            self.assertEqual(capped["label_audit"]["required_auroc_ci_low"], audit["required_auroc_ci_low"])
+
+    def test_a_label_audit_can_fail_a_domain_that_passes_without_it(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            manifest, scores = _write_corpus(Path(tmp), {"val": 220, "test": 220}, 62, 38)
+            plain = measure(manifest, load_scores(scores), variants=["kakao"], resamples=300)
+            low = plain["measured_on"]["auroc_ci"][0]
+            self.assertTrue(plain["gate"]["passed"], (low, plain["gate"]["problems"]))
+            audited = measure(manifest, load_scores(scores), variants=["kakao"], resamples=300, audit_pos=(40, 200), audit_neg=(0, 200))
+            self.assertFalse(audited["gate"]["passed"])
+            self.assertTrue(any("라벨 감사" in problem for problem in audited["gate"]["problems"]))
 
 
 class ScoreWithProfileTest(unittest.TestCase):

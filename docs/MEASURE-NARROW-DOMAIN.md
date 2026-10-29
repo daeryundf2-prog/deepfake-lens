@@ -57,6 +57,29 @@ deepfake-lens measure kakao-2026.json --model-path models/community-forensics-vi
   복사본을 독립 표본으로 세지 않습니다. 시드(기본 0)가 같으면 같은 구간이 나옵니다.
 - 이미 다른 프로그램으로 낸 점수가 있으면 `--scores 점수.jsonl`(행마다 `{"id": …, "score": 0~100}`)을 씁니다.
 
+### 3.1 라벨이 확실하지 않은 코퍼스(AI라고 올라온 게시물 등)를 쓸 때
+
+```
+deepfake-lens measure posts.json --scores scores.jsonl --variant kakao \
+  --clusters persons.jsonl --dropped-scores dropped.jsonl --audit-pos 6/200 --audit-neg 0/200 \
+  --json-out posts-measure.json
+```
+
+- `--clusters`: 행마다 `{"id": …, "cluster": "인물-07"}`. 같은 인물(영상)이나 같은 화자(음성)를 한 묶음으로
+  다시 뽑습니다. 같은 사람의 여러 파일은 서로 독립이 아니므로, 원본 파일 단위로 뽑으면 신뢰구간이 너무 좁게
+  나옵니다. 파일에 없는 항목은 원본 파일 단위로 남습니다. 한 사람의 진짜·가짜 파일은 한 묶음으로 함께 뽑으므로
+  (자체 생성한 짝지은 코퍼스처럼) 같은 사람에게서 나온 두 점수의 연관이 신뢰구간에 반영됩니다.
+- `--dropped-scores`: 출처 확인 감사에서 확인되지 않아 뺀 AI 후보의 점수입니다(`--scores`와 같은 형식). 어려운
+  표본이 빠지면 AUROC가 부풉니다. 결과의 `dropped_by_audit`에 빠진 비율, 뺀 값, AI로 되돌려 넣은 값과 그
+  신뢰구간이 나오고, **되돌려 넣은 구간의 하한도 0.85를 넘어야** 게이트를 통과합니다.
+- `--audit-pos`/`--audit-neg`: AI로 라벨된 항목과 실제로 라벨된 항목을 출처로 다시 확인한 결과(`오류 수/검사 수`).
+  오류율의 한쪽 95% 상한(Clopper-Pearson)으로 요구 신뢰구간 하한을 올리고(예: 6/200·0/200이면 0.861),
+  우도비 표를 보여 줄 수 있는 범위(예: 약 63)로 자릅니다. 결과의 `label_audit`에 기록됩니다.
+- 생성기가 여럿이면 `per_generator`에 생성기마다 AUROC·신뢰구간·재현율·통과 여부가, `weakest_generator`에
+  신뢰구간 하한이 가장 낮은 생성기가 나옵니다. 감정서에는 전체 값과 함께 이 최솟값을 적습니다. 생성기별
+  판정은 참고용이며 전체 게이트를 바꾸지 않습니다.
+- 출처를 모르는 사건 파일은 측정한 생성기 범위 밖일 수 있습니다. 이 옵션들은 그 문제를 풀지 않습니다.
+
 ## 4. 결과 읽기
 
 `kakao-measure.json`의 `gate.passed`와 `gate.problems`가 측정 게이트 판정입니다.

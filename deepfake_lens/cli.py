@@ -914,7 +914,7 @@ def _run_command(args: argparse.Namespace, parser: argparse.ArgumentParser, cmd_
         print(json_dumps(payload, ensure_ascii=False, indent=2))
         return 0
     if args.command == "measure":
-        from .lr_measure import load_scores, measure, score_items_with_profile
+        from .lr_measure import load_clusters, load_scores, measure, score_items_with_profile
         from .corpus_manifest import load_manifest
 
         if (args.scores is None) == (args.model_path is None):
@@ -927,7 +927,12 @@ def _run_command(args: argparse.Namespace, parser: argparse.ArgumentParser, cmd_
                 manifest_items = [item for item in load_manifest(args.manifest)["items"] if not args.variant or item.get("variant") in args.variant]
                 scores = score_items_with_profile(args.manifest.resolve(), manifest_items, args.model_path)
                 model_name = args.model_path.name
-            payload = measure(args.manifest, scores, variants=args.variant, target_fpr=args.target_fpr, resamples=args.bootstrap, seed=args.seed, model=model_name)
+            payload = measure(
+                args.manifest, scores, variants=args.variant, target_fpr=args.target_fpr, resamples=args.bootstrap, seed=args.seed, model=model_name,
+                clusters=load_clusters(args.clusters) if args.clusters else None,
+                dropped=load_scores(args.dropped_scores) if args.dropped_scores else None,
+                audit_pos=args.audit_pos, audit_neg=args.audit_neg,
+            )
         except (ValueError, OSError) as exc:  # MeasureError, ManifestError, bad JSON and bad encodings are ValueErrors
             print(f"측정할 수 없습니다: {exc}", file=sys.stderr)
             return 2
