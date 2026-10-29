@@ -5,9 +5,10 @@ The Stable Diffusion XL reference pipelines (diffusers
 fixed 48-bit message with the ``invisible-watermark`` library (MIT,
 ShieldMnt/invisible-watermark 0.2.0, ``imwatermark/maxDct.py``) — method
 ``dwtDct``, scales ``[0, 36, 36]``, 4×4 blocks. This module reimplements
-only its *decoder* with numpy + OpenCV (no PyWavelets, no torch):
+only its *decoder* with numpy alone (no OpenCV, no PyWavelets, no torch):
 
-1. ``cv2.cvtColor(BGR → YUV)`` of the 8-bit image, cropped to a multiple of 4;
+1. OpenCV's ``cvtColor(BGR → YUV)`` of the 8-bit image, cropped to a multiple of 4 — recomputed in numpy with
+   OpenCV's 14-bit fixed-point coefficients (:func:`bgr_to_yuv_u8`; equal to ``cv2.cvtColor`` for all 2²⁴ colours);
 2. one level of the Haar DWT of the U channel (the only channel with a
    non-zero scale that ``decode`` visits — its loop is ``range(2)``): the
    approximation band ``cA = (a + b + c + d) / 2`` of each 2×2 pixel block;
@@ -47,6 +48,14 @@ ALGORITHM = "imwatermark-dwtDct"
 # pywt "haar" decomposition low-pass coefficient (1/sqrt(2) as PyWavelets stores it).
 HAAR_LO = 0.7071067811865476
 
+# OpenCV imgproc color_yuv (RGB2YUV, 8-bit): Y = 0.299R + 0.587G + 0.114B, U = 0.492(B - Y) + 128,
+# V = 0.877(R - Y) + 128, as integers scaled by 2**14 and rounded half up (CV_DESCALE), then saturated to 0..255.
+YUV_SHIFT = 14
+YUV_B2Y, YUV_G2Y, YUV_R2Y, YUV_B2U, YUV_R2V = 1868, 9617, 4899, 8061, 14369
+# The same transform for float images (OpenCV's float32 path, chroma offset 0.5) and its inverse (YUV2RGB).
+YUV_F_B2Y, YUV_F_G2Y, YUV_F_R2Y, YUV_F_B2U, YUV_F_R2V = 0.114, 0.587, 0.299, 0.492, 0.877
+YUV_F_U2B, YUV_F_U2G, YUV_F_V2G, YUV_F_V2R = 2.032, -0.395, -0.581, 1.140
+
 
 @dataclass(frozen=True)
 class DwtDctReading:
@@ -56,12 +65,42 @@ class DwtDctReading:
     height: int
 
 
+def bgr_to_yuv_u8(bgr: Any) -> Any:
+    """``cv2.cvtColor(bgr, cv2.COLOR_BGR2YUV)`` for a uint8 H×W×3 array, bit for bit, in numpy."""
+    import numpy as np
+
+    b, g, r = (bgr[:, :, i].astype(np.int32) for i in range(3))
+    half, delta = 1 << (YUV_SHIFT - 1), 128 << YUV_SHIFT
+    y = (b * YUV_B2Y + g * YUV_G2Y + r * YUV_R2Y + half) >> YUV_SHIFT
+    u = ((b - y) * YUV_B2U + delta + half) >> YUV_SHIFT
+    v = ((r - y) * YUV_R2V + delta + half) >> YUV_SHIFT
+    return np.clip(np.stack((y, u, v), axis=-1), 0, 255).astype(np.uint8)
+
+
+def _bgr_to_yuv_f32(bgr: Any) -> Any:
+    """``cv2.cvtColor(bgr, cv2.COLOR_BGR2YUV)`` for float32 (equal up to float32 rounding order, ~1 ulp)."""
+    import numpy as np
+
+    f = np.float32
+    b, g, r = bgr[:, :, 0], bgr[:, :, 1], bgr[:, :, 2]
+    y = b * f(YUV_F_B2Y) + g * f(YUV_F_G2Y) + r * f(YUV_F_R2Y)
+    return np.stack((y, (b - y) * f(YUV_F_B2U) + f(0.5), (r - y) * f(YUV_F_R2V) + f(0.5)), axis=-1).astype(np.float32)
+
+
+def _yuv_to_bgr_f32(yuv: Any) -> Any:
+    """``cv2.cvtColor(yuv, cv2.COLOR_YUV2BGR)`` for float32 (equal up to float32 rounding order, ~1 ulp)."""
+    import numpy as np
+
+    f = np.float32
+    y, u, v = yuv[:, :, 0], yuv[:, :, 1] - f(0.5), yuv[:, :, 2] - f(0.5)
+    return np.stack((y + u * f(YUV_F_U2B), y + u * f(YUV_F_U2G) + v * f(YUV_F_V2G), y + v * f(YUV_F_V2R)), axis=-1).astype(np.float32)
+
+
 def _decode_bits(bgr: Any, n_bits: int) -> str:
-    import cv2
     import numpy as np
 
     rows, cols = bgr.shape[0] // 4 * 4, bgr.shape[1] // 4 * 4
-    yuv = cv2.cvtColor(np.ascontiguousarray(bgr[:rows, :cols]), cv2.COLOR_BGR2YUV)
+    yuv = bgr_to_yuv_u8(bgr[:rows, :cols])
     channel = yuv[:, :, DWTDCT_CHANNEL].astype(np.float64)
     # PyWavelets' haar dwt2 order of operations (rows, then columns, each times 1/sqrt(2)) —
     # bit-identical to pywt.dwt2(..., "haar")[0]; "(a+b+c+d)/2" differs in the last ulp, which
@@ -112,8 +151,8 @@ RGB_HANDOFF = "imwatermark.rgb"  # versioned_cache kind (R27-5)
 def offer_loaded(path: Path, version: tuple[int, ...] | None, image: Any) -> None:
     """R27-5: hand :func:`load_rgb`'s array to the SDXL check when ``image`` (``Image.open(path)``) is already loaded.
 
-    Only an image whose pixels Pillow has already decoded (``tile`` emptied by ``load()``), with numpy imported,
-    OpenCV installed (else the SDXL check is skipped before decoding) and at most MAX_PIXELS pixels; the array is
+    Only an image whose pixels Pillow has already decoded (``tile`` emptied by ``load()``), with numpy imported
+    and at most MAX_PIXELS pixels; the array is
     made by the same calls as :func:`load_rgb` (``load()`` again is a no-op). Any failure offers nothing — the
     SDXL check then decodes the file itself, as before.
     """
@@ -122,9 +161,6 @@ def offer_loaded(path: Path, version: tuple[int, ...] | None, image: Any) -> Non
     if version is None or getattr(image, "tile", None) != [] or sys.modules.get("numpy") is None:
         return
     try:
-        from .import_probe import require_available
-
-        require_available("cv2")
         width, height = image.size
         if int(width) * int(height) > MAX_PIXELS:
             return
@@ -145,13 +181,12 @@ def encode_array_for_tests(rgb: Any, bits: str) -> Any:
     ``cA = (a+b+c+d)/2`` and the inverse spreads ``cA/2`` back); used to build
     marked images without the library. The analysis never encodes.
     """
-    import cv2
     import numpy as np
 
     marks = [int(b) for b in bits]
     out = rgb[:, :, ::-1].astype(np.float32).copy()  # BGR float, as diffusers passes it
     rows, cols = out.shape[0] // 4 * 4, out.shape[1] // 4 * 4
-    yuv = cv2.cvtColor(out[:rows, :cols], cv2.COLOR_BGR2YUV).astype(np.float64)
+    yuv = _bgr_to_yuv_f32(out[:rows, :cols]).astype(np.float64)
     ch = yuv[:, :, DWTDCT_CHANNEL]
     a, b, c, d = ch[0::2, 0::2], ch[0::2, 1::2], ch[1::2, 0::2], ch[1::2, 1::2]
     ca, h, v, dd = (a + b + c + d) / 2, (a + b - c - d) / 2, (a - b + c - d) / 2, (a - b - c + d) / 2
@@ -171,8 +206,8 @@ def encode_array_for_tests(rgb: Any, bits: str) -> Any:
     ch[1::2, 0::2] = (ca - h + v - dd) / 2
     ch[1::2, 1::2] = (ca - h - v + dd) / 2
     yuv[:, :, DWTDCT_CHANNEL] = ch
-    out[:rows, :cols] = cv2.cvtColor(yuv.astype(np.float32), cv2.COLOR_YUV2BGR)
+    out[:rows, :cols] = _yuv_to_bgr_f32(yuv.astype(np.float32))
     return np.clip(np.rint(out[:, :, ::-1]), 0, 255).astype(np.uint8)
 
 
-__all__ = ["ALGORITHM", "DwtDctReading", "MAX_PIXELS", "MIN_SIDE", "decode_array", "encode_array_for_tests", "load_rgb"]
+__all__ = ["ALGORITHM", "DwtDctReading", "MAX_PIXELS", "MIN_SIDE", "bgr_to_yuv_u8", "decode_array", "encode_array_for_tests", "load_rgb"]

@@ -16,7 +16,7 @@ from .model_cache import (  # noqa: F401 — re-exported for existing callers/te
     _release_cached_model,
     clear_all_model_caches,
 )
-from .result_types import ExternalModelAnalysis, register_model_display_name  # noqa: F401 — ExternalModelAnalysis re-exported
+from .result_types import EvidenceSignal, ExternalModelAnalysis, register_model_display_name  # noqa: F401 — ExternalModelAnalysis re-exported
 from .model_runtimes import (  # noqa: F401 — dispatch targets + shared caches
     _AASIST_RUNNERS,
     _AIDE_RUNNERS,
@@ -60,6 +60,8 @@ logger = logging.getLogger(__name__)
 # core.model_coverage maps it to a ``failed`` coverage entry, which makes
 # the verdict undetermined (G1, fail-closed).
 FAILED_CONFIDENCE = "failed"
+# A gated-off profile that ran only for an unmeasured reference score.
+REFERENCE_CONFIDENCE = "reference"
 
 
 # Shown with a pin failure: how to provision a pin (G9).
@@ -261,7 +263,7 @@ def _analyze_profile_file(media_path: Path, model_file: Path, *, depth: int, mod
         # hints and its run-time caveats describe a model that did not run
         # and are not added to the row's limitations.
         reason = str(profile.get("reason") or "이 프로필은 문서화용 자리표시자이며 실행 가능한 런타임에 연결되어 있지 않습니다.")
-        return ExternalModelAnalysis(
+        gated = ExternalModelAnalysis(
             available=False,
             score=0,
             confidence="unavailable",
@@ -270,6 +272,7 @@ def _analyze_profile_file(media_path: Path, model_file: Path, *, depth: int, mod
             limitations=[],
             display_name=display,
         )
+        return _reference_run(profile, media_path, base_dir=model_file.parent, gated=gated)
 
     score = _score_from_score_map(profile, media_path)
     if score is None:
@@ -297,6 +300,89 @@ def _analyze_profile_file(media_path: Path, model_file: Path, *, depth: int, mod
         detail=f"외부 모델 프로필이 점수 {score}를 제공했습니다.",
         display_name=display,
     )
+
+
+def _reference_run(profile: dict[str, object], media_path: Path, *, base_dir: Path, gated: ExternalModelAnalysis) -> ExternalModelAnalysis:
+    """Run a gated-off ``reference_signal`` profile for its raw score only.
+
+    The result keeps ``available=False`` and the gate detail, so coverage,
+    evidence and the verdict are exactly those of the skipped profile; only
+    ``confidence=REFERENCE_CONFIDENCE`` and ``score`` (the raw score) mark
+    it for the reference-signal list. A missing checkpoint, a pin refusal
+    or an inference failure leaves the gated result unchanged.
+    """
+    if profile.get("reference_signal") is not True:
+        return gated
+    result = _score_from_runtime_profile(profile, media_path, base_dir=base_dir)
+    if result is None or not result.available:
+        if result is not None:
+            logger.info("reference run of %s produced no score: %s", gated.model, result.detail)
+        return gated
+    return replace(gated, score=result.score, confidence=REFERENCE_CONFIDENCE)
+
+
+REFERENCE_SIGNAL_TITLE = "미측정 모델 원점수(참고 신호)"
+
+
+def model_reference_signals(
+    model: ExternalModelAnalysis | None,
+    model_path: Path | str | list[Path | str] | tuple[Path | str, ...] | None = None,
+    *,
+    modality: str = "image",
+) -> list[EvidenceSignal]:
+    """Reference-only rows for gated-off profiles that ran for a raw score.
+
+    Never evidence: the caller adds these to ``reference_signals`` only.
+    """
+    if model is None:
+        return []
+    if model.models:
+        scored = [
+            (str(member.get("display_name") or member.get("model") or ""), member.get("score"), member.get("profile"))
+            for member in model.models
+            if member.get("confidence") == REFERENCE_CONFIDENCE
+        ]
+    else:
+        scored = [(model.label, model.score, _single_source(model_path, modality))] if model.confidence == REFERENCE_CONFIDENCE else []
+    return [
+        EvidenceSignal(
+            REFERENCE_SIGNAL_TITLE,
+            f"{label}: 원점수 {int(score)}/100 — 측정 게이트를 통과하지 않은 미측정 모델의 참고 신호입니다. "
+            "보정되지 않은 값이며 확률이 아니고, 결론과 근거 항목에 쓰이지 않습니다."
+            + _lr_suffix(profile_path, float(score)),
+            int(score),
+        )
+        for label, score, profile_path in scored
+        if isinstance(score, (int, float)) and not isinstance(score, bool)
+    ]
+
+
+def _single_source(model_path: Path | str | list[Path | str] | tuple[Path | str, ...] | None, modality: str) -> Path | None:
+    """The one profile a single-profile analysis ran (same selection as analyze_external_model)."""
+    if model_path is None:
+        return None
+    sources = [source for source in _model_sources(model_path) if _profile_matches_modality(source, modality)]
+    return sources[0] if len(sources) == 1 else None
+
+
+def _lr_suffix(profile_path: object, score: float) -> str:
+    """The validated "증거 강도(우도비)" sentence a profile's ``lr_profile`` names (OMO-20)."""
+    if not profile_path:
+        return ""
+    from .corpus_manifest import relpath_outside_corpus
+    from .lr_measure import load_lr_profile, lr_statement
+
+    source = Path(str(profile_path))
+    try:
+        profile = json.loads(source.read_text(encoding="utf-8"))
+    except (OSError, ValueError, RecursionError):
+        return ""
+    name = profile.get("lr_profile") if isinstance(profile, dict) else None
+    if not isinstance(name, str) or relpath_outside_corpus(name, source.parent):
+        return ""
+    lr = load_lr_profile(source.parent / name)
+    statement = lr_statement(lr, score) if lr else None
+    return f" {statement}" if statement else ""
 
 
 def _bare_checkpoint_sha256(checkpoint: Path) -> str:

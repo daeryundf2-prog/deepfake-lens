@@ -414,6 +414,78 @@ def create_app(
             headers={"X-Content-Type-Options": "nosniff"},
         )
 
+    @app.get("/gui-shell.css")
+    async def gui_shell_css():
+        from fastapi.responses import FileResponse
+        return FileResponse(
+            Path(__file__).resolve().parent / "gui-shell.css",
+            media_type="text/css; charset=utf-8",
+            headers={"X-Content-Type-Options": "nosniff"},
+        )
+
+    @app.get("/gui-settings.css")
+    async def gui_settings_css():
+        from fastapi.responses import FileResponse
+        return FileResponse(
+            Path(__file__).resolve().parent / "gui-settings.css",
+            media_type="text/css; charset=utf-8",
+            headers={"X-Content-Type-Options": "nosniff"},
+        )
+
+    @app.get("/gui-onboarding.css")
+    async def gui_onboarding_css():
+        from fastapi.responses import FileResponse
+        return FileResponse(
+            Path(__file__).resolve().parent / "gui-onboarding.css",
+            media_type="text/css; charset=utf-8",
+            headers={"X-Content-Type-Options": "nosniff"},
+        )
+
+    @app.get("/gui-shell.js")
+    async def gui_shell_js():
+        from fastapi.responses import FileResponse
+        return FileResponse(
+            Path(__file__).resolve().parent / "gui-shell.js",
+            media_type="text/javascript; charset=utf-8",
+            headers={"X-Content-Type-Options": "nosniff"},
+        )
+
+    @app.get("/gui-history.js")
+    async def gui_history_js():
+        from fastapi.responses import FileResponse
+        return FileResponse(
+            Path(__file__).resolve().parent / "gui-history.js",
+            media_type="text/javascript; charset=utf-8",
+            headers={"X-Content-Type-Options": "nosniff"},
+        )
+
+    @app.get("/gui-settings.js")
+    async def gui_settings_js():
+        from fastapi.responses import FileResponse
+        return FileResponse(
+            Path(__file__).resolve().parent / "gui-settings.js",
+            media_type="text/javascript; charset=utf-8",
+            headers={"X-Content-Type-Options": "nosniff"},
+        )
+
+    @app.get("/gui-onboarding.js")
+    async def gui_onboarding_js():
+        from fastapi.responses import FileResponse
+        return FileResponse(
+            Path(__file__).resolve().parent / "gui-onboarding.js",
+            media_type="text/javascript; charset=utf-8",
+            headers={"X-Content-Type-Options": "nosniff"},
+        )
+
+    @app.get("/fonts/PretendardVariable.woff2")
+    async def gui_font_pretendard():
+        from fastapi.responses import FileResponse
+        return FileResponse(
+            Path(__file__).resolve().parent / "fonts" / "PretendardVariable.woff2",
+            media_type="font/woff2",
+            headers={"X-Content-Type-Options": "nosniff"},
+        )
+
     @app.get("/api/health")
     async def health():
         return {"status": "healthy"}
@@ -1253,6 +1325,30 @@ def create_app(
         from .reviews import get_default_review_store
         store = get_default_review_store()
         return {"status": "success", "reviews": store.list_reviews(_evidence())}
+
+    # OMO-4: the sidebar history and the case fields kept per scan job (owner as /api/scan-status).
+    @app.get("/api/history")
+    async def api_history():
+        from .webapp_api import _history_payload
+        return _api_json(await run_in_threadpool(lambda: _history_payload(owner=job_owner, evidence=_evidence())))
+
+    @app.post("/api/history-delete")
+    async def api_history_delete(request: Request):
+        from .webapp_api import _history_delete_payload
+        body = await request.body()
+        return _api_json(await run_in_threadpool(lambda: _history_delete_payload(body, owner=job_owner, evidence=_evidence())))
+
+    @app.get("/api/job-case")
+    async def api_get_job_case(request: Request):
+        from .webapp_api import _job_case_get_payload
+        query = str(request.url.query)
+        return _api_json(await run_in_threadpool(lambda: _job_case_get_payload(query, owner=job_owner, evidence=_evidence())))
+
+    @app.post("/api/job-case")
+    async def api_post_job_case(request: Request):
+        from .webapp_api import _job_case_post_payload
+        body = await request.body()
+        return _api_json(await run_in_threadpool(lambda: _job_case_post_payload(body, owner=job_owner, evidence=_evidence())))
 
     return app
 

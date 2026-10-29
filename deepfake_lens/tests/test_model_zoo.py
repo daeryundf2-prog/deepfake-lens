@@ -17,7 +17,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 from deepfake_lens.core import _model_analysis_from_json
-from deepfake_lens.model_pins import empty_pin_for
+from deepfake_lens.model_pins import empty_pin_for, is_commit_sha, is_sha256
 from deepfake_lens.model_adapter import (
     AGREEMENT_SPREAD,
     PROFILE_SET_TYPE,
@@ -166,7 +166,10 @@ class CommittedProfilesTest(unittest.TestCase):
                 self.assertIn("측정 게이트", profile["reason"])
                 self.assertIn("measured_on", profile)
                 self.assertIsNone(profile["measured_on"])
-                self.assertEqual(profile["pin"], empty_pin_for(profile))
+                # A pinned profile carries the real digest of its fetched weights.
+                pin = profile["pin"]
+                if pin != empty_pin_for(profile):
+                    self.assertTrue(all(is_sha256(value) or is_commit_sha(value) for value in pin.values()), pin)
                 target = profile["inner"] if profile["runtime"] == "video-frames" else profile
                 expected_key = "revision" if "hub_model" in target else "sha256"
                 self.assertEqual(set(profile["pin"]), {expected_key})
@@ -697,7 +700,8 @@ class VideoFramesRuntimeTest(unittest.TestCase):
                 self.assertEqual(profile["runtime"], "video-frames")
                 self.assertEqual(profile["inner"]["runtime"], inner_runtime)
                 # G9: the outer pin describes the inner checkpoint.
-                self.assertEqual(profile["pin"], {"sha256": ""})
+                self.assertEqual(set(profile["pin"]), {"sha256"})
+                self.assertTrue(profile["pin"]["sha256"] == "" or is_sha256(profile["pin"]["sha256"]))
 
 
 def _has_torchvision() -> bool:

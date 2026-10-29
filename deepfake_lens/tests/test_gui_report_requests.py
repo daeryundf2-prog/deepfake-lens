@@ -98,7 +98,9 @@ class ScanOptionsFollowTheRowsTest(unittest.TestCase):
         shared = {"exp-report", "exp-pdf", "exp-evidence"}
         self.assertIn("'exp-signed'", inputs)
         self.assertTrue(_function("exportReport").split("{", 1)[1].lstrip().startswith("if (exportBlocked()) return;"))
-        self.assertIn("$(id).addEventListener('click', () => exportReport(kind))", source)
+        # Design review 2026-10-30 (item 5): the formats are radios; one 내보내기 button exports the chosen one.
+        self.assertIn("$('exp-go').addEventListener('click', () => { if (selectedFormat()) exportReport(selectedFormat()); });", source)
+        self.assertIn("'exp-go'", inputs)
         for button in EXPORT_BUTTONS:
             with self.subTest(button=button):
                 self.assertIn(f"'{button}'", inputs)

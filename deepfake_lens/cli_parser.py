@@ -159,6 +159,18 @@ def port_number(text: str) -> int:
     return value
 
 
+def _audit_counts(text: str) -> tuple[int, int]:
+    """argparse type of ``measure --audit-pos/--audit-neg``: ``errors/checked`` with 0 <= errors <= checked, checked >= 1."""
+    errors, _, checked = text.partition("/")
+    try:
+        pair = int(errors), int(checked)
+    except ValueError:
+        pair = (-1, 0)
+    if not 0 <= pair[0] <= pair[1] or pair[1] < 1:
+        raise argparse.ArgumentTypeError(f"감사 결과는 '오류 수/검사 수' 형식이어야 합니다(예: 6/200): {escape_echo(repr(text))}")
+    return pair
+
+
 def escape_echo(text: object) -> str:
     """``text`` with newlines and other control characters written as escapes (R9-7, R10-1)."""
     from .result_text import escape_controls
@@ -385,6 +397,22 @@ def build_parser() -> tuple[argparse.ArgumentParser, dict[str, argparse.Argument
     calibrate_parser.add_argument("--out", type=Path, required=True, help="보정 결과 JSON 저장 경로")
     calibrate_parser.add_argument("--mapping-out", type=Path, help="등위(isotonic) 점수 보정 프로필(매핑표·방법·데이터셋 지문)도 저장 — 값은 데이터셋 의존 신뢰도이며 진실 확률이 아님")
     calibrate_parser.add_argument("--thresholds", type=Path, help=THRESHOLDS_HELP)
+
+    measure_parser = subparsers.add_parser("measure", help="좁은 범위 측정: 코퍼스 test 분할의 AUROC(원본 묶음 부트스트랩 95%% 신뢰구간)·measured_on·측정 게이트 판정과 우도비(LR) 보정 프로필")
+    measure_parser.add_argument("manifest", type=Path, metavar="<매니페스트>", help="corpus-manifest-v1 매니페스트(분할 완료)")
+    measure_parser.add_argument("--scores", type=Path, help="항목별 점수 파일(한 줄에 항목 식별자와 0~100 사이 점수 하나씩)")
+    measure_parser.add_argument("--model-path", type=Path, help="각 항목을 직접 채점할 런타임 모델 프로필(--scores와 둘 중 하나)")
+    measure_parser.add_argument("--variant", action="append", default=[], help="측정할 변형(예: kakao, 반복 지정 가능; 생략하면 전체)")
+    measure_parser.add_argument("--target-fpr", type=float, default=0.05, help="val 분할에서 임계값을 맞출 목표 오탐률")
+    measure_parser.add_argument("--bootstrap", type=int, default=2000, help="원본 묶음 부트스트랩 반복 수")
+    measure_parser.add_argument("--seed", type=int, default=0, help="부트스트랩 난수 시드(같은 시드는 같은 구간)")
+    measure_parser.add_argument("--json-out", type=Path, help="측정 결과 JSON 저장")
+    measure_parser.add_argument("--scores-out", type=Path, help="측정에 쓴 항목별 점수를 JSONL로 저장(--scores로 같은 측정을 다시 할 수 있음)")
+    measure_parser.add_argument("--lr-out", type=Path, help="우도비 보정 프로필 JSON 저장(검증 통과 여부 포함)")
+    measure_parser.add_argument("--clusters", type=Path, help="항목별 묶음 파일(한 줄에 항목 식별자와 묶음 이름 하나씩; 예: 인물·화자) — 부트스트랩을 이 단위로 다시 뽑음, 없는 항목은 원본 파일 단위")
+    measure_parser.add_argument("--dropped-scores", type=Path, help="라벨 감사에서 출처를 확인하지 못해 빠진 AI 후보의 점수 파일(--scores와 같은 형식) — AI로 되돌려 넣은 구간에도 게이트 적용")
+    measure_parser.add_argument("--audit-pos", type=_audit_counts, metavar="오류/검사", help="AI로 라벨된 항목 감사 결과(예: 6/200) — 요구 신뢰구간 하한을 올리고 우도비에 상한을 둠")
+    measure_parser.add_argument("--audit-neg", type=_audit_counts, metavar="오류/검사", help="실제로 라벨된 항목 감사 결과(예: 0/200)")
 
     feedback_parser = subparsers.add_parser("feedback", help="감정인 라벨과 검사 점수를 비교해 융합 가중치 제안")
     feedback_parser.add_argument("labels", type=Path, help="감정인 판정 JSONL/JSON: 행마다 `path`, `expected_label`, `notes`(선택) 필드")
@@ -623,6 +651,7 @@ def build_parser() -> tuple[argparse.ArgumentParser, dict[str, argparse.Argument
     desktop_parser.add_argument("--no-browser", action="store_true", help="브라우저를 자동으로 열지 않음")
     desktop_parser.add_argument("--idle-exit-minutes", type=int, default=20, metavar="<분>", help="화면 신호와 검사가 모두 없을 때 스스로 꺼지기까지의 시간(기본 20; 0이면 끄지 않음)")
     desktop_parser.add_argument("--models-dir", type=Path, help="vendor-weights --install로 준비한 모델 폴더")
+    desktop_parser.add_argument("--browser-tab", action="store_true", help="앱 창 대신 기본 브라우저의 새 탭으로 엽니다")
 
     doctor_parser = subparsers.add_parser("doctor", help="모델 가중치·가속기·의존성 진단")
     doctor_parser.add_argument("--format", choices=["table", "json"], default="table", help="표준 출력 형식")
@@ -692,7 +721,7 @@ def build_parser() -> tuple[argparse.ArgumentParser, dict[str, argparse.Argument
         "corpus": corpus_parser,
         "scan": scan_parser, "collect": collect_parser, "dataset": dataset_parser,
         "eval": eval_parser, "benchmark": benchmark_parser, "fusion": fusion_parser,
-        "calibrate": calibrate_parser, "feedback": feedback_parser, "train": train_parser,
+        "calibrate": calibrate_parser, "measure": measure_parser, "feedback": feedback_parser, "train": train_parser,
         "models": models_parser, "train-neural-plan": neural_parser, "video": video_parser,
         "audio": audio_parser, "face": face_parser, "video-analysis": video_analysis_parser,
         "inpaint": inpaint_parser, "text-advanced": text_advanced_parser, "compare": compare_parser,

@@ -3,11 +3,14 @@
 from __future__ import annotations
 
 import json
+import tempfile
 import unittest
+from pathlib import Path
 
-from deepfake_lens.evidence_rules import GENERATOR_NAMES, generator_name_in
+from deepfake_lens.evidence_rules import GENERATOR_NAMES, generator_name_in, image_metadata_evidence
 from deepfake_lens.generator_strings import SIGNER_TITLE, TABLE_PATH, c2pa_signer_evidence, tool_guess_rules
-from deepfake_lens.image_metadata import guess_image_source
+from deepfake_lens.image_metadata import guess_image_source, parse_xmp_fields, read_image_metadata_full
+from deepfake_lens.tests.png_fixture import write_png
 from deepfake_lens.result_types import EvidenceDirection, EvidenceStrength, SourceConfidence
 
 PHASE0_LABELS = [
@@ -34,6 +37,96 @@ class TableTest(unittest.TestCase):
         self.assertEqual(guess_image_source({"exif.Software": "Dreamina"}).confidence, SourceConfidence.LOW)
         self.assertEqual(guess_image_source({"exif.Software": "GIMP 2.10"}).confidence, SourceConfidence.UNKNOWN)
         self.assertEqual(generator_name_in("Adobe Firefly"), "Firefly")
+
+
+NOVELAI_COMMENT = json.dumps({"prompt": "1girl, garden", "steps": 28, "height": 832, "width": 1216, "scale": 5.0, "seed": 42,
+                              "sampler": "k_euler_ancestral", "uc": "lowres", "n_samples": 1, "noise_schedule": "karras"})
+INVOKEAI_METADATA = json.dumps({"generation_mode": "txt2img", "positive_prompt": "a lighthouse", "seed": 7, "steps": 30,
+                                "cfg_scale": 7.5, "scheduler": "euler", "model": {"name": "sdxl"}})
+FOOOCUS_PARAMETERS = json.dumps({"prompt": "a fox", "negative_prompt": "", "styles": "['Fooocus V2']", "performance": "Speed",
+                                 "base_model": "juggernautXL_v8Rundiffusion.safetensors", "version": "Fooocus v2.5.5"})
+SWARMUI_PARAMETERS = json.dumps({"sui_image_params": {"prompt": "a city", "model": "flux1-dev", "seed": 1, "steps": 20, "cfgscale": 1,
+                                                      "swarm_version": "0.9.6.2"}, "sui_extra_data": {"date": "2026-10-27"}})
+MIDJOURNEY_DESCRIPTION = "a red bicycle in the rain --ar 3:2 --v 7 Job ID: 0f6e1b2a-1111-2222-3333-444455556666"
+
+
+class GeneratorRecordTest(unittest.TestCase):
+    """2026-10-27: the structured records of NovelAI/InvokeAI/Fooocus/SwarmUI/Midjourney follow the A1111/ComfyUI rule."""
+
+    RECORDS = {
+        "NovelAI 추정": {"Software": "NovelAI", "Comment": NOVELAI_COMMENT, "Source": "NovelAI Diffusion V4.5 4BDE2A90"},
+        "InvokeAI 추정": {"invokeai_metadata": INVOKEAI_METADATA},
+        "Fooocus 추정": {"parameters": FOOOCUS_PARAMETERS, "fooocus_scheme": "fooocus"},
+        "SwarmUI 추정": {"parameters": SWARMUI_PARAMETERS},
+        "Midjourney/Niji 추정": {"Description": MIDJOURNEY_DESCRIPTION, "Author": "someone"},
+    }
+
+    def evidence_of_png(self, text: dict[str, str]):
+        with tempfile.TemporaryDirectory() as tmp:
+            read = read_image_metadata_full(write_png(Path(tmp) / "x.png", text))
+        return read, image_metadata_evidence(read.metadata, read.dimensions)
+
+    def test_each_record_read_from_a_png_is_a_strong_self_declaration(self) -> None:
+        for label, text in self.RECORDS.items():
+            with self.subTest(label):
+                read, items = self.evidence_of_png(text)
+                self.assertEqual(guess_image_source(read.metadata).label, label)
+                [item] = [i for i in items if i.direction == EvidenceDirection.SYNTHETIC]
+                self.assertEqual((item.title, item.strength, item.self_declared), ("생성 도구 메타데이터", EvidenceStrength.STRONG, True))
+                self.assertTrue(item.detail.startswith(label), item.detail)
+
+    def test_invokeai_graph_alone_is_a_record(self) -> None:
+        _, items = self.evidence_of_png({"invokeai_graph": json.dumps({"id": "g", "nodes": {"n1": {"type": "noise"}}, "edges": []})})
+        self.assertEqual([i.strength for i in items if i.direction == EvidenceDirection.SYNTHETIC], [EvidenceStrength.STRONG])
+
+    def test_key_names_or_shapes_without_the_record_are_not_strong(self) -> None:
+        near_misses = [
+            {"Software": "NovelAI"},  # brand only (moderate, the brand rule)
+            {"Software": "NovelAI", "Comment": "nice picture"},
+            {"Comment": NOVELAI_COMMENT},  # no Software=NovelAI
+            {"invokeai_metadata": "{}"},
+            {"parameters": FOOOCUS_PARAMETERS},  # no fooocus_scheme
+            {"parameters": json.dumps({"sui_image_params": {}})},
+            {"Description": "a red bicycle --v 7"},  # no Job ID
+            {"Description": "Job ID: 0f6e1b2a-1111-2222-3333-444455556666"},  # no parameter
+        ]
+        for text in near_misses:
+            with self.subTest(text):
+                _, items = self.evidence_of_png(text)
+                self.assertFalse([i for i in items if i.strength == EvidenceStrength.STRONG], items)
+
+    def test_fooocus_exif_software_alone_is_the_moderate_brand_rule(self) -> None:
+        [item] = [i for i in image_metadata_evidence({"exif.Software": "Fooocus v2.5.5"}, None) if i.direction == EvidenceDirection.SYNTHETIC]
+        self.assertEqual((item.title, item.strength), ("생성 도구 이름 메타데이터", EvidenceStrength.MODERATE))
+        self.assertTrue(item.detail.startswith("Fooocus 추정"), item.detail)
+
+    def test_midjourney_record_in_xmp_description(self) -> None:
+        packet = (
+            '<x:xmpmeta xmlns:x="adobe:ns:meta/"><rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#">'
+            '<rdf:Description xmlns:dc="http://purl.org/dc/elements/1.1/"><dc:description><rdf:Alt>'
+            f'<rdf:li xml:lang="x-default">{MIDJOURNEY_DESCRIPTION}</rdf:li></rdf:Alt></dc:description></rdf:Description></rdf:RDF></x:xmpmeta>'
+        ).encode()
+        items = image_metadata_evidence(parse_xmp_fields(packet), None)
+        self.assertEqual([(i.title, i.strength) for i in items if i.direction == EvidenceDirection.SYNTHETIC],
+                         [("생성 도구 메타데이터", EvidenceStrength.STRONG)])
+
+    def test_xmp_digital_source_type_as_rdf_resource(self) -> None:
+        packet = (
+            '<x:xmpmeta xmlns:x="adobe:ns:meta/"><rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#">'
+            '<rdf:Description xmlns:Iptc4xmpExt="http://iptc.org/std/Iptc4xmpExt/2008-02-29/"><Iptc4xmpExt:DigitalSourceType '
+            'rdf:resource="http://cv.iptc.org/newscodes/digitalsourcetype/compositeWithTrainedAlgorithmicMedia"/>'
+            '</rdf:Description></rdf:RDF></x:xmpmeta>'
+        ).encode()
+        fields = parse_xmp_fields(packet)
+        self.assertTrue(fields["xmp.DigitalSourceType"].endswith("/compositeWithTrainedAlgorithmicMedia"))
+        [item] = [i for i in image_metadata_evidence(fields, None) if i.direction == EvidenceDirection.SYNTHETIC]
+        self.assertEqual((item.title, item.strength, item.self_declared), ("XMP 디지털 출처 유형: 생성형 AI", EvidenceStrength.STRONG, True))
+
+    def test_every_record_names_its_source(self) -> None:
+        records = json.loads(TABLE_PATH.read_text(encoding="utf-8"))["generator_records"]["records"]
+        self.assertEqual({r["generator"] for r in records} >= {"NovelAI", "InvokeAI", "Fooocus", "SwarmUI", "Midjourney"}, True)
+        for record in records:
+            self.assertTrue(record["keys"] and record["source"] and record["confidence"], record["generator"])
 
 
 class SignerTest(unittest.TestCase):

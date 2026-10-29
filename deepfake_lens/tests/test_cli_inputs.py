@@ -50,7 +50,7 @@ OUTPUT_DESTS = frozenset({
     "out", "output", "output_dir", "frame_root", "heatmap_dir", "to", "bundle_to", "cache", "hash_db",
     "json_out", "csv_out", "html_out", "pdf_out", "md_out", "forensic_pdf_out", "evidence_statement_out",
     "evidence_statement_pdf_out", "manifest_out", "audit_out", "split_out", "robustness_out", "profile_out",
-    "false_positive_out", "false_negative_out", "mapping_out",
+    "false_positive_out", "false_negative_out", "mapping_out", "lr_out", "scores_out",
 })
 # --key-file is checked by its own rule (N8: missing/empty key file -> exit 2).
 SEPARATELY_CHECKED_DESTS = frozenset({"key_file"})
@@ -102,6 +102,11 @@ BUILDERS: dict[str, Builder] = {
     "benchmark": lambda fx, bad: ["benchmark", bad.get("folder", str(fx.folder)), "--json-out", _o(fx, "b.json")],
     "fusion": lambda fx, bad: ["fusion", bad.get("folder", str(fx.folder)), "--out", _o(fx, "f.json")],
     "calibrate": lambda fx, bad: ["calibrate", bad.get("folder", str(fx.folder)), "--out", _o(fx, "k.json")],
+    "measure": lambda fx, bad: [
+        "measure", bad.get("manifest", str(fx.json)), "--scores", bad.get("scores", str(fx.jsonl)),
+        *(["--clusters", bad["clusters"]] if "clusters" in bad else []),
+        *(["--dropped-scores", bad["dropped_scores"]] if "dropped_scores" in bad else []),
+    ],
     "feedback": lambda fx, bad: ["feedback", bad.get("labels", str(fx.jsonl)), "--scan-json", bad.get("scan_json", str(fx.json))],
     "train": lambda fx, bad: ["train", bad.get("folder", str(fx.folder)), "--out", _o(fx, "t.json")],
     "train-neural-plan": lambda fx, bad: ["train-neural-plan", bad.get("folder", str(fx.folder)), "--out", _o(fx, "n.json"), "--output-dir", _o(fx, "nd")],

@@ -1,0 +1,56 @@
+/* OMO-9 settings: theme override tokens, settings dialog, delete-confirm dialog. */
+
+/* The theme tokens (system / 밝게 / 어둡게) live in gui.css :root; this file styles the dialogs. */
+
+dialog.settings,
+dialog.confirm {
+    border: 1px solid var(--line);
+    border-radius: var(--radius-lg);
+    background: var(--panel);
+    color: var(--ink);
+    padding: 24px 26px;
+    box-shadow: var(--shadow-lg);
+    width: min(520px, calc(100vw - 32px));
+    max-height: calc(100vh - 32px);
+    overflow-y: auto;
+}
+dialog.confirm { width: min(420px, calc(100vw - 32px)); }
+dialog.settings::backdrop,
+dialog.confirm::backdrop { background: var(--backdrop); backdrop-filter: blur(2px); }
+
+dialog.settings[open] { display: flex; flex-direction: column; gap: 12px; }
+dialog.settings h2 { margin: 0 0 4px; font-size: var(--fs-xl); font-weight: 650; letter-spacing: -0.02em; }
+dialog.settings .set-group { border: 0; border-top: 1px solid var(--line-2); margin: 0; padding: 14px 0 2px; }
+dialog.settings .set-group > legend { padding: 0; font-size: var(--fs-xs); font-weight: 600; letter-spacing: 0.02em; color: var(--muted); }
+dialog.settings .set-pixel { border: 0; margin: 0; padding: 0; }
+dialog.settings .check,
+dialog.confirm .btn,
+dialog.settings .btn { min-height: 44px; }
+dialog.settings .set-info {
+    display: grid;
+    grid-template-columns: max-content 1fr;
+    gap: 6px 16px;
+    margin: 0;
+    padding-top: 8px;
+    border-top: 1px solid var(--line-2);
+}
+dialog.settings .set-info dt { color: var(--muted); font-size: var(--fs-sm); }
+dialog.settings .set-info dd { font-size: var(--fs-md); }
+dialog.settings .set-info dd { margin: 0; overflow-wrap: anywhere; }
+dialog.settings .btn { align-self: flex-start; }
+
+dialog.confirm[open] { display: flex; flex-wrap: wrap; gap: 12px; }
+dialog.confirm p { flex: 1 1 100%; margin: 0; }
+
+dialog.settings :focus-visible,
+dialog.confirm :focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+
+@media (forced-colors: active) {
+    dialog.settings,
+    dialog.confirm { border: 2px solid CanvasText; background: Canvas; color: CanvasText; }
+    dialog.settings .set-group,
+    dialog.settings .set-info { border-color: CanvasText; }
+    dialog.settings .set-info dt { color: GrayText; }
+    dialog.settings :focus-visible,
+    dialog.confirm :focus-visible { outline-color: Highlight; }
+}

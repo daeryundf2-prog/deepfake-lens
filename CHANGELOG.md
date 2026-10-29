@@ -4,6 +4,40 @@ All notable changes to Deepfake Lens. Format: Keep a Changelog; this repo
 has not tagged a release yet (version is `0.1.0.dev0`), so entries are
 grouped by work pass rather than release.
 
+## 2026-10 — OmO desktop app shell
+
+### Added
+- Desktop mode (`deepfake-lens desktop`, 「Deepfake Lens.cmd」) opens the GUI
+  in an Edge or Chrome app window with its own profile folder (`app-window`);
+  the default browser tab is the fallback, and `desktop --browser-tab` opens
+  the tab instead (OMO-6).
+- App shell: a left sidebar with 「새 검사」, 「최근 검사」 (finished scans kept
+  7 days, reopened with their case fields, 「지우기」 with confirmation),
+  running-scan progress and 「설정」; a drawer under 1181 px (OMO-1, OMO-2,
+  OMO-7, OMO-8). `dfl:*` lifecycle events for the GUI (OMO-5).
+- 설정 dialog: theme, scan defaults, shortcuts (Ctrl/Cmd+N, Ctrl/Cmd+,),
+  version, record folder, signing key status and retention days (OMO-9).
+- First-run welcome panel 「Deepfake Lens 시작하기」, dismissed with
+  「다음부터 보지 않기」 and reopened from 설정 (OMO-10).
+- Case fields saved per scan in `cases.json` in the user-data folder
+  (`DEEPFAKE_LENS_CASES` overrides), never inside an examined folder (OMO-3).
+- Routes on both servers: `GET /api/history`, `POST /api/history-delete`,
+  `GET /api/job-case`, `POST /api/job-case` (OMO-4).
+- GUI redesign: bundled UI font Pretendard Variable (OFL-1.1,
+  `deepfake_lens/fonts/`, served at `/fonts/PretendardVariable.woff2` by both
+  servers, no network request), zinc neutrals with one indigo accent,
+  translucent sticky top bar, segmented view tabs, verdict summary cards,
+  rounded ledger, refined sidebar, dialogs and welcome card; light/dark theme
+  tokens defined once in `gui.css` (OMO-13).
+
+### Changed
+- The long caveat explanations fold behind 「자세한 설명」; every warning
+  headline stays visible and the report/export text is unchanged (OMO-11).
+
+### Fixed
+- The side refusal quotes its field name as an interpolated value, and
+  `SourceQuotesTest` checks it (OMO-3).
+
 ## 2026-10 — GUI redesign (court-docket ledger)
 
 ### Changed

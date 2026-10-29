@@ -133,12 +133,10 @@ class SdxlOutcome:
 
 def sdxl_check(path: Path) -> SdxlOutcome:
     """Decode the dwtDct message and compare it with the registry's SDXL entries (exact match only)."""
-    from .import_probe import require, require_available
+    from .import_probe import require
 
-    # dependency probes: absent numpy/cv2/PIL is "skipped". R27-5: cv2 is located, not imported — it is imported by
-    # decode_array, i.e. only for an image inside the measured range (importing it starts OpenCV's BLAS threads).
+    # dependency probes: absent numpy/PIL is "skipped" (the decoder's BGR->YUV step is numpy, no OpenCV).
     require("numpy")
-    require_available("cv2")
     require("PIL")
 
     from .wm_imwatermark import ALGORITHM, MAX_PIXELS, MIN_SIDE, decode_array, load_rgb

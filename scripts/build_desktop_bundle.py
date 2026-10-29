@@ -11,27 +11,31 @@
    --only-binary=:all: --no-deps``. Because of ``--no-deps`` the set is explicit; :func:`missing_requirements`
    reads every installed dist's ``Requires-Dist`` (markers evaluated for win32 / CPython 3.12, extras off) and the
    build fails when a required dist is not installed; ``site-packages/bin/`` and ``direct_url.json`` are deleted
-   (RISK B22); the C++ runtime ``msvcp140*.dll`` from the pinned msvc-runtime wheel goes into ``python/`` and every
+   (RISK B22); the model weights in :data:`BUNDLED_WEIGHTS` (TrustMark decoders) are fetched, checked against the
+   sha256 pinned in ``deepfake_lens/models/assets.json`` and copied into ``site-packages/deepfake_lens/models/``; the C++ runtime ``msvcp140*.dll`` from the pinned msvc-runtime wheel goes into ``python/`` and every
    ``.pyd``/``.dll``'s import table is checked (RISK A1); the embeddable's ``vcruntime140*.dll`` (14.42) are replaced
    by the same wheel's copies so the C runtime set has one version (REV2-D7); site-packages is precompiled with the
    build machine's CPython 3.12 (``compileall --invalidation-mode checked-hash`` with the build path stripped,
    RISK A7, REV2-D5 D6);
 4. ``Deepfake Lens.cmd``, ``문제 확인.cmd``, ``읽어보세요.txt``, ``VERSION.txt``;
 5. a zip with ``/`` separators and UTF-8 names;
-6. a check of the folder (python.exe, the ``._pth`` lines, ``deepfake_lens/gui.js``, ``pymupdf``) and its size.
+6. a check of the folder (python.exe, the ``._pth`` lines, ``deepfake_lens/gui.js``, ``pymupdf``, ``onnxruntime``, the
+   bundled weights' sha256) and its size.
 
 ``--platform macos`` makes ``DeepfakeLens-mac/``: ``Deepfake Lens.command`` (creates ``.venv`` with python3.12 or
 python3.13 on first run, installs from the bundled ``wheels/`` with ``--no-index``, then runs
 ``python -m deepfake_lens desktop``) and ``wheels/`` with this repository's wheel plus the same pins for macOS arm64
 (CPython 3.12 and 3.13 — numpy 2.5.4 has no 3.11 wheels).
 
-Network: python.org (the embeddable zip) and PyPI (through pip) only. Downloads are cached under ``--cache``.
+Network: python.org (the embeddable zip), PyPI (through pip) and the URLs in :data:`BUNDLED_WEIGHTS` (Windows only).
+Downloads are cached under ``--cache``.
 The Windows bundle cannot be run on the build machine; the first run is QA-SYS-4's bundle path.
 """
 
 from __future__ import annotations
 
 import hashlib
+import json
 import os
 import shutil
 import subprocess
@@ -53,9 +57,14 @@ EMBED_SHA256 = "4acbed6dd1c744b0376e3b1cf57ce906f9dc9e95e68824584c8099a63025a3c3
 PTH_NAME = "python312._pth"
 SITE_PACKAGES_PTH = "Lib\\site-packages"
 
-TOP_LEVEL = ("pymupdf==1.28.2", "numpy==2.5.4", "Pillow==12.3.0", "c2pa-python==0.38.0", "py7zr==1.1.4", "syhwp==0.0.8", "olefile==0.47")
-"""What the bundle is for: PDF reports, pixel checks, C2PA, .7z and .hwp. The rest of :data:`WINDOWS_WHEELS` is their
-dependencies, resolved once with ``pip download`` for win_amd64 / cp312 on 2026-10-23 and pinned here."""
+TOP_LEVEL = (
+    "pymupdf==1.28.2", "numpy==2.5.4", "Pillow==12.3.0", "c2pa-python==0.38.0", "py7zr==1.1.4", "syhwp==0.0.8", "olefile==0.47",
+    "onnxruntime==1.31.1",
+)
+"""What the bundle is for: PDF reports, pixel checks, C2PA, .7z, .hwp and the TrustMark watermark decoders
+(onnxruntime; the SDXL imwatermark check needs only numpy). The rest of :data:`WINDOWS_WHEELS` is their dependencies,
+resolved once with ``pip download`` for win_amd64 / cp312 on 2026-10-23 (onnxruntime's on 2026-10-27; its
+``sympy``/``ml_dtypes`` are extras the decoders do not use) and pinned here."""
 DEPENDENCIES = (
     # c2pa-python
     "toml==0.10.2", "cryptography==50.0.2", "cffi==2.1.1", "pycparser==3.12",
@@ -63,6 +72,8 @@ DEPENDENCIES = (
     # py7zr
     "texttable==1.7.2", "pycryptodomex==3.24.1", "brotli==1.2.1", "psutil==7.2.2", "backports-zstd==1.8.0",
     "pyppmd==1.3.1", "pybcj==1.0.8", "multivolumefile==0.2.3", "inflate64==1.0.4",
+    # onnxruntime
+    "flatbuffers==25.12.19", "packaging==26.3", "protobuf==7.36.2",
 )
 WINDOWS_WHEELS = TOP_LEVEL + DEPENDENCIES
 MAC_PYTHONS = ("3.12", "3.13")
@@ -77,6 +88,26 @@ MSVC_RUNTIME_DLLS = ("msvcp140.dll", "msvcp140_1.dll", "msvcp140_2.dll", "msvcp1
 """RISK A1: the C++ runtime that PyMuPDF's ``_mupdf.pyd``/``mupdfcpp64.dll``/``_extra.pyd`` import. The embeddable
 Python ships only ``vcruntime140.dll``/``vcruntime140_1.dll``; these go into ``python\\`` (the application folder,
 searched for every extension's imports) from the wheel's ``msvc_runtime-<v>.data/data/``."""
+BUNDLED_WEIGHTS: Mapping[str, str] = {
+    "trustmark-decoder_Q.onnx": "https://cai-watermark.adobe.net/watermarking/trustmark-models/decoder_Q.onnx",
+    "trustmark-decoder_P.onnx": "https://cai-watermark.adobe.net/watermarking/trustmark-models/decoder_P.onnx",
+    "trustmark-decoder_C.onnx": "https://cai-watermark.adobe.net/watermarking/trustmark-models/decoder_C.onnx",
+}
+"""Model weights shipped in ``site-packages/deepfake_lens/models/`` (what ``vendor_weights.default_models_dir()``
+resolves to inside the bundle): asset name in ``deepfake_lens/models/assets.json`` → download URL. Each file is
+fetched at build time and must match that asset's pinned, non-empty sha256 (an unpinned name stops the build). Add a
+detector's weight by its asset name here, once its runtime is in :data:`TOP_LEVEL`. VideoSeal, AudioSeal and PerTh are
+not listed: their decoders need torch, which the bundle does not ship."""
+EXPORTED_WEIGHTS: Mapping[str, str] = {
+    "community-forensics-vit-runtime.json": "scripts/fetch_community_forensics.py",
+}
+"""Reference-signal detector checkpoints that have no download URL of their own (exported from the upstream weights by
+the named script): runtime profile -> producer. The file is the profile's ``checkpoint`` path under
+``<cache>/exported/`` and must match the profile's ``pin.sha256``; it is copied to the same relative path in
+``site-packages/deepfake_lens/models/``. AASIST is not listed: it needs torch, which the bundle does not ship."""
+ASSETS_JSON = REPO_ROOT / "deepfake_lens" / "models" / "assets.json"
+MODELS_DIR = REPO_ROOT / "deepfake_lens" / "models"
+WEIGHTS_USER_AGENT = "deepfake-lens-build-desktop-bundle/1.0"
 VCRUNTIME_DLLS = ("vcruntime140.dll", "vcruntime140_1.dll")
 """REV2-D7: the embeddable 3.12.10 ships these as 14.42; ``msvcp140.dll`` 14.51 from the wheel expects a vcruntime at
 least as new as itself (Microsoft: the runtime DLLs of one redistributable version go together). The wheel carries
@@ -515,9 +546,10 @@ def verify_windows_bundle(folder: Path) -> list[str]:
             if need not in lines:
                 problems.append(f"{PTH_NAME}에 {need!r} 줄이 없음")
     site = python / "Lib" / "site-packages"
-    for need in ("deepfake_lens/gui.js", "deepfake_lens/gui.html", "deepfake_lens/__main__.py", "pymupdf/__init__.py", "fitz/__init__.py", "numpy/__init__.py", "PIL/__init__.py", "c2pa/__init__.py", "py7zr/__init__.py", "olefile/__init__.py"):
+    for need in ("deepfake_lens/gui.js", "deepfake_lens/gui.html", "deepfake_lens/gui-shell.js", "deepfake_lens/gui-history.js", "deepfake_lens/gui-settings.js", "deepfake_lens/gui-onboarding.js", "deepfake_lens/gui-shell.css", "deepfake_lens/gui-settings.css", "deepfake_lens/gui-onboarding.css", "deepfake_lens/fonts/PretendardVariable.woff2", "deepfake_lens/__main__.py", "pymupdf/__init__.py", "fitz/__init__.py", "numpy/__init__.py", "PIL/__init__.py", "c2pa/__init__.py", "py7zr/__init__.py", "olefile/__init__.py", "onnxruntime/__init__.py", "onnxruntime/capi/onnxruntime_pybind11_state.pyd"):
         if not (site / need).is_file():
             problems.append(f"site-packages/{need} 없음")
+    problems.extend(weight_problems(site / "deepfake_lens" / "models"))
     for need in (WIN_LAUNCHER, WIN_DOCTOR, WIN_README, "VERSION.txt"):
         if not (folder / need).is_file():
             problems.append(f"{need} 없음")
@@ -534,6 +566,77 @@ def verify_windows_bundle(folder: Path) -> list[str]:
         problems.extend(f"빌드 경로가 남은 .pyc: {leak}" for leak in pyc_build_path_leaks(site))  # REV2-D5
     if python.is_dir():
         problems.extend(unresolved_imports(python)[0])
+    return problems
+
+
+def pinned_sha256(name: str, assets_json: Path = ASSETS_JSON) -> str:
+    """The sha256 pinned for asset ``name`` in ``models/assets.json``; BuildError when it is not listed or empty."""
+    assets = json.loads(assets_json.read_text(encoding="utf-8")).get("assets", [])
+    digests = [str(a.get("sha256") or "") for a in assets if isinstance(a, dict) and a.get("name") == name]
+    if not digests or not digests[0]:
+        raise BuildError(f"{name}: {assets_json.name}에 고정된 sha256이 없습니다 — 꼬러미에 넣지 않습니다")
+    return digests[0]
+
+
+def exported_pin(profile_name: str, models_dir: Path = MODELS_DIR) -> tuple[str, str]:
+    """(checkpoint path relative to the models folder, pinned sha256) of an :data:`EXPORTED_WEIGHTS` profile."""
+    profile = json.loads((models_dir / profile_name).read_text(encoding="utf-8"))
+    relpath = str(profile.get("checkpoint") or "")
+    pin = profile.get("pin") if isinstance(profile.get("pin"), dict) else {}
+    digest = str(pin.get("sha256") or "")
+    if not relpath or not digest:
+        raise BuildError(f"{profile_name}: checkpoint 또는 pin.sha256이 없습니다 — 꼬러미에 넣지 않습니다")
+    return relpath, digest
+
+
+def install_exported_weights(cache: Path, site: Path) -> list[str]:
+    """Copy every :data:`EXPORTED_WEIGHTS` checkpoint from ``<cache>/exported/`` (checked against its profile pin)."""
+    models = site / "deepfake_lens" / "models"
+    done: list[str] = []
+    for profile_name, producer in EXPORTED_WEIGHTS.items():
+        relpath, expected = exported_pin(profile_name)
+        source = cache / "exported" / relpath
+        if not source.is_file():
+            raise BuildError(
+                f"{relpath}이(가) 없습니다 — 먼저 {producer} --dest {cache / 'exported'} 를 실행해 만드십시오"
+            )
+        actual = sha256_of(source)
+        if actual != expected:
+            raise BuildError(f"{relpath}의 sha256이 {profile_name} 고정값과 다릅니다: {actual} (기대 {expected})")
+        target = models / relpath
+        target.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(source, target)
+        done.append(relpath)
+    return done
+
+
+def weight_problems(models: Path, names: Iterable[str] | None = None, assets_json: Path = ASSETS_JSON) -> list[str]:
+    """Each of ``names`` (default :data:`BUNDLED_WEIGHTS`, then the :data:`EXPORTED_WEIGHTS` checkpoints) that is
+    missing from ``models`` or not its pinned bytes."""
+    problems: list[str] = []
+    if names is None:
+        for profile_name in EXPORTED_WEIGHTS:
+            try:
+                relpath, expected = exported_pin(profile_name)
+            except BuildError as exc:
+                problems.append(str(exc))
+                continue
+            target = models / relpath
+            if not target.is_file():
+                problems.append(f"site-packages/deepfake_lens/models/{relpath} 없음")
+            elif sha256_of(target) != expected:
+                problems.append(f"site-packages/deepfake_lens/models/{relpath}: sha256이 {profile_name} 고정값과 다름")
+    for name in BUNDLED_WEIGHTS if names is None else names:
+        target = models / name
+        try:
+            expected = pinned_sha256(name, assets_json)
+        except BuildError as exc:
+            problems.append(str(exc))
+            continue
+        if not target.is_file():
+            problems.append(f"site-packages/deepfake_lens/models/{name} 없음")
+        elif sha256_of(target) != expected:
+            problems.append(f"site-packages/deepfake_lens/models/{name}: sha256이 assets.json 고정값과 다름")
     return problems
 
 
@@ -752,6 +855,34 @@ def fetch_msvc_runtime(cache: Path) -> Path:
     if actual != MSVC_RUNTIME_SHA256:
         raise BuildError(f"{MSVC_RUNTIME_WHEEL}의 sha256이 고정값과 다릅니다: {actual} (기대 {MSVC_RUNTIME_SHA256}) — 파일을 지우고 다시 받으십시오: {target}")
     return target
+
+
+def fetch_weight(cache: Path, name: str, url: str) -> Path:
+    """One :data:`BUNDLED_WEIGHTS` file (cached), refused when its sha256 is not the one pinned in assets.json."""
+    expected = pinned_sha256(name)
+    target = cache / "weights" / name
+    if not target.is_file():
+        target.parent.mkdir(parents=True, exist_ok=True)
+        partial = target.with_name(target.name + ".part")
+        print(f"내려받는 중: {url}", flush=True)
+        request = urllib.request.Request(url, headers={"User-Agent": WEIGHTS_USER_AGENT})
+        with urllib.request.urlopen(request, timeout=600) as answer, partial.open("wb") as out:
+            shutil.copyfileobj(answer, out)
+        partial.replace(target)
+    actual = sha256_of(target)
+    if actual != expected:
+        raise BuildError(f"{name}의 sha256이 고정값과 다릅니다: {actual} (기대 {expected}) — 파일을 지우고 다시 받으십시오: {target}")
+    return target
+
+
+def install_weights(cache: Path, site: Path) -> list[str]:
+    """Copy every :data:`BUNDLED_WEIGHTS` file (fetched and checked) into ``site/deepfake_lens/models``."""
+    models = site / "deepfake_lens" / "models"
+    if not models.is_dir():
+        raise BuildError(f"{models}가 없습니다 — 레포 휠에 models 폴더가 빠졌습니다")
+    for name, url in BUNDLED_WEIGHTS.items():
+        shutil.copyfile(fetch_weight(cache, name, url), models / name)
+    return list(BUNDLED_WEIGHTS)
 
 
 def install_msvc_runtime(wheel: Path, python_dir: Path) -> list[str]:
@@ -983,6 +1114,10 @@ def build_windows(out_parent: Path, cache: Path) -> Path:
     problems = missing_requirements(site_packages_dists(site), marker_environment("windows"))
     if problems:
         raise BuildError("의존성 검사 실패:\n  " + "\n  ".join(problems))
+    weights = install_weights(cache, site)
+    print(f"  모델 가중치(assets.json sha256 일치): {', '.join(weights)}", flush=True)
+    exported = install_exported_weights(cache, site)
+    print(f"  참고 신호 모델(프로필 pin 일치): {', '.join(exported)}", flush=True)
     runtime = install_msvc_runtime(fetch_msvc_runtime(cache), python)
     print(f"  C/C++ 런타임(msvc-runtime {MSVC_RUNTIME_VERSION}): {', '.join(runtime)}", flush=True)
     for dll, version in runtime_versions(python).items():

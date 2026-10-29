@@ -10,7 +10,7 @@ from pathlib import Path
 from deepfake_lens.media_marks import load_registry, sdxl_check, sdxl_evidence
 from deepfake_lens.result_types import EvidenceDirection, EvidenceStrength
 
-HAVE_PIXELS = all(importlib.util.find_spec(m) is not None for m in ("numpy", "cv2", "PIL"))
+HAVE_PIXELS = all(importlib.util.find_spec(m) is not None for m in ("numpy", "PIL"))
 
 
 class RegistryEntriesTest(unittest.TestCase):
@@ -43,7 +43,7 @@ def _raw() -> dict:
     return json.loads(REGISTRY_PATH.read_text(encoding="utf-8"))
 
 
-@unittest.skipUnless(HAVE_PIXELS, "numpy, opencv and Pillow required")
+@unittest.skipUnless(HAVE_PIXELS, "numpy and Pillow required")
 class EmbeddedMessageTest(unittest.TestCase):
     def test_each_message_names_its_pipeline(self) -> None:
         import numpy as np

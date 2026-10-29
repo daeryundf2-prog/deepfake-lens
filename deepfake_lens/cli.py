@@ -103,7 +103,7 @@ from .vendor_weights import (
 from .json_text import json_dumps
 
 
-COMMANDS = {"doctor", "scan", "verify-report", "corpus", "collect", "dataset", "eval", "benchmark", "fusion", "calibrate", "feedback", "train", "train-neural-plan", "models", "video", "video-analysis", "audio", "face", "faceswap-seam", "evidence-statement", "vendor-weights", "inpaint", "text-advanced", "compare", "watermark", "forensic", "classify", "multimodal", "realtime", "rppg", "prnu", "evidence", "api-serve", "batch", "explain", "agent", "3d", "avatar", "pixel-analysis", "ml-classify", "legal-report", "perf", "security", "release", "web", "desktop", "-h", "--help"}
+COMMANDS = {"doctor", "scan", "verify-report", "corpus", "collect", "dataset", "eval", "benchmark", "fusion", "calibrate", "measure", "feedback", "train", "train-neural-plan", "models", "video", "video-analysis", "audio", "face", "faceswap-seam", "evidence-statement", "vendor-weights", "inpaint", "text-advanced", "compare", "watermark", "forensic", "classify", "multimodal", "realtime", "rppg", "prnu", "evidence", "api-serve", "batch", "explain", "agent", "3d", "avatar", "pixel-analysis", "ml-classify", "legal-report", "perf", "security", "release", "web", "desktop", "-h", "--help"}
 
 def _pkg_profile(name: str) -> str:
     # Absolute path into the resolved models dir — works from the source
@@ -913,6 +913,37 @@ def _run_command(args: argparse.Namespace, parser: argparse.ArgumentParser, cmd_
             write_json_report(args.mapping_out, payload["score_calibration"])
         print(json_dumps(payload, ensure_ascii=False, indent=2))
         return 0
+    if args.command == "measure":
+        from .lr_measure import load_clusters, load_scores, measure, score_items_with_profile
+        from .corpus_manifest import load_manifest
+
+        if (args.scores is None) == (args.model_path is None):
+            cmd_parsers["measure"].error("--scores와 --model-path 중 정확히 하나를 지정하십시오")
+        try:
+            if args.scores is not None:
+                scores = load_scores(args.scores)
+                model_name = args.scores.name
+            else:
+                manifest_items = [item for item in load_manifest(args.manifest)["items"] if not args.variant or item.get("variant") in args.variant]
+                scores = score_items_with_profile(args.manifest.resolve(), manifest_items, args.model_path)
+                model_name = args.model_path.name
+            payload = measure(
+                args.manifest, scores, variants=args.variant, target_fpr=args.target_fpr, resamples=args.bootstrap, seed=args.seed, model=model_name,
+                clusters=load_clusters(args.clusters) if args.clusters else None,
+                dropped=load_scores(args.dropped_scores) if args.dropped_scores else None,
+                audit_pos=args.audit_pos, audit_neg=args.audit_neg,
+            )
+        except (ValueError, OSError) as exc:  # MeasureError, ManifestError, bad JSON and bad encodings are ValueErrors
+            print(f"측정할 수 없습니다: {exc}", file=sys.stderr)
+            return 2
+        if args.json_out:
+            write_json_report(args.json_out, payload)
+        if args.lr_out:
+            write_json_report(args.lr_out, payload["lr_profile"])
+        if args.scores_out:
+            write_cases_jsonl(args.scores_out, [{"id": key, "score": value} for key, value in sorted(scores.items())])
+        print(json_dumps(payload, ensure_ascii=False, indent=2))
+        return 0
     if args.command == "feedback":
         from .cli_inputs import UsageError as FeedbackUsageError  # (UsageError is local in this function)
         from .feedback import FEEDBACK_NO_LABELS, FeedbackFileError, parse_feedback_rows
@@ -1280,7 +1311,7 @@ def _run_command(args: argparse.Namespace, parser: argparse.ArgumentParser, cmd_
         return run_desktop(
             folder=args.folder, port=args.port, no_browser=args.no_browser, idle_exit_minutes=args.idle_exit_minutes,
             models_dir=getattr(args, "models_dir", None), key_source=args.desktop_key[0], key_file=args.desktop_key[1],
-            log_path=getattr(args, "log_path", None),
+            log_path=getattr(args, "log_path", None), browser_tab=args.browser_tab,
         )
     if args.command == "doctor":
         from .doctor import format_report, run_diagnostics

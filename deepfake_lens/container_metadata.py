@@ -121,6 +121,33 @@ class SeiString:
     text: str
 
 
+# ISO/IEC 14496-10 Annex A profile_idc / ISO/IEC 23008-2 Annex A general_profile_idc.
+AVC_PROFILES = {66: "Baseline", 77: "Main", 88: "Extended", 100: "High", 110: "High 10", 122: "High 4:2:2", 244: "High 4:4:4 Predictive"}
+HEVC_PROFILES = {1: "Main", 2: "Main 10", 3: "Main Still Picture", 4: "Range Extensions"}
+
+
+@dataclass(frozen=True)
+class VideoTrack:
+    """The first H.264/HEVC track's visual sample entry: coded size and the decoder configuration's profile/level."""
+
+    codec: str
+    width: int
+    height: int
+    profile_idc: int
+    level_idc: int
+
+    @property
+    def profile(self) -> str | None:
+        names = AVC_PROFILES if self.codec == "H.264" else HEVC_PROFILES
+        return names.get(self.profile_idc)
+
+    @property
+    def level(self) -> str:
+        if self.codec == "HEVC":
+            return f"{self.level_idc / 30:g}"
+        return f"{self.level_idc / 10:g}"
+
+
 @dataclass
 class ContainerFacts:
     format_label: str
@@ -130,6 +157,7 @@ class ContainerFacts:
     sei_note: str = ""
     c2pa_uuid: bool = False
     partial: list[str] = field(default_factory=list)
+    video: VideoTrack | None = None
 
     def coverage_reason(self) -> str:
         text = f"{self.format_label} 판독({'·'.join(self.parts)})" if self.parts else f"{self.format_label} 판독"
@@ -236,7 +264,9 @@ def registry_cache_tokens() -> list[str]:
         registry = load_registry()
     except RegistryError as exc:
         return [f"container-registry:error:{exc}"]
-    return [f"container-registry:{registry.version}:{registry.sha256}"]
+    from .encoder_fingerprints import table_cache_tokens
+
+    return [f"container-registry:{registry.version}:{registry.sha256}", *table_cache_tokens()]
 
 
 # --- Reader state -------------------------------------------------------------------
@@ -296,6 +326,10 @@ def _kind_for(key: str) -> str:
 class _Track:
     handler: bytes = b""
     codec: str = ""
+    width: int = 0
+    height: int = 0
+    profile_idc: int = 0
+    level_idc: int = 0
     nal_length_size: int = 4
     first_chunk: int | None = None
     config_sei: list[bytes] = field(default_factory=list)
@@ -558,6 +592,8 @@ def _read_stsd(reader: _Reader, payload: int, length: int, depth: int, track: _T
     if not codec or len(entry) < 86:
         return
     track.codec = codec
+    track.width = int.from_bytes(entry[8 + 24 : 8 + 26], "big")
+    track.height = int.from_bytes(entry[8 + 26 : 8 + 28], "big")
     name_length = entry[8 + 42]
     if 0 < name_length <= 31:
         reader.add("MP4 stsd", "compressorname", _decode_text(entry[8 + 43 : 8 + 43 + name_length]), KIND_TOOL)
@@ -569,8 +605,10 @@ def _read_stsd(reader: _Reader, payload: int, length: int, depth: int, track: _T
             break
         body = entry[pos + 8 : pos + child_size]
         if child == b"avcC" and len(body) >= 5:
+            track.profile_idc, track.level_idc = body[1], body[3]
             track.nal_length_size = (body[4] & 0x03) + 1
         elif child == b"hvcC" and len(body) >= 23:
+            track.profile_idc, track.level_idc = body[1] & 0x1F, body[12]
             track.nal_length_size = (body[21] & 0x03) + 1
             track.config_sei.extend(_hvcc_sei_nals(body))
         pos += child_size
@@ -608,6 +646,7 @@ def _read_bmff(reader: _Reader) -> None:
     if video is None:
         facts.sei_note = "SEI 미확인(H.264/HEVC 트랙 없음)"
         return
+    facts.video = VideoTrack(video.codec, video.width, video.height, video.profile_idc, video.level_idc)
     for nal in video.config_sei:
         _sei_from_nal(nal, video.codec, facts)
     offset = video.first_chunk if video.first_chunk is not None and video.first_chunk < reader.size else state.first_mdat
@@ -993,22 +1032,55 @@ def _layers(entry: Any, items: list[Any], *, ran_limitation: bool) -> Any:
 def media_layers(path: Path) -> Any:
     """The ``container_metadata`` check of an audio or video file, as ``media_marks.MarkLayers``."""
     from .checks import run_check
-    from .evidence_rules import container_metadata_evidence
+    from .encoder_fingerprints import TableError, load_table
+    from .evidence_rules import container_metadata_evidence, messenger_video_evidence
     from .result_types import CoverageEntry, CoverageStatus
 
-    def check() -> tuple[ContainerFacts, list[Any]]:
+    def check() -> tuple[ContainerFacts, list[Any], list[Any]]:
         registry = load_registry()
         facts = read_container_metadata(path)
-        return facts, container_metadata_evidence(facts, registry)
+        messenger: list[Any] = []
+        if facts.video is not None:
+            try:
+                messenger = messenger_video_evidence(facts, load_table())
+            except TableError as exc:
+                facts.partial.append(f"메신저 전송본 형식 대조 안 함: {exc}")
+        return facts, container_metadata_evidence(facts, registry), messenger
 
     outcome, entry = run_check(CHECK, check)
     if outcome is None:
         return _layers(entry, [], ran_limitation=False)
-    facts, items = outcome
-    return _layers(CoverageEntry(CHECK, CoverageStatus.RAN, facts.coverage_reason()), items, ran_limitation=True)
+    facts, items, messenger = outcome
+    layers = _layers(CoverageEntry(CHECK, CoverageStatus.RAN, facts.coverage_reason()), [*items, *messenger], ran_limitation=True)
+    if messenger:
+        from .platform_traces import PATH_LIMITATION
+
+        layers.limitations.append(PATH_LIMITATION)
+    return layers
 
 
-def image_aigc_layers(metadata: dict[str, str], image_format: str | None, read_error: str | None, partial: str | None) -> Any:
+def _jpeg_table_items(path: Path, metadata: dict[str, str]) -> tuple[list[Any], str]:
+    """The IJG quantization-table facts of a JPEG and the coverage-reason note; a table that cannot be compared is a note."""
+    from .encoder_fingerprints import TableError, jpeg_ijg_comparison, load_table
+    from .evidence_rules import jpeg_table_evidence
+
+    try:
+        table = load_table()
+        comparison = jpeg_ijg_comparison(path, table)
+    except (TableError, CheckSkipped) as exc:
+        return [], f"JPEG 양자화표 대조 안 함: {exc}"
+    except OSError as exc:
+        return [], f"JPEG 양자화표 대조 안 함: 파일을 읽지 못함({type(exc).__name__})"
+    if comparison.matched:
+        note = f"JPEG 양자화표: IJG 표준 표(품질 {comparison.qualities[0]})와 일치"
+    else:
+        note = f"JPEG 양자화표: IJG 표준 표 아님(가장 가까운 품질 {comparison.nearest}, {comparison.differing}개 값 다름)"
+    return jpeg_table_evidence(comparison, metadata, table.label), note
+
+
+def image_aigc_layers(
+    metadata: dict[str, str], image_format: str | None, read_error: str | None, partial: str | None, path: Path | None = None,
+) -> Any:
     """The ``container_metadata`` check of an image — the GB 45438 ``AIGC`` label in PNG text chunks and XMP only.
 
     The fields come from the ``metadata`` check's read (image_metadata); a
@@ -1023,23 +1095,30 @@ def image_aigc_layers(metadata: dict[str, str], image_format: str | None, read_e
         label = (image_format or "알 수 없음").upper()
         return _layers(skipped(CHECK, f"이 이미지 형식({label})에는 PNG 텍스트 청크·XMP가 없어 AIGC 라벨을 판독하지 않음"), [], ran_limitation=False)
 
-    def check() -> list[Any]:
+    def check() -> tuple[list[Any], str]:
         registry = load_registry()
         items: list[Any] = []
         for key, where in IMAGE_AIGC_KEYS:
             if metadata.get(key):
                 items.extend(aigc_label_evidence(where, metadata[key], registry))
-        return items
+        note = ""
+        if path is not None and image_format == "jpeg":
+            tables, note = _jpeg_table_items(path, metadata)
+            items.extend(tables)
+        return items, note
 
-    items, entry = run_check(CHECK, check)
-    if items is None:
+    outcome, entry = run_check(CHECK, check)
+    if outcome is None:
         return _layers(entry, [], ran_limitation=False)
+    items, jpeg_note = outcome
     if read_error is not None:
         entry = failed(CHECK, AnalyzerError(f"이미지 메타데이터를 끝까지 읽지 못해 AIGC 라벨 확인이 불완전합니다({read_error})"))
         return _layers(entry, items, ran_limitation=False)
     reason = f"AIGC 암묵 라벨 판독({IMAGE_AIGC_PARTS[str(image_format)]})"
     found = sum(1 for key, _ in IMAGE_AIGC_KEYS if metadata.get(key))
     reason += f" — AIGC 필드 {found}개" if found else " — AIGC 필드 없음"
+    if jpeg_note:
+        reason += f" · {jpeg_note}"
     if partial:
         reason += f" — 일부만 판독: {partial}"
     return _layers(CoverageEntry(CHECK, CoverageStatus.RAN, reason), items, ran_limitation=False)
@@ -1060,6 +1139,7 @@ __all__ = [
     "RegistryError",
     "SEI_SCAN_BYTES",
     "SeiString",
+    "VideoTrack",
     "image_aigc_layers",
     "load_registry",
     "media_layers",

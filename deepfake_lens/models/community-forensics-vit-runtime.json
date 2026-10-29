@@ -1,44 +1,47 @@
 {
   "type": "deepfake-lens-runtime-profile-v1",
-  "name": "CommunityForensics ViT-S/384 (OpenSight) general AI-image detector",
+  "name": "CommunityForensics ViT-S/384 general AI-image detector (OwensLab commfor-model-384)",
   "display_name": "CommunityForensics ViT-S/384 생성 이미지 탐지기",
   "candidate_key": "community-forensics-vit-s384",
   "runtime": "onnx",
   "supported": false,
   "reason": "0단계: 측정 게이트(클래스당 200건, AUROC 95% CI 하한 0.85) 미충족 — 2차 계획 측정 단계 전까지 비활성.",
+  "reference_signal": true,
   "modality": "image",
-  "checkpoint": "checkpoints/community-forensics/generative_detector.onnx",
+  "checkpoint": "checkpoints/community-forensics/commfor-vit-s384.onnx",
   "input_size": 384,
   "input_name": "input",
   "mean": [
-    0.48145466,
-    0.4578275,
-    0.40821073
+    0.485,
+    0.456,
+    0.406
   ],
   "std": [
-    0.26862954,
-    0.26130258,
-    0.27577711
+    0.229,
+    0.224,
+    0.225
   ],
   "score_index": 0,
   "score_activation": "sigmoid",
   "ensemble_weight": 0.6,
-  "source_url": "https://huggingface.co/Red-had1911/deepfake-detector-onnx (generative_detector.onnx — direct export of the original timm checkpoint model_v11_ViT_384_base_ckpt.pt; Community Forensics, Park & Owens U-Michigan, arXiv:2411.04125, MIT)",
+  "source_url": "https://huggingface.co/OwensLab/commfor-model-384 (revision 6076002bf0d9dd37537f965ee2f06f826c333b61, model.safetensors sha256 b89f36275f3bf5e2b040eee36597a8f19db051bff9a473a9cf7b2466284fb387; ONNX export by scripts/fetch_community_forensics.py; code https://github.com/JeongsooP/Community-Forensics; Park & Owens, CVPR 2025, arXiv:2411.04125; MIT code+weights)",
   "limitations": [
-    "체크포인트는 저장소에 포함되지 않습니다. Red-had1911/deepfake-detector-onnx에서 generative_detector.onnx를 내려받으십시오.",
+    "체크포인트는 저장소에 포함되지 않습니다. scripts/fetch_community_forensics.py가 OwensLab/commfor-model-384(고정 커밋)의 model.safetensors를 내려받아 sha256을 확인한 뒤 ONNX(checkpoints/community-forensics/commfor-vit-s384.onnx)로 변환합니다.",
     "Community Forensics(2024)의 약 4,800개 생성기, 270만 표본으로 학습되었습니다.",
-    "생성기에 따라 탐지율이 제한되며, 얼굴 조작 유형은 이 모델의 대상이 아닙니다(crop_faces 멤버의 영역). 로컬 측정 수치는 미검증입니다(experiments/IMAGE_EVALUATION.md).",
-    "같은 저장소의 faceswap_detector.onnx도 얼굴 크롭에서 평가했으나 실제 얼굴과 SBI 합성 얼굴을 분리하지 못해 기각했습니다(docs/MODEL-REJECTIONS.md).",
-    "onnx-community 자동 변환본(model.onnx, 2-logit)은 모든 입력에 0.4–0.7 근처의 평탄한 점수를 내므로 사용하지 마십시오. 이 프로필은 직접 내보낸 단일 로짓 모델을 씁니다.",
-    "모델 카드의 전처리는 440 리사이즈 + 384 중앙 크롭이지만 어댑터는 384로 바로 리사이즈합니다(작은 도메인 차이).",
+    "공개 탐지기는 학습에 없던 최신 생성기에서 탐지율이 크게 떨어집니다(외부 보고 18–30%). 낮은 점수는 실제 사진이라는 근거가 아닙니다.",
+    "얼굴 조작(페이스스왑) 유형은 이 모델의 대상이 아닙니다. 로컬 측정 수치는 없습니다(측정 게이트 미충족).",
+    "측정 게이트를 통과하기 전까지 이 모델의 원점수는 참고 신호로만 표시되며 결론과 근거 항목에 쓰이지 않습니다.",
     "점수는 보정 전 원점수이며 진위 판정이 아닙니다."
   ],
   "notes": [
-    "출력은 (N,1) 로짓이며 sigmoid = 0–100 척도의 P(AI 생성)입니다."
+    "출력은 (1,1) 로짓이며 sigmoid = 0–100 척도의 P(AI 생성)입니다(업스트림 라벨: 실제 0, 생성 1).",
+    "전처리는 업스트림 평가와 같습니다: 짧은 변 440 리사이즈 → 384 중앙 크롭 → ImageNet mean/std 정규화.",
+    "참고 신호 전용: 측정 게이트 미충족(비활성) 상태에서도 가중치가 있고 고정 해시가 일치하면 실행해, 원점수를 결론이 아닌 참고 신호로만 보고합니다."
   ],
   "pin": {
-    "sha256": ""
+    "sha256": "32d3f2ed0ec00fc66df6e987210fb55a862fcf00b2d359b2290acc4446626369"
   },
   "measured_on": null,
-  "license": "MIT"
+  "license": "MIT",
+  "resize_size": 440
 }

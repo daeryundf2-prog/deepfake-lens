@@ -771,7 +771,18 @@ def _preprocess_image(image_path: Path, profile: dict[str, object]):
     image_module = importlib.import_module("PIL.Image")
     np = importlib.import_module("numpy")
     input_size = int(profile.get("input_size", 224) or 224)
-    image = image_module.open(image_path).convert("RGB").resize((input_size, input_size))
+    image = image_module.open(image_path).convert("RGB")
+    resize_size = int(profile.get("resize_size", 0) or 0)
+    if resize_size:
+        # torchvision Resize(resize_size) + CenterCrop(input_size), bilinear.
+        width, height = image.size
+        scale = resize_size / min(width, height)
+        width, height = max(input_size, round(width * scale)), max(input_size, round(height * scale))
+        image = image.resize((width, height), image_module.BILINEAR)
+        left, top = int(round((width - input_size) / 2.0)), int(round((height - input_size) / 2.0))
+        image = image.crop((left, top, left + input_size, top + input_size))
+    else:
+        image = image.resize((input_size, input_size))
     array = np.asarray(image).astype("float32") / 255.0
     mean = np.asarray(profile.get("mean", [0.485, 0.456, 0.406]), dtype="float32").reshape(1, 1, 3)
     std = np.asarray(profile.get("std", [0.229, 0.224, 0.225]), dtype="float32").reshape(1, 1, 3)

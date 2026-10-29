@@ -1,0 +1,52 @@
+{
+  "schema": "encoder-fingerprints-v1",
+  "version": "2026-10-27.1",
+  "note": "Encoder fingerprints recorded as FACTS: which encoder table / which re-encode format the file's own bytes equal. A match never means 'came from X', never manipulation or authenticity — anyone can reproduce the same table or the same ffmpeg output. Every entry names its source; nothing is estimated. Per-camera-make JPEG tables are deliberately absent: no citable published table set was found, so the EXIF-make cue compares against the IJG library default only (see docs/FACT-LAYERS.md for adding a table from a reference capture).",
+  "jpeg_ijg_standard": {
+    "id": "ijg-libjpeg-standard",
+    "meaning": "IJG libjpeg 표준 양자화표(ITU-T T.81 부록 K 표 K.1·K.2)를 품질 값으로 배율한 표",
+    "luma": [16, 11, 10, 16, 24, 40, 51, 61, 12, 12, 14, 19, 26, 58, 60, 55, 14, 13, 16, 24, 40, 57, 69, 56, 14, 17, 22, 29, 51, 87, 80, 62, 18, 22, 37, 56, 68, 109, 103, 77, 24, 35, 55, 64, 81, 104, 113, 92, 49, 64, 78, 87, 103, 121, 120, 101, 72, 92, 95, 98, 112, 100, 103, 99],
+    "chroma": [17, 18, 24, 47, 99, 99, 99, 99, 18, 21, 26, 66, 99, 99, 99, 99, 24, 26, 56, 99, 99, 99, 99, 99, 47, 66, 99, 99, 99, 99, 99, 99, 99, 99, 99, 99, 99, 99, 99, 99, 99, 99, 99, 99, 99, 99, 99, 99, 99, 99, 99, 99, 99, 99, 99, 99, 99, 99, 99, 99, 99, 99, 99, 99],
+    "order": "natural (row-major)",
+    "scaling": "scale = 5000/Q (Q<50) or 200-2Q (Q>=50); value = (base*scale+50)/100, at least 1, at most 32767, at most 255 when force_baseline",
+    "source": "ITU-T Rec. T.81 (09/1992) | ISO/IEC 10918-1, Annex K.1, Tables K.1 and K.2 (https://www.w3.org/Graphics/JPEG/itu-t81.pdf); scaling from IJG libjpeg jcparam.c jpeg_quality_scaling() and jpeg_add_quant_table(), identical in libjpeg-turbo (https://github.com/libjpeg-turbo/libjpeg-turbo/blob/main/src/jcparam.c, checked 2026-10-27)",
+    "confidence": "표준 문서와 공개 소스 코드(재현 가능: libjpeg 계열로 품질 Q 저장 시 같은 표)",
+    "checked": "2026-10-27",
+    "users": "libjpeg·libjpeg-turbo를 쓰는 프로그램(Pillow, ImageMagick·GIMP 기본 설정, 다수의 브라우저·변환기·서버)과 일부 카메라. mozjpeg 기본 표, Photoshop, Apple 이미지 저장은 다른 표를 씁니다."
+  },
+  "messenger_video": [
+    {
+      "id": "kakaotalk-ios-normal",
+      "platform": "카카오톡 일반 화질 영상 전송본(iOS 송신)",
+      "codec": "H.264",
+      "profiles": ["Baseline"],
+      "sizes": [[720, 404]],
+      "encoder": "Lavf57.56.101",
+      "source": "Y.-M. Jeon, W.-M. Heo, J.-M. Kim, K. Kim, arXiv:2304.03848 [cs.MM] v1 (2023-04-07; messenger media footprints, 13 messengers, Android/iOS), Table VII (KakaoTalk General: Baseline@L4.1, 720x404 / 404x720, encoder Lavf57.56.101; MediaInfo 20.09), https://ar5iv.labs.arxiv.org/html/2304.03848",
+      "confidence": "논문의 실측(MediaInfo 출력) — 앱 판에 따라 바뀔 수 있음",
+      "checked": "2026-10-27"
+    },
+    {
+      "id": "kakaotalk-android-normal",
+      "platform": "카카오톡 일반 화질 영상 전송본(안드로이드 송신)",
+      "codec": "H.264",
+      "profiles": ["Baseline"],
+      "sizes": [[852, 480]],
+      "encoder": "Lavf57.56.101",
+      "source": "Y.-M. Jeon, W.-M. Heo, J.-M. Kim, K. Kim, arXiv:2304.03848 [cs.MM] v1 (2023-04-07; messenger media footprints, 13 messengers, Android/iOS), Table VIII (KakaoTalk General: Baseline@L3 / Baseline@L3.1, 852x480, encoder Lavf57.56.101; MediaInfo 20.09), https://ar5iv.labs.arxiv.org/html/2304.03848",
+      "confidence": "논문의 실측(MediaInfo 출력) — 앱 판에 따라 바뀔 수 있음",
+      "checked": "2026-10-27"
+    },
+    {
+      "id": "kakaotalk-high",
+      "platform": "카카오톡 고화질 영상 전송본(iOS·안드로이드 송신)",
+      "codec": "H.264",
+      "profiles": ["Main", "Baseline"],
+      "sizes": [[1920, 1080]],
+      "encoder": "Lavf57.83.100",
+      "source": "Y.-M. Jeon, W.-M. Heo, J.-M. Kim, K. Kim, arXiv:2304.03848 [cs.MM] v1 (2023-04-07; messenger media footprints, 13 messengers, Android/iOS), Tables VII-VIII (KakaoTalk High: Main@L4 / Baseline@L4, 1920x1080, encoder Lavf57.83.100), https://ar5iv.labs.arxiv.org/html/2304.03848",
+      "confidence": "논문의 실측(MediaInfo 출력) — 앱 판에 따라 바뀔 수 있음",
+      "checked": "2026-10-27"
+    }
+  ]
+}

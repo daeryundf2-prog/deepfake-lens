@@ -10,7 +10,12 @@ Classification (phase-0 spec, WP-A):
 
 | source                                            | kind          | direction | strength |
 | C2PA valid + trusted + AI digitalSourceType       | deterministic | synthetic | strong   |
+| C2PA valid + ITL-only signer + AI declaration,    | deterministic | synthetic | strong   | detail: 임시 신뢰 목록 서명 — 공식 신뢰 목록 밖
+|   hash match (owner decision 2026-10-27)          |               |           |          |
+| C2PA valid + ITL-only signer + digitalCapture     | deterministic | authentic | moderate | (P0R-21, unchanged)
 | generator metadata in a tool-identifying field     | deterministic | synthetic | strong   |
+|   (A1111/ComfyUI, and the generator records of     |               |           |          | self-declared
+|   NovelAI/InvokeAI/Fooocus/SwarmUI/Midjourney)     |               |           |          |
 | XMP DigitalSourceType / generator name in XMP tool | deterministic | synthetic | strong   |
 | C2PA valid + trusted + digitalCapture, hash match | deterministic | authentic | strong   |
 | camera EXIF consistent, no recompression (D7)     | deterministic | authentic | moderate |
@@ -45,7 +50,7 @@ from .digital_source_type import (
     split_declared,
 )
 from .image_class import DIRECTION_NEUTRAL_NOTE, ImageClass
-from .image_metadata import guess_image_source
+from .image_metadata import generator_record, guess_image_source
 from .result_types import (
     EvidenceDirection,
     EvidenceItem,
@@ -58,6 +63,7 @@ from .result_types import (
 
 if TYPE_CHECKING:  # P0R-22: container_metadata imports checks/result_types only — no cycle at run time either
     from .container_metadata import ContainerFacts, Registry as ContainerRegistry
+    from .encoder_fingerprints import IjgComparison, Table as EncoderTable
 
 # P0R-22: the phrase every self-declared synthetic item carries in its detail
 # (EvidenceItem.self_declared) — an unsigned statement the file makes about
@@ -127,6 +133,7 @@ XMP_GENERATOR_FIELDS = (
 XMP_TOOL_FIELDS = (("xmp.CreatorTool", "xmp:CreatorTool"),)
 # Non-XMP metadata keys (lower-case, matched on the part after the last ".") that name the producing tool or hold a
 # generator's own record: PNG/EXIF Software, A1111 parameters, ComfyUI prompt/workflow, a "generator" field.
+# (The NovelAI/InvokeAI/Fooocus/SwarmUI/Midjourney records are matched by their exact keys in generator_record.)
 GENERATOR_SPECIFIC_KEYS = frozenset({"software", "parameters", "prompt", "workflow", "generator", "creatortool"})
 XMP_DIGITAL_SOURCE_TYPE_KEY = "xmp.DigitalSourceType"
 
@@ -373,7 +380,9 @@ def image_metadata_evidence(
     # P0R-11: only a structural generator record (ComfyUI graph, A1111 parameters) in a tool field is strong; a brand
     # word counts only in a generator-specific field and is moderate; neither ever comes from exif.Model, LensModel,
     # Credit or creator. Every such item is a self-declaration (P0R-12): unsigned metadata the file states about itself.
-    tool_guess = guess_image_source(_tool_field_metadata(generic), brands=False)
+    # A generator's own structured record (NovelAI/InvokeAI/Fooocus/SwarmUI/Midjourney — image_metadata.generator_record)
+    # is read in its own field, which is that generator's tool field: the same strong self-declared rule as A1111/ComfyUI.
+    tool_guess = generator_record(metadata) or guess_image_source(_tool_field_metadata(generic), brands=False)
     specific = {key: value for key, value in generic.items() if key.rsplit(".", 1)[-1].lower() in GENERATOR_SPECIFIC_KEYS}
     brand_guess = guess_image_source(specific)
     any_guess = guess_image_source(generic, brands=False)
@@ -467,6 +476,8 @@ def _codes(raw: object) -> set[str]:
 # changed), claimSignature.mismatch (claim changed). C2PA 2.x spec, §15
 # "Validation" status codes.
 C2PA_INTEGRITY_TITLE = "C2PA 무결성 불일치"
+# Owner decision 2026-10-27: the caveat every ITL-signed generative declaration carries in its detail.
+C2PA_ITL_CAVEAT = "임시 신뢰 목록 서명 — 공식 신뢰 목록 밖"
 C2PA_INTEGRITY_DETAIL = "매니페스트 해시 불일치 — 서명 이후 내용이 변경됨"
 # techniques-2026: the content hard bindings a validator reports a match for
 # (data hash for JPEG/PNG/PDF…, BMFF hash for MP4/MOV/HEIF, box hash, collection hash).
@@ -646,16 +657,27 @@ def c2pa_evidence(validation: Mapping[str, object] | None) -> list[EvidenceItem]
             f"신뢰 서명자 {signer}의 유효한 매니페스트이나 촬영/생성 출처 유형을 선언하지 않았습니다." + basis,
             EvidenceKind.DETERMINISTIC, EvidenceDirection.NEUTRAL, EvidenceStrength.MODERATE, "c2pa",
         )
-    elif itl_verified and (declared_text or capture):
-        # P0R-21: a valid manifest whose signer chains only to the frozen Interim Trust List — "legacy trust": the
-        # product was never evaluated by the C2PA conformance program, so the declaration is moderate, never strong.
-        direction = EvidenceDirection.SYNTHETIC if declared_text else EvidenceDirection.AUTHENTIC
-        what = f"{declared_text}를 선언합니다" if declared_text else "digitalCapture(카메라 촬영)를 선언합니다"
+    elif itl_verified and declared_text:
+        # Owner decision 2026-10-27 (revises P0R-21 for generative declarations): a cryptographically valid signature
+        # chaining only to the frozen Interim Trust List, with a matching hard binding, whose manifest declares
+        # generative AI is strong synthetic evidence — the signer states against its own interest that the content
+        # was generated. The detail names the caveat (interim list, not the official C2PA trust list) for the report.
         main = EvidenceItem(
-            "C2PA 서명(동결된 임시 신뢰 목록 ITL): " + ("생성형 AI 출처 선언" if declared_text else "카메라 촬영 출처"),
-            f"서명자 {signer}의 유효한 매니페스트가 {what}(해시 일치). 서명 인증서는 현재 C2PA 공식 신뢰 목록이 아니라 2026-01-01에 동결된 "
+            "C2PA 서명(동결된 임시 신뢰 목록 ITL): 생성형 AI 출처 선언",
+            f"서명자 {signer}의 유효한 매니페스트가 {declared_text}를 선언합니다(해시 일치). {C2PA_ITL_CAVEAT}: 서명 인증서는 현재 C2PA "
+            "공식 신뢰 목록이 아니라 2026-01-01에 동결된 임시 신뢰 목록(ITL)에만 연결되며, ITL 제품은 C2PA 적합성 프로그램의 평가를 받지 "
+            "않았습니다. 서명자가 스스로 생성형 AI 산출물이라고 밝힌 서명된 선언이어서 생성 근거로 씁니다." + basis,
+            EvidenceKind.DETERMINISTIC, EvidenceDirection.SYNTHETIC, EvidenceStrength.STRONG, "c2pa",
+        )
+    elif itl_verified and capture:
+        # P0R-21: a valid manifest whose signer chains only to the frozen Interim Trust List — "legacy trust": the
+        # product was never evaluated by the C2PA conformance program, so a capture (authenticity) declaration is
+        # moderate, never strong.
+        main = EvidenceItem(
+            "C2PA 서명(동결된 임시 신뢰 목록 ITL): 카메라 촬영 출처",
+            f"서명자 {signer}의 유효한 매니페스트가 digitalCapture(카메라 촬영)를 선언합니다(해시 일치). 서명 인증서는 현재 C2PA 공식 신뢰 목록이 아니라 2026-01-01에 동결된 "
             "임시 신뢰 목록(ITL)에만 연결됩니다 — ITL 제품은 C2PA 적합성 프로그램의 평가를 받지 않았으므로 단독 결론 근거로 쓰지 않습니다." + basis,
-            EvidenceKind.DETERMINISTIC, direction, EvidenceStrength.MODERATE, "c2pa",
+            EvidenceKind.DETERMINISTIC, EvidenceDirection.AUTHENTIC, EvidenceStrength.MODERATE, "c2pa",
         )
     elif declared_text:
         main = EvidenceItem(
@@ -1086,4 +1108,82 @@ def container_metadata_evidence(facts: "ContainerFacts", registry: "ContainerReg
                 "근거로 쓰지 않고 사실로만 기록합니다.",
                 EvidenceKind.DETERMINISTIC, EvidenceDirection.NEUTRAL, EvidenceStrength.WEAK, LAYER,
             ))
+    return items
+
+
+# Encoder fingerprints (models/encoder-fingerprints.json): which encoder table / re-encode format the bytes equal — facts only.
+JPEG_IJG_TITLE = "JPEG 양자화표: IJG 표준 표와 일치"
+JPEG_NON_IJG_TITLE = "JPEG 양자화표: IJG 표준 표와 다름"
+JPEG_RESAVE_CUE_TITLE = "카메라 제조사 기록과 IJG 표준 양자화표가 함께 있음(재저장 확인 단서)"
+MESSENGER_VIDEO_TITLE = "메신저 재전송 흔적: 영상 형식이 등록된 전송본 형식과 일치"
+ENCODER_FACT_CAVEAT = (
+    "같은 프로그램·설정이면 누구나 같은 값을 만들 수 있어 경로나 기기를 확정하지 않으며, 조작·생성 또는 원본성 어느 쪽의 근거도 아닙니다."
+)
+
+
+def _quality_text(qualities: tuple[int, ...]) -> str:
+    if len(qualities) == 1:
+        return str(qualities[0])
+    if list(qualities) == list(range(qualities[0], qualities[-1] + 1)):
+        return f"{qualities[0]}–{qualities[-1]}"
+    return ", ".join(str(q) for q in qualities)
+
+
+def jpeg_table_evidence(comparison: "IjgComparison", metadata: Mapping[str, str], table_label: str) -> list[EvidenceItem]:
+    """The last encoder's quantization table as a neutral fact, and the EXIF-make re-save cue (never a conclusion)."""
+    from .container_metadata import LAYER
+
+    compared = "광도·색차 표 128개 값" if comparison.compared == 128 else "광도 표 64개 값(흑백 이미지)"
+    if not comparison.matched:
+        return [EvidenceItem(
+            JPEG_NON_IJG_TITLE,
+            f"JPEG {compared}이 IJG 표준 표(ITU-T T.81 부록 K)에 어떤 품질 값(1–100)의 배율을 적용해도 같아지지 않습니다"
+            f"(가장 가까운 품질 {comparison.nearest}: {comparison.differing}개 값 다름). 카메라 제조사 고유 표, 다른 인코더"
+            "(포토샵·애플 이미지 저장·mozjpeg 등), 메신저 재압축 표일 수 있으며 이 검사는 어느 쪽인지 식별하지 않습니다"
+            f"(등록된 플랫폼 표 대조는 플랫폼 재압축 양자화표 대조 검사). {ENCODER_FACT_CAVEAT} 기준: {table_label}.",
+            EvidenceKind.DETERMINISTIC, EvidenceDirection.NEUTRAL, EvidenceStrength.WEAK, LAYER,
+        )]
+    quality = _quality_text(comparison.qualities)
+    items = [EvidenceItem(
+        JPEG_IJG_TITLE,
+        f"JPEG {compared}이 IJG 표준 표(ITU-T T.81 부록 K)에 품질 값 {quality}의 배율을 적용한 표와 모두 같습니다. 이 파일을 마지막으로 "
+        "저장한 인코더가 IJG 표준 표를 쓰는 소프트웨어(libjpeg·libjpeg-turbo 계열 — 많은 편집기·변환기·브라우저·서버와 일부 카메라)라는 "
+        f"사실입니다. {ENCODER_FACT_CAVEAT} 기준: {table_label}.",
+        EvidenceKind.DETERMINISTIC, EvidenceDirection.NEUTRAL, EvidenceStrength.WEAK, LAYER,
+    )]
+    camera = f"{metadata.get('exif.Make', '').strip()} {metadata.get('exif.Model', '').strip()}".strip()
+    if camera:
+        items.append(EvidenceItem(
+            JPEG_RESAVE_CUE_TITLE,
+            f"EXIF 기종은 「{_shown(camera)}」인데 양자화표는 IJG 표준 표 품질 {quality}입니다. 편집·변환 프로그램은 다시 저장할 때 흔히 "
+            "IJG 표준 표를 쓰면서 EXIF를 그대로 복사하므로 재저장 여부를 확인할 단서입니다. 이 기종의 카메라가 원래 어떤 표를 쓰는지는 "
+            "등록 표에 없어 모순을 확정하지 않습니다 — 같은 기종으로 촬영한 기준 사진의 양자화표와 비교하거나 원본 파일 제출을 요청하십시오. "
+            "조작·생성 또는 원본성 어느 쪽의 근거도 아닙니다.",
+            EvidenceKind.DETERMINISTIC, EvidenceDirection.NEUTRAL, EvidenceStrength.WEAK, LAYER,
+        ))
+    return items
+
+
+def messenger_video_evidence(facts: "ContainerFacts", table: "EncoderTable") -> list[EvidenceItem]:
+    """A video whose codec, profile, coded size and encoder field equal a registered messenger re-encode (path fact)."""
+    from .container_metadata import KIND_TOOL, LAYER
+    from .encoder_fingerprints import messenger_video_matches
+
+    video = facts.video
+    if video is None:
+        return []
+    encoders = [(f"{f.source} {f.key}", f.value.strip()) for f in facts.fields if f.kind == KIND_TOOL]
+    matches = messenger_video_matches(video.codec, video.profile, video.width, video.height, [v for _, v in encoders], table)
+    items: list[EvidenceItem] = []
+    for entry in matches:
+        where, value = next((w, v) for w, v in encoders if v == entry.get("encoder"))
+        items.append(EvidenceItem(
+            MESSENGER_VIDEO_TITLE,
+            f"영상 트랙 {video.codec} {video.profile} 프로필(레벨 {video.level}), 부호화 크기 {video.width}x{video.height}, "
+            f"인코더 필드 {where}=「{_shown(value)}」이(가) 「{entry.get('platform')}」 형식과 모두 같습니다(출처는 인코더 지문 표의 해당 항목, "
+            f"신뢰 수준: {entry.get('confidence')}, 확인 {entry.get('checked')}). 메신저는 전송할 때 영상을 다시 인코딩하므로 원본의 해상도·화질과 "
+            "촬영 메타데이터(기기·시각·C2PA·워터마크)가 사라졌을 가능성이 큽니다 — 이 파일은 전송 사본일 수 있으니 촬영 기기의 원본 파일 또는 "
+            f"원본 화질 전송본 제출을 요청하십시오. {ENCODER_FACT_CAVEAT} 기준: {table.label}.",
+            EvidenceKind.DETERMINISTIC, EvidenceDirection.NEUTRAL, EvidenceStrength.WEAK, LAYER,
+        ))
     return items

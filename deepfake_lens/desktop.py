@@ -17,18 +17,22 @@ Nothing here runs unless the server was built with ``desktop=True``; the ``web``
 from __future__ import annotations
 
 import logging
+import ntpath
 import os
 import secrets
 import shutil
 import socket
+import subprocess
 import sys
 import threading
 import time
 from dataclasses import dataclass, field
+from collections.abc import Mapping
 from pathlib import Path
 from typing import Callable
 
 from .signing import MIN_REPORT_KEY_BYTES, REPORT_KEY_ENV, ReportKeyError
+from .user_data import user_data_dir
 
 logger = logging.getLogger(__name__)
 
@@ -460,6 +464,82 @@ def open_browser(url: str) -> bool:
         return False
 
 
+def find_app_browser(
+    *,
+    platform: str | None = None,
+    environ: Mapping[str, str] | None = None,
+    exists: Callable[[str], bool] = os.path.exists,
+    which: Callable[[str], str | None] = shutil.which,
+) -> str | None:
+    """The first installed Edge or Chrome executable (for an app window), or None."""
+    platform = platform or sys.platform
+    env: Mapping[str, str] = os.environ if environ is None else environ
+    candidates: list[str] = []
+    if platform == "win32":
+        bases = [env.get(name) for name in ("ProgramFiles(x86)", "ProgramFiles", "LOCALAPPDATA")]
+        for relative in (r"Microsoft\Edge\Application\msedge.exe", r"Google\Chrome\Application\chrome.exe"):
+            candidates += [ntpath.join(base, relative) for base in bases if base]
+    elif platform == "darwin":
+        apps = [("Microsoft Edge.app", "Microsoft Edge"), ("Google Chrome.app", "Google Chrome")]
+        roots = ["/Applications"]
+        if env.get("HOME"):
+            roots.append(os.path.join(env["HOME"], "Applications"))
+        for root in roots:
+            candidates += [os.path.join(root, app, "Contents", "MacOS", exe) for app, exe in apps]
+    for path in candidates:
+        if exists(path):
+            return path
+    for name in ("microsoft-edge", "microsoft-edge-stable", "google-chrome", "google-chrome-stable", "chromium", "chromium-browser"):
+        found = which(name)
+        if found:
+            return found
+    return None
+
+
+def open_app_window(url: str, *, profile_dir: Path, executable: str, popen: Callable[..., object] = subprocess.Popen) -> bool:
+    """Start Edge/Chrome as a window of its own (its own profile); False when it cannot be started."""
+    argv = [
+        executable,
+        f"--app={url}",
+        f"--user-data-dir={profile_dir}",
+        "--no-first-run",
+        "--no-default-browser-check",
+        "--window-size=1440,900",
+    ]
+    kwargs: dict[str, object] = {
+        "stdin": subprocess.DEVNULL,
+        "stdout": subprocess.DEVNULL,
+        "stderr": subprocess.DEVNULL,
+        "close_fds": True,
+    }
+    if os.name == "nt":
+        kwargs["creationflags"] = 0x00000008 | 0x00000200  # DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP
+    else:
+        kwargs["start_new_session"] = True
+    try:
+        popen(argv, **kwargs)
+    except OSError:
+        return False
+    return True
+
+
+def open_gui(url: str, *, browser_tab: bool) -> bool:
+    """The GUI in an app window of its own profile; the default browser's tab when there is none or it fails."""
+    if not browser_tab:
+        base = user_data_dir()
+        profile: Path | None = None
+        if base is not None:
+            profile = base / "app-window"
+            try:
+                profile.mkdir(parents=True, exist_ok=True, mode=0o700)
+            except OSError:
+                profile = None
+        executable = find_app_browser() if profile is not None else None
+        if profile is not None and executable is not None and open_app_window(url, profile_dir=profile, executable=executable):
+            return True
+    return open_browser(url)
+
+
 def machine_notes() -> list[str]:
     """One-line warnings about where and on what this runs (x64 only; OneDrive folders are slow and unverified)."""
     import platform
@@ -538,6 +618,7 @@ def run_desktop(
     key_source: str,
     key_file: Path | None,
     log_path: Path | None,
+    browser_tab: bool = False,
 ) -> int:
     """Start the desktop server, open the browser, run until shutdown/idle/Ctrl-C. Returns the exit code."""
     from .webapp import build_server
@@ -551,7 +632,7 @@ def run_desktop(
     url = f"http://{host}:{chosen}/gui"
     if running:
         print(f"Deepfake Lens가 이미 실행 중입니다: {url}", flush=True)
-        if not no_browser and not open_browser(url):
+        if not no_browser and not open_gui(url, browser_tab=browser_tab):
             print(f"브라우저를 열지 못했습니다 — 주소창에 붙여 넣으십시오: {url}", flush=True)
             return ALREADY_RUNNING_NO_BROWSER_EXIT  # the launcher pauses on this code so the address stays readable
         return 0
@@ -574,7 +655,7 @@ def run_desktop(
             for _ in range(10):
                 if this_tool_listens(chosen, host):
                     print(f"Deepfake Lens가 이미 실행 중입니다: {url}", flush=True)
-                    if not no_browser and not open_browser(url):
+                    if not no_browser and not open_gui(url, browser_tab=browser_tab):
                         print(f"브라우저를 열지 못했습니다 — 주소창에 붙여 넣으십시오: {url}", flush=True)
                     return 0
                 time.sleep(1.0)
@@ -610,7 +691,7 @@ def run_desktop(
         lines.append(f"  {idle_exit_minutes}분 동안 화면이 열려 있지 않고 검사도 없으면 스스로 꺼집니다.")
     lines.extend("  주의: " + note for note in machine_notes())
     print("\n".join(lines), flush=True)
-    if not no_browser and not open_browser(url):
+    if not no_browser and not open_gui(url, browser_tab=browser_tab):
         print(f"브라우저를 열지 못했습니다 — Edge나 Chrome의 주소창에 이 주소를 붙여 넣으십시오:\n  {url}", flush=True)
     print("  화면이 비어 있거나 Internet Explorer가 열리면 위 주소를 Edge나 Chrome에 붙여 넣으십시오. 이 창 안을 클릭했다면 Enter를 누르십시오.", flush=True)
 

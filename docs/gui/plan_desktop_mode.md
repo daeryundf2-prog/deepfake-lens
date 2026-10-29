@@ -86,10 +86,11 @@ DeepfakeLens-win64\
 `scripts/build_desktop_bundle.py --platform windows --out dist/DeepfakeLens-win64` (비게이트, `--help` 한국어):
 1. python.org 임베더블 zip 내려받기(URL·sha256 고정: `python-3.12.10-embed-amd64.zip`), 풀기.
 2. `python312._pth`에 `Lib\site-packages`와 `import site` 추가(임베더블은 기본으로 site를 끈다 — 이게 가장 흔한 함정).
-3. `pip install --target python\Lib\site-packages --platform win_amd64 --python-version 3.12 --only-binary=:all: --no-deps` 로 휠 설치: 이 레포 휠(`pip wheel . --no-deps`) + `pymupdf==1.28.2 numpy==2.5.4 Pillow==12.3.0 c2pa-python py7zr syhwp olefile`(의존성은 명시 목록으로 — `--no-deps`라 빠뜨리면 ImportError; 빌더가 끝에 **레코드 검사**: 각 패키지의 `Requires-Dist`를 읽어 목록에 없는 필수 의존성이 있으면 실패).
+3. `pip install --target python\Lib\site-packages --platform win_amd64 --python-version 3.12 --only-binary=:all: --no-deps` 로 휠 설치: 이 레포 휠(`pip wheel . --no-deps`) + `pymupdf==1.28.2 numpy==2.5.4 Pillow==12.3.0 c2pa-python py7zr syhwp olefile onnxruntime==1.31.1`(의존성은 명시 목록으로 — `--no-deps`라 빠뜨리면 ImportError; 빌더가 끝에 **레코드 검사**: 각 패키지의 `Requires-Dist`를 읽어 목록에 없는 필수 의존성이 있으면 실패).
+   - 워터마크 검사(2026-10-27): SDXL imwatermark 검사는 OpenCV 없이 numpy만 쓴다(`wm_imwatermark.bgr_to_yuv_u8` — OpenCV BGR→YUV와 2²⁴색 전부 같음). TrustMark Q/P/C는 `onnxruntime`과 디코더 가중치가 필요하다: 빌더의 `BUNDLED_WEIGHTS`(자산 이름 → URL)에 있는 가중치를 빌드 때 받아 `deepfake_lens/models/assets.json`의 고정 sha256과 대조한 뒤 `site-packages/deepfake_lens/models/`(꾸러미 안 `default_models_dir()`)에 넣는다. 고정 sha256이 없는 자산은 빌드를 멈춘다. 다른 검출기 가중치는 그 런타임이 꾸러미에 들어간 뒤 이름과 URL로 추가한다. VideoSeal·AudioSeal·PerTh는 torch가 필요해 넣지 않는다.
 4. 실행 파일 생성: `Deepfake Lens.cmd`(아래), `문제 확인.cmd`, `읽어보세요.txt`, `VERSION.txt`(커밋 SHA).
 5. zip으로 묶기(`zipfile`, 경로 구분자 `/`, 한글 이름 UTF-8 플래그).
-6. 검사: 폴더 안 `python.exe` 존재, `._pth` 내용, site-packages에 `deepfake_lens/gui.js`와 `pymupdf`, 총 크기 출력. **Windows에서 실행은 못 하므로** 이 Mac에서 할 수 있는 검증은 여기까지 — 사람이 Windows에서 「Deepfake Lens.cmd」를 한 번 눌러 보는 것이 첫 시험이다(QA-SYS-4에 단계 추가).
+6. 검사: 폴더 안 `python.exe` 존재, `._pth` 내용, site-packages에 `deepfake_lens/gui.js`와 `pymupdf`·`onnxruntime`, 넣은 가중치의 sha256, 총 크기 출력. **Windows에서 실행은 못 하므로** 이 Mac에서 할 수 있는 검증은 여기까지 — 사람이 Windows에서 「Deepfake Lens.cmd」를 한 번 눌러 보는 것이 첫 시험이다(QA-SYS-4에 단계 추가).
 
 `Deepfake Lens.cmd`:
 ```bat

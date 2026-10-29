@@ -26,6 +26,29 @@ crash.
   `huggingface_hub`, or `--revision <sha>` offline).
 - Profiles removed in phase 0 and the measurements behind each removal are
   listed in `docs/MODEL-REJECTIONS.md`.
+- **Reference signals (`reference_signal: true`).** A gated-off profile that
+  sets this flag still runs when its checkpoint is present and its pin
+  matches, but only for its raw score: the result keeps
+  `available: false` and the gate detail, so coverage (`모델 실행 불가: …`),
+  evidence, verdict and report conclusions are exactly those of the skipped
+  profile. The score appears only in `reference_signals` as
+  `미측정 모델 원점수(참고 신호)` ("…원점수 N/100 — 측정 게이트를 통과하지 않은
+  미측정 모델의 참고 신호입니다 … 결론과 근거 항목에 쓰이지 않습니다") and in
+  `model_analysis.models[]` with `confidence: "reference"`. A missing
+  checkpoint, pin mismatch or inference failure leaves the skipped result
+  unchanged. Set for `community-forensics-vit-runtime.json` (image) and
+  `aasist-runtime.json` (audio).
+- Fetch the reference weights:
+  - `python scripts/fetch_community_forensics.py` — downloads
+    `OwensLab/commfor-model-384@6076002b` `model.safetensors`
+    (87,262,324 B, sha256 `b89f3627…4fb387`, MIT), exports ONNX (opset 17,
+    `input` 1×3×384×384 → `logit` 1×1) to
+    `checkpoints/community-forensics/commfor-vit-s384.onnx` and verifies the
+    pinned export sha256 `32d3f2ed…626369` (needs torch, timm, safetensors,
+    onnx, onnxruntime at export time; a scan needs only onnxruntime).
+  - `python scripts/fetch_aasist.py` — `AASIST.pth` from
+    `clovaai/aasist@a04c9863` (1,281,532 B, sha256 `51d2d9cf…bc1a1c0`, MIT;
+    the scan needs torch).
 
 The table below is generated from the profiles by
 `scripts/sync_model_docs.py`; CI fails when it is stale.
@@ -33,11 +56,11 @@ The table below is generated from the profiles by
 <!-- BEGIN GENERATED: profiles (scripts/sync_model_docs.py — do not edit by hand) -->
 | 프로필 | 표시 이름 | 검출기(식별자 name) | 모달리티 | 런타임 | 가중치 | pin | supported | measured_on | 표본 내 보정(G28) |
 |---|---|---|---|---|---|---|---|---|---|
-| `aasist-runtime.json` | AASIST 음성 위조 탐지기(ASVspoof2019-LA) | AASIST (Interspeech 2022) ASVspoof2019-LA anti-spoofing | audio | `aasist` | 로컬 `aasist.pth` | 미고정 (sha256 비어 있음) | false | 없음 | — |
+| `aasist-runtime.json` | AASIST 음성 위조 탐지기(ASVspoof2019-LA) | AASIST (Interspeech 2022) ASVspoof2019-LA anti-spoofing | audio | `aasist` | 로컬 `aasist.pth` | 고정 (sha256 51d2d9cf0738…) | false | 없음 | — |
 | `ai-image-swin-runtime.json` | Swin-large 생성 이미지 탐지기(umm-maybe) | Swin-large AI-vs-human image detector (umm-maybe) | image | `hf-image-classifier` | 허브 `umm-maybe/AI-image-detector` | 미고정 (revision 비어 있음) | false | 없음 | — |
 | `aide-runtime.json` | AIDE 생성 이미지 탐지기(ICLR 2025, progan_train) | AIDE (ICLR 2025) progan_train | image | `aide` | 로컬 `aide_progan_train.pth` | 미고정 (sha256 비어 있음) | false | 없음 | — |
-| `community-forensics-frames-runtime.json` | CommunityForensics ViT-S/384 영상 프레임 생성 탐지기 | CommunityForensics ViT-S/384 per-frame (video-frames runtime) | video | `video-frames → onnx` | 로컬 `checkpoints/community-forensics/generative_detector.onnx` | 미고정 (sha256 비어 있음) | false | 없음 | — |
-| `community-forensics-vit-runtime.json` | CommunityForensics ViT-S/384 생성 이미지 탐지기 | CommunityForensics ViT-S/384 (OpenSight) general AI-image detector | image | `onnx` | 로컬 `checkpoints/community-forensics/generative_detector.onnx` | 미고정 (sha256 비어 있음) | false | 없음 | — |
+| `community-forensics-frames-runtime.json` | CommunityForensics ViT-S/384 영상 프레임 생성 탐지기 | CommunityForensics ViT-S/384 per-frame (video-frames runtime) | video | `video-frames → onnx` | 로컬 `checkpoints/community-forensics/commfor-vit-s384.onnx` | 고정 (sha256 32d3f2ed0ec0…) | false | 없음 | — |
+| `community-forensics-vit-runtime.json` | CommunityForensics ViT-S/384 생성 이미지 탐지기 | CommunityForensics ViT-S/384 general AI-image detector (OwensLab commfor-model-384) | image | `onnx` | 로컬 `checkpoints/community-forensics/commfor-vit-s384.onnx` | 고정 (sha256 32d3f2ed0ec0…) | false | 없음 | — |
 | `fakespot-detector-runtime.json` | Fakespot AI 텍스트 탐지기(roberta-base) | Fakespot AI text detector (roberta-base) | text | `hf-text-classifier` | 허브 `fakespot-ai/roberta-base-ai-text-detection-v1` | 미고정 (revision 비어 있음) | false | 없음 | — |
 | `sbi-effnet-runtime.json` | SBI EfficientNet-B0 얼굴 조작 탐지기(로컬 학습 v2) | SBI-trained EfficientNet-B0 v2 (local, enriched self-blend: polygon/affine masks + diverse portraits) | image | `torchvision` | 로컬 `sbi-effnet-b0.pth` | 미고정 (sha256 비어 있음) | false | 없음 | 예 (score_bias=35) |
 | `sbi-frames-runtime.json` | SBI EfficientNet-B0 영상 얼굴 프레임 탐지기 | SBI EfficientNet-B0 on per-frame face crops (video-frames runtime) | video | `video-frames → torchvision` | 로컬 `sbi-effnet-b0.pth` | 미고정 (sha256 비어 있음) | false | 없음 | 예 (score_bias=35) |

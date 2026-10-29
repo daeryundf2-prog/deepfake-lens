@@ -6,8 +6,10 @@ signer can add ranges that drop real content — or every other byte — and the
 (fixtures ``exclusion-twozone.png``, ``exclusion-allcontent.png``, built by scripts/build_c2pa_exclusion_fixtures.py).
 Such a manifest must never be valid/trusted evidence: the ``c2pa`` check fails with a Korean reason.
 
-P0R-21: the frozen Interim Trust List is a separate bundle; a signer chaining only to it is labelled ``itl`` and its
-declaration is moderate, never strong; revocation is not checked offline and every basis text says so.
+P0R-21: the frozen Interim Trust List is a separate bundle; a signer chaining only to it is labelled ``itl``; its
+capture declaration is moderate, never strong, and (owner decision 2026-10-27) its generative-AI declaration with a
+hash match is strong with the caveat "임시 신뢰 목록 서명 — 공식 신뢰 목록 밖" in its detail; revocation is not checked
+offline and every basis text says so.
 """
 
 from __future__ import annotations
@@ -176,7 +178,7 @@ class ExclusionAttackFixturesTest(unittest.TestCase):
 
 @unittest.skipUnless(HAVE_SDK, "c2pa-python 없음")
 class InterimTrustListTest(unittest.TestCase):
-    """P0R-21: the frozen ITL is its own bundle; an ITL-only signer is labelled and moderate."""
+    """P0R-21: the frozen ITL is its own bundle; an ITL-only signer is labelled; its generative declaration is strong."""
 
     def test_the_basis_names_the_itl_and_says_revocation_is_not_checked(self) -> None:
         from deepfake_lens.c2pa import C2PA_REVOCATION_NOTE, trust_basis, trust_basis_text
@@ -199,7 +201,7 @@ class InterimTrustListTest(unittest.TestCase):
                 with self.assertRaises(c2pa_module.C2paTrustError):
                     c2pa_module.trust_basis()
 
-    def test_an_itl_only_signer_is_labelled_and_moderate(self) -> None:
+    def test_an_itl_only_signer_is_labelled_and_its_generative_declaration_strong(self) -> None:
         import hashlib
 
         from deepfake_lens import c2pa as c2pa_module
@@ -219,7 +221,44 @@ class InterimTrustListTest(unittest.TestCase):
         assert item.result is not None
         main = [e for e in item.result.evidence if e.title.startswith("C2PA 서명(동결된 임시 신뢰 목록 ITL)")]
         self.assertEqual(len(main), 1, item.result.evidence)
-        self.assertEqual((main[0].direction, main[0].strength), (EvidenceDirection.SYNTHETIC, EvidenceStrength.MODERATE))
+        self.assertEqual((main[0].direction, main[0].strength), (EvidenceDirection.SYNTHETIC, EvidenceStrength.STRONG))
+        self.assertIn("임시 신뢰 목록 서명 — 공식 신뢰 목록 밖", main[0].detail)
+
+
+class InterimTrustListRuleTest(unittest.TestCase):
+    """Owner decision 2026-10-27, on validation records (no SDK): only the generative declaration of an ITL signer is strong."""
+
+    def record(self, source_type: str, **changes: object) -> dict[str, object]:
+        return {"present": True, "status": "valid", "trusted": False, "trust_list": "itl", "signature": {"common_name": "Some ITL Signer"},
+                "success_codes": ["assertion.dataHash.match"], "failure_codes": ["signingCredential.untrusted"],
+                "digital_source_types": [f"http://cv.iptc.org/newscodes/digitalsourcetype/{source_type}"], **changes}
+
+    def main(self, record: dict[str, object]):
+        from deepfake_lens.evidence_rules import c2pa_evidence
+
+        return c2pa_evidence(record)[0]
+
+    def test_generative_declarations_are_strong_with_the_interim_list_caveat(self) -> None:
+        from deepfake_lens.evidence_rules import C2PA_ITL_CAVEAT
+
+        for source_type in ("trainedAlgorithmicMedia", "compositeWithTrainedAlgorithmicMedia"):
+            with self.subTest(source_type):
+                main = self.main(self.record(source_type))
+                self.assertEqual(main.title, "C2PA 서명(동결된 임시 신뢰 목록 ITL): 생성형 AI 출처 선언")
+                self.assertEqual((main.direction, main.strength), (EvidenceDirection.SYNTHETIC, EvidenceStrength.STRONG))
+                self.assertIn(C2PA_ITL_CAVEAT, main.detail)
+                self.assertIn("공식 신뢰 목록이 아니라", main.detail)
+
+    def test_capture_declaration_stays_moderate(self) -> None:
+        main = self.main(self.record("digitalCapture"))
+        self.assertEqual(main.title, "C2PA 서명(동결된 임시 신뢰 목록 ITL): 카메라 촬영 출처")
+        self.assertEqual((main.direction, main.strength), (EvidenceDirection.AUTHENTIC, EvidenceStrength.MODERATE))
+
+    def test_without_a_hash_match_or_a_valid_signature_the_declaration_is_not_strong(self) -> None:
+        for changes in ({"success_codes": []}, {"status": "invalid"}, {"trust_list": None}):
+            with self.subTest(changes):
+                main = self.main(self.record("trainedAlgorithmicMedia", **changes))
+                self.assertEqual((main.direction, main.strength), (EvidenceDirection.SYNTHETIC, EvidenceStrength.MODERATE))
 
 
 if __name__ == "__main__":

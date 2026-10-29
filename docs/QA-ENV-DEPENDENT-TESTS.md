@@ -49,6 +49,7 @@ R11-2 (round 11). 선택 패키지·도구·OS 기능·픽스처가 없으면 �
 | `Pillow + numpy needed for the fixture` | `dev` extra(Pillow, numpy) | test_report_labels_ko.py, test_scan_overhead.py |
 | `opencv + librosa required` | `full` extra(opencv-python, librosa) + `ffmpeg` 실행 파일 — 음성 트랙이 있는·없는 mp4로 A/V 싱크 검사(R25-9) | test_multimodal.py |
 | `POSIX file names` | Windows가 아닌 OS(POSIX — 압축 구성원 이름의 `:`가 보통 문자, R25-6) | test_archives.py |
+| `POSIX file modes only` | Windows가 아닌 OS(POSIX — 검사별 사건 정보 `cases.json`이 소유자만 읽는 0600 모드로 쓰이는지 확인, OMO-3) | test_case_store.py |
 | `POSIX working folder deeper than PATH_MAX` | Windows가 아닌 OS(POSIX — PATH_MAX보다 깊은 작업 폴더에서 비ASCII 이름을 네이티브 디코더용 이름으로 스테이징, R25-4) | test_native_path.py |
 | `Pillow + numpy required to write EXIF/XMP fixtures` | `dev` extra(Pillow, numpy) | test_image_metadata_exif.py |
 | `Pillow not installed` | `dev` extra(Pillow) | test_cli_operations.py, test_error_text.py, test_json_contract.py, test_metadata_extent.py, test_model_zoo.py |
@@ -95,6 +96,8 @@ R11-2 (round 11). 선택 패키지·도구·OS 기능·픽스처가 없으면 �
 | `node is not installed` | Node.js(`node`) — GUI 스크립트 검사 | test_archives.py, test_gui_ledger.py, test_path_b64.py |
 | `node required to run gui.js helpers` | Node.js(`node`) — GUI 스크립트 검사 | test_display_names.py |
 | `not a git work tree` | git 작업 트리(압축본·내보낸 사본 아님). R16-12: 얕은 복제(shallow clone)는 건너뛰지 않는다 — 인용된 커밋이 잘린 이력에 없으면 test_qa_sys.py·test_shutdown.py가 같은 규칙·같은 메시지(`HEAD 이력에 제목이 …인 커밋이 없습니다 — 얕은 복제(shallow clone)라 이력이 잘려 있습니다 …`)로 **실패**한다(아래 "얕은 복제" 참조) | test_output_generation.py, test_qa_sys.py, test_shutdown.py |
+| `numpy and Pillow required` | `dev` extra(numpy, Pillow — dwtDct 워터마크 디코더와 픽스처) | test_imwatermark_registry.py, test_wm_sdxl.py |
+| `opencv required for the reference conversion` | `pixel` extra(opencv-python — numpy BGR→YUV 변환이 OpenCV와 비트 단위로 같은지 비교하는 기준, OMO-17) | test_wm_sdxl.py |
 | `numpy + Pillow needed for the mixed fixture` | `dev` extra(numpy, Pillow) | test_korean_output.py |
 | `numpy + opencv required (scene generator, face layer)` | `pixel`/`face` extra(opencv-python, numpy) | test_qa_out.py |
 | `numpy needed for the photo-like fixture` | `dev` 또는 `pixel` extra(numpy) | test_korean_output.py |
@@ -146,7 +149,6 @@ R11-2 (round 11). 선택 패키지·도구·OS 기능·픽스처가 없으면 �
 | `대조군: 이 환경의 mediapipe 가져오기는 자식 프로세스도 파일도 만들지 않음` | 그냥 `import mediapipe`가 자식 프로세스(sounddevice→ctypes.util.find_library의 ldconfig/gcc/ld, matplotlib 글꼴 캐시의 fc-list)나 파일(`~/.cache/matplotlib` 등)을 만드는 환경(Linux, R15-8/R16-4) — 그렇지 않은 환경에서는 대조군이 성립하지 않아 건너뜀 | test_mediapipe_import.py |
 | `파일 시스템이 UTF-8이 아닌 파일 이름을 허용하지 않음(Windows·macOS)` | UTF-8이 아닌 바이트 파일 이름을 허용하는 파일 시스템(리눅스 ext4·tmpfs 등) | test_corpus_manifest.py, test_native_path.py, test_non_utf8_names.py, test_path_b64.py |
 | `c2pa-python and fixtures/c2pa-2.4 required` | `provenance`/`dev` extra(c2pa-python>=0.38) + `scripts/build_c2pa24_fixtures.py` 픽스처(techniques-2026) | test_c2pa24.py, test_marking_context.py |
-| `numpy, opencv and Pillow required` | `pixel`+`dev` extra(numpy, opencv-python, Pillow) — SDXL dwtDct 워터마크 검사(techniques-2026) | test_wm_sdxl.py |
 | `invisible-watermark + PyWavelets required (tech image)` | invisible-watermark·PyWavelets(`deepfake-lens-gate:tech` 이미지, `requirements-tech.lock`) — 디코더가 라이브러리와 비트 단위로 같은지 확인 | test_wm_sdxl.py |
 | `Pillow required` | `pixel`/`dev` extra(Pillow) — JPEG 양자화표 자연 순서를 Pillow의 IJG 품질 75 표와 대조(TB-4) | test_platform_traces.py |
 | `numpy required` | `dev` extra(numpy) — 유효 대역폭 측정(TB-4), PerTh 순음 판별(TB-2) | test_platform_traces.py, test_wm_perth.py |

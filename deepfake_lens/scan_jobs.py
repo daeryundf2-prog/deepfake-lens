@@ -32,6 +32,7 @@ import logging
 import os
 import re
 import secrets
+import stat
 import threading
 import time
 from pathlib import Path
@@ -52,6 +53,7 @@ MAX_RUNNING = 32
 # Finished jobs kept in memory; older ones are read back from the store folder when asked for (a job held in memory
 # only — no store folder — is lost when it falls out of this window, oldest first).
 MAX_FINISHED_IN_MEMORY = 64
+HISTORY_LIMIT = 200
 # A job id: 128 random bits as hex (was 64).
 JOB_ID_PATTERN = re.compile(r"^[0-9a-f]{12,64}$")
 SOURCE_ASYNC = "async"
@@ -126,6 +128,28 @@ def _canonical(record: dict[str, Any]) -> bytes:
 def _record_mac(record: dict[str, Any], key: bytes) -> str:
     derived = hmac.new(key, b"deepfake-lens scan-job record v1", hashlib.sha256).digest()
     return hmac.new(derived, _canonical(record), hashlib.sha256).hexdigest()
+
+
+def _history_item(job_id: str, entry: dict[str, Any], *, persisted: bool) -> dict[str, Any]:
+    result = entry.get("result") or {}
+    scan_root = result.get("scan_root")
+    return {
+        "job_id": job_id,
+        "status": entry.get("status"),
+        "source": entry.get("source"),
+        "created": entry.get("created"),
+        "finished": entry.get("finished"),
+        "scan_root": scan_root,
+        "folder_name": Path(scan_root).name if scan_root else "",
+        "files": len(result.get("items") or []),
+        "summary": result.get("summary") or {},
+        "persisted": persisted,
+    }
+
+
+def _newest(items: dict[str, dict[str, Any]]) -> list[dict[str, Any]]:
+    ordered = sorted(items.values(), key=lambda item: float(item["finished"] or 0), reverse=True)
+    return ordered[:HISTORY_LIMIT]
 
 
 class JobStore:
@@ -338,6 +362,91 @@ class JobStore:
             if not isinstance(mac, str) or not hmac.compare_digest(mac, _record_mac(record, key)):
                 raise JobIntegrityError(JOB_INTEGRITY_FAILED)
         return record
+
+    def list_finished(
+        self, owner: str, *, evidence: list[Path] | tuple[Path, ...] = (), stats: dict[str, int] | None = None,
+    ) -> list[dict[str, Any]]:
+        """OMO-4: an owner's finished jobs, newest first; ``stats["skipped"]`` counts the unverifiable records left out."""
+        if stats is not None:
+            stats["skipped"] = 0
+        now = time.time()
+        items: dict[str, dict[str, Any]] = {}
+        with self._lock:
+            self._evict(now)
+            for job_id, entry in self._jobs.items():
+                if entry.get("owner") == owner and entry.get("status") in ("done", "cancelled"):
+                    items[job_id] = _history_item(job_id, entry, persisted="_file" in entry)
+        folder, _reason = store_folder(evidence)
+        if folder is None or not folder.is_dir():
+            return _newest(items)
+        try:
+            names = [entry.name for entry in os.scandir(folder)]
+        except OSError:
+            return _newest(items)
+        for name in names:
+            job_id = name[: -len(".json")] if name.endswith(".json") else ""
+            if not JOB_ID_PATTERN.match(job_id):
+                continue
+            path = folder / name
+            try:
+                if not stat.S_ISREG(os.lstat(path).st_mode):
+                    continue
+            except OSError:
+                continue
+            if job_id in items:
+                items[job_id]["persisted"] = True
+                continue
+            try:
+                record = self._load(job_id, evidence)
+            except (JobIntegrityError, OSError, ValueError) as exc:
+                logger.warning("scan job record %s skipped: %s", path, exc)
+                if stats is not None:
+                    stats["skipped"] += 1
+                continue
+            if record is None or record.get("owner") != owner or record.get("status") not in ("done", "cancelled"):
+                continue
+            finished = record.get("finished")
+            result = record.get("result")
+            if not isinstance(finished, (int, float)) or not isinstance(result, dict):
+                continue
+            if float(finished) + ttl_seconds() <= now:
+                continue
+            entry = {"status": record["status"], "created": record.get("created"), "finished": finished,
+                     "source": record.get("source"), "result": result}
+            items[job_id] = _history_item(job_id, entry, persisted=True)
+        return _newest(items)
+
+    def delete(self, job_id: str, owner: str, *, evidence: list[Path] | tuple[Path, ...] = ()) -> bool:
+        if not isinstance(job_id, str) or not JOB_ID_PATTERN.match(job_id):
+            return False
+        removed = False
+        with self._lock:
+            entry = self._jobs.get(job_id)
+            if entry is not None and entry.get("owner") == owner and entry.get("status") in ("done", "cancelled"):
+                del self._jobs[job_id]
+                self._unlink(entry)
+                removed = True
+        folder, _reason = store_folder(evidence)
+        if folder is None:
+            return removed
+        path = folder / f"{job_id}.json"
+        try:
+            if not stat.S_ISREG(os.lstat(path).st_mode):
+                return removed
+            record = self._load(job_id, evidence)
+        except JobIntegrityError as exc:
+            logger.warning("scan job record %s not deleted: %s", path, exc)
+            return removed
+        except OSError:
+            return removed
+        if record is None or record.get("owner") != owner:
+            return removed
+        try:
+            path.unlink()
+        except OSError:
+            logger.info("scan job file %s could not be removed", path, exc_info=True)
+            return removed
+        return True
 
     def running_async_jobs(self) -> list[str]:
         """Ids of the async jobs still running (desktop mode: no idle exit and no shutdown while one runs)."""
