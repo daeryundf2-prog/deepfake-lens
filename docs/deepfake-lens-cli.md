@@ -44,6 +44,12 @@ Every subcommand, briefly. Detail for the core workflow lives in the sections be
 - `legal-report <file>`: legal-style forensic report with integrity checksum (not a digital signature); provenance evidence delegates to the same SDK-first c2pa.py path as `forensic`.
 - `perf <folder> --out`: throughput/cache/duplicate-rate report.
 - `security --out` / `release --out`: guardrail and release-readiness reports.
+- `compare <file_a> <file_b>`: side-by-side comparison of an audio pair or a text/document pair (`--format table|json`).
+- `doctor`: environment diagnostic report (optional dependencies, runtime readiness); `--json-out` writes it as JSON.
+- `evidence-statement <target>`: evidence-statement draft from a scanned folder, scan JSON, or single media file; case/court/law-firm letterhead flags, `--pdf-out` / `--md-out`.
+- `faceswap-seam <file>`: face-swap seam heuristics on an image; `--thresholds` overrides the layer-threshold profile, `--json-out` writes the report.
+- `vendor-weights`: offline model-weight management — `--verify` SHA-256 integrity, `--fetch` checksum-verified download, `--manifest-out` / `--bundle-to` export, `--install <bundle>` install; `--offline` refuses all network access.
+- `watermark <file>`: text-watermark detection (KGW green-list via `--secret`, or SynthID-Text mean-g via `--synthid-keys`).
 - `web`: local web GUI (localhost; Host-header guarded; contract: `docs/deepfake-lens-service.md`).
 
 ## Usage

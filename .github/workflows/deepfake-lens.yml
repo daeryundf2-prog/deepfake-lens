@@ -166,6 +166,10 @@ jobs:
           python -m pip install --upgrade pip
           python -m pip install -e . pip-audit
       - name: Audit installed dependencies
-        # --skip-editable: the local project is not published on PyPI, so
-        # pip-audit cannot look it up and would fail on the package itself.
-        run: pip-audit --strict --skip-editable
+        # The local project is editable and not published on PyPI, so it is
+        # excluded from the frozen list. pip-audit >= 2.10 treats a skipped
+        # editable distribution as a hard error under --strict, which is why
+        # --skip-editable no longer works here.
+        run: |
+          python -m pip freeze --exclude-editable > audit-requirements.txt
+          pip-audit --strict --no-deps --disable-pip -r audit-requirements.txt
