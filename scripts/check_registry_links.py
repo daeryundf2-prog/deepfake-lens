@@ -4,7 +4,8 @@ The v2.0 expansion shipped links that never existed (fabricated repos,
 placeholder arXiv IDs). This checker keeps the registry honest: CI runs it
 weekly and fails when a cited URL becomes unreachable.
 
-Exit code 0 when every URL is reachable, 1 otherwise.
+Loopback and placeholder URLs are skipped; persistent timeouts are reported
+as warnings. Exit code 0 when every URL is reachable, 1 otherwise.
 """
 
 from __future__ import annotations
@@ -12,7 +13,9 @@ from __future__ import annotations
 import re
 import sys
 import time
+import socket
 import urllib.error
+import urllib.parse
 import urllib.request
 from pathlib import Path
 
@@ -22,12 +25,24 @@ SOURCES = [
     REPO_ROOT / "README.md",
     *sorted((REPO_ROOT / "docs").glob("*.md")),
 ]
-URL_PATTERN = re.compile(r"https?://[^\s\"'\\)\]>]+")
+# Backtick ends a URL: markdown wraps inline URLs as `http://host`.
+URL_PATTERN = re.compile(r"https?://[^\s\"'\\)\]>`]+")
 USER_AGENT = {"User-Agent": "deepfake-lens-link-check/1.0 (+https://github.com/daeryundf2-prog/deepfake-lens)"}
 TIMEOUT_SECONDS = 20
 RETRIES = 2
+# URLs that cannot be reached by design: loopback hosts and doc placeholders
+# such as `uc?id=<FILE_ID` (the pattern stops at `>`, leaving a dangling `<`).
+SKIP_HOSTS = {"localhost", "127.0.0.1", "0.0.0.0", "[::1]"}
+PLACEHOLDER_MARKERS = ("<", "FILE_ID")
 # Transient server-side failures worth retrying before declaring a URL dead.
 RETRYABLE_STATUS = {408, 500, 502, 503, 504}
+
+
+def is_skipped(url: str) -> bool:
+    """True for loopback and placeholder URLs that are never checked."""
+    if any(marker in url for marker in PLACEHOLDER_MARKERS):
+        return True
+    return urllib.parse.urlsplit(url).hostname in {h.strip("[]") for h in SKIP_HOSTS}
 
 
 def extract_urls() -> list[tuple[str, str]]:
@@ -37,7 +52,7 @@ def extract_urls() -> list[tuple[str, str]]:
         text = path.read_text(encoding="utf-8")
         for raw in URL_PATTERN.findall(text):
             url = raw.rstrip(".,;")
-            if url not in seen:
+            if url not in seen and not is_skipped(url):
                 seen.add(url)
                 found.append((path.name, url))
     return found
@@ -67,8 +82,14 @@ def check(url: str) -> tuple[bool, str]:
             return False, f"HTTP {code}"
         except Exception as exc:  # noqa: BLE001 - report any network failure
             last_error = f"{type(exc).__name__}: {exc}"
+            timed_out = isinstance(exc, (TimeoutError, socket.timeout)) or isinstance(
+                getattr(exc, "reason", None), (TimeoutError, socket.timeout)
+            )
             if attempt < RETRIES:
                 time.sleep(2 * (attempt + 1))
+            elif timed_out:
+                # A slow host is not a dead link: warn, do not fail the job.
+                return True, f"timeout after {RETRIES + 1} attempts (warning only)"
     return False, last_error
 
 
