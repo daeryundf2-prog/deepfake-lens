@@ -55,7 +55,7 @@ DETECTOR_REGISTRY = [
         adapter_target="clip-linear runtime profile",
         status="candidate",
         priority="high",
-        source_url="https://github.com/YuhengLi99/UniversalFakeDetect",
+        source_url="https://github.com/WisconsinAIVision/UniversalFakeDetect",
         notes=[
             "Wired via models/univfd-runtime.json; needs transformers+torch and the released linear-head weights (not committed).",
             "CLIP-feature probes generalize across generators better than classifier retraining, which complements AIDE's DCT view.",
